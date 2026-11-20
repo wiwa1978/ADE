@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/earendil-works/pi",
+  "commit": "4afe78de1e51162c01c946dcf080e6a266685a01",
+  "license": "MIT",
+  "packages": ["chord", "pi-ai", "pi-codemode", "pi-durable", "pi-schema", "pi-telemetry"],
+  "build": "Upstream npm build scripts (build:offline for pi-ai), then npm pack --ignore-scripts",
+  "modifications": "None. Compiled packages from the pinned source; the registry's same-numbered pi-durable release does not expose signals."
+}
