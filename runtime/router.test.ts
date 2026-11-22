@@ -8,6 +8,7 @@ import { EnvironmentManager } from "./environments.ts";
 import { createGitHubRepositories } from "./github-repositories.ts";
 import { LocalAgentHost } from "./host.ts";
 import { createRuntimeRouters, createRuntimeServer } from "./server.ts";
+import { createAgentWorkflow } from "./agent-workflow.ts";
 import { createSessionGit } from "./session-git.ts";
 import { TerminalManager } from "./terminals.ts";
 import { WorktreeManager } from "./worktrees.ts";
@@ -46,6 +47,7 @@ test("every non-GET runtime route rejects a foreign Origin with 403", async () =
 		cleanUpArchivedWorkspace: async () => ({ terminalsClosed: 0, worktreeRemoved: false }),
 		getGitHubRevision: () => 0,
 		bumpGitHubRevision: () => {},
+		...createAgentWorkflow({ host, worktreeManager, sessionGit: createSessionGit() }),
 	});
 
 	const allRoutes = [...envRouter.routes, ...mainRouter.routes];

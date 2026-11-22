@@ -172,6 +172,10 @@ export class TurnStore {
 				...(task ? { projectId: task.projectId } : {}),
 				status: busy ? "working" : "idle",
 				archivedAt: (task ?? chat)?.archivedAt ?? null,
+				createdAt: (task ?? chat)?.createdAt ?? null,
+				// When the conversation last changed; used to sort sessions and the inbox.
+				updatedAt: turns.length ? Math.max(...turns.map(turn => turn.updatedAt)) : (task ?? chat)?.createdAt ?? null,
+				lastTurnStatus: turns.length ? turns[turns.length - 1].status : null,
 				...(workspace ? { workspace } : {}),
 				...(task?.issueUrl
 					? {

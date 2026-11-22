@@ -497,6 +497,12 @@ export type Conversation = {
   githubIssue?: GitHubIssueSummary;
   status: "working" | "idle";
   archivedAt?: number | null;
+  createdAt?: number | null;
+  /** When the conversation last changed; used to sort sessions and the inbox. */
+  updatedAt?: number | null;
+  lastTurnStatus?: "pending" | "completed" | "failed" | "blocked" | null;
+  /** Set when the session runs on Claude Code or Codex instead of ADE's built-in agent. */
+  engine?: "claude-code" | "codex";
   workspace?: ConversationWorkspace;
   messages: ConversationMessage[];
 };

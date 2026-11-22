@@ -1,4 +1,4 @@
-import { notFound } from "../http-error.ts";
+import { conflict, notFound } from "../http-error.ts";
 import type { Router } from "../router.ts";
 import {
 	validateArchiveSession,
@@ -19,10 +19,10 @@ import type { RouteDeps } from "./context.ts";
 
 export function registerSessionRoutes(
 	router: Router,
-	{ host, worktreeManager, sessionGit, cleanUpArchivedWorkspace }: RouteDeps,
+	{ host, worktreeManager, sessionGit, cleanUpArchivedWorkspace, engines, checkpoints, inbox, viewSessions, prepareWorktree }: RouteDeps,
 ): void {
 	router.get("/api/sessions", (ctx) => {
-		ctx.json(200, { sessions: host.sessions() });
+		ctx.json(200, { sessions: viewSessions() });
 	});
 
 	router.post(
@@ -149,7 +149,9 @@ export function registerSessionRoutes(
 	router.post(
 		"/api/coding-tasks",
 		async (ctx) => {
-			ctx.json(200, { session: await host.createCodingTask(validateCodingTaskCreate(await ctx.readBody()), worktreeManager) });
+			const session = await host.createCodingTask(validateCodingTaskCreate(await ctx.readBody()), worktreeManager);
+			if (session) prepareWorktree(session);
+			ctx.json(200, { session });
 		},
 		{ originError: "Use ADE to start a coding task." },
 	);
@@ -173,7 +175,19 @@ export function registerSessionRoutes(
 	router.post(
 		"/api/coding-tasks/:id([0-9a-f-]+)/messages",
 		async (ctx) => {
-			ctx.json(200, { session: await host.send("coding", validateSendMessage(await ctx.readBody()), ctx.params.id) });
+			const input = validateSendMessage(await ctx.readBody());
+			const sessionId = ctx.params.id;
+			// Snapshot the workspace before the agent acts on this message, so it can be rewound later.
+			const workspace = host.getWorkspacePath(sessionId);
+			if (workspace) await checkpoints.create(sessionId, workspace, input.content).catch(() => null);
+			inbox.invalidate(sessionId);
+			if (engines.get(sessionId)) {
+				if (!workspace) throw notFound("Session has no ready workspace.");
+				engines.send(sessionId, workspace, input.content, host.approvals.policy(sessionId), null);
+				ctx.json(200, { session: viewSessions().find(item => item.id === sessionId) });
+				return;
+			}
+			ctx.json(200, { session: await host.send("coding", input, sessionId) });
 		},
 		{ originError: "Use ADE to send a coding task message." },
 	);
@@ -207,6 +221,10 @@ export function registerSessionRoutes(
 	);
 
 	router.get("/api/sessions/:id/timeline", async (ctx) => {
+		if (engines.get(ctx.params.id)) {
+			ctx.json(200, engines.snapshot(ctx.params.id));
+			return;
+		}
 		const conversationId = ctx.url.searchParams.get("conversationId") ?? undefined;
 		ctx.json(200, await host.getTimeline(ctx.params.id, conversationId));
 	});
@@ -215,6 +233,7 @@ export function registerSessionRoutes(
 		"/api/sessions/:id/steer",
 		async (ctx) => {
 			const input = validateSessionSteer(await ctx.readBody());
+			if (engines.get(ctx.params.id)) throw conflict("This agent can't take messages while it works. Wait for it to finish, or stop it and send again.");
 			ctx.json(200, await host.steerOrFollowUp(ctx.params.id, input.content, input.mode));
 		},
 		{ originError: "Use ADE to steer a session." },
@@ -223,6 +242,10 @@ export function registerSessionRoutes(
 	router.post(
 		"/api/sessions/:id/abort",
 		async (ctx) => {
+			if (engines.get(ctx.params.id)) {
+				ctx.json(200, engines.abort(ctx.params.id));
+				return;
+			}
 			ctx.json(200, await host.abortSession(ctx.params.id));
 		},
 		{ originError: "Use ADE to abort a session." },

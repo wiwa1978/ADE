@@ -5,6 +5,11 @@ import { notFound } from "../http-error.ts";
 import type { createSessionGit } from "../session-git.ts";
 import type { TerminalManager } from "../terminals.ts";
 import type { WorktreeManager } from "../worktrees.ts";
+import type { Inbox } from "../inbox.ts";
+import type { ProjectScriptStore, ScriptRunner } from "../project-scripts.ts";
+import type { Checkpoints } from "../checkpoints.ts";
+import type { EngineManager } from "../engines.ts";
+import type { Conversation } from "../../packages/protocol/index.ts";
 
 export type ArchivedWorkspaceCleanup = {
 	terminalsClosed: number;
@@ -25,6 +30,19 @@ export type RouteDeps = {
 	) => Promise<ArchivedWorkspaceCleanup>;
 	getGitHubRevision: () => number;
 	bumpGitHubRevision: () => void;
+	/** Session attention states (Inbox). */
+	inbox: Inbox;
+	/** Per-project setup/run scripts and their running processes. */
+	scripts: ProjectScriptStore;
+	scriptRunner: ScriptRunner;
+	/** Workspace snapshots before each agent turn. */
+	checkpoints: Checkpoints;
+	/** Claude Code / Codex sessions. */
+	engines: EngineManager;
+	/** Sessions as the UI sees them (engine sessions report their engine's status). */
+	viewSessions: () => Conversation[];
+	/** Copy configured files into a new worktree and start the project's setup script. */
+	prepareWorktree: (session: Conversation) => void;
 };
 
 export function requireWorkspace(host: LocalAgentHost, sessionId: string): string {

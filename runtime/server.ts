@@ -27,6 +27,8 @@ import { registerBrowserRoutes } from "./routes/browser.ts";
 import { registerApprovalRoutes } from "./routes/approvals.ts";
 import { registerMcpRoutes } from "./routes/mcp.ts";
 import { registerSystemRoutes } from "./routes/system.ts";
+import { registerAgentWorkflowRoutes } from "./routes/agent-workflow.ts";
+import { createAgentWorkflow } from "./agent-workflow.ts";
 
 function json(response: ServerResponse, status: number, value: unknown) {
 	response.writeHead(status, {
@@ -117,6 +119,7 @@ export function createRuntimeRouters(deps: RouteDeps): { envRouter: Router; main
 	registerFactoryRoutes(mainRouter, deps);
 	registerProjectRoutes(mainRouter, deps);
 	registerGitHubRoutes(mainRouter, deps);
+	registerAgentWorkflowRoutes(mainRouter, deps);
 	registerSessionRoutes(mainRouter, deps);
 	registerWorkspaceRoutes(mainRouter, deps);
 	registerBrowserRoutes(mainRouter, deps);
@@ -141,12 +144,14 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 	origins?: readonly (string | undefined)[];
 }) {
 	let githubConnectionRevision = 0;
+	const { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree } = createAgentWorkflow({ host, worktreeManager, sessionGit });
 	/** Close terminals in an archived session's workspace and optionally remove its ADE worktree (keeping the branch). */
 	async function cleanUpArchivedWorkspace(session: { id: string; workspace: string | null; repository: string | null; kind: string | null }, removeWorktreeRequested: boolean) {
 		let terminalsClosed = 0;
 		let worktreeRemoved = false;
 		let worktreeError: string | undefined;
 		if (session.workspace && terminals) terminalsClosed = terminals.closeUnder(session.workspace);
+		scriptRunner.stopAll(session.id);
 		if (removeWorktreeRequested && session.kind === "worktree" && session.workspace && session.repository && worktreeManager?.root) {
 			try {
 				const summary = await getWorkspaceGitSummary(session.workspace);
@@ -173,6 +178,13 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 		bumpGitHubRevision: () => {
 			githubConnectionRevision++;
 		},
+		inbox,
+		scripts,
+		scriptRunner,
+		checkpoints,
+		engines,
+		viewSessions,
+		prepareWorktree,
 	});
 
 	const server = createServer((request, response) => {
@@ -222,6 +234,8 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			json(response, 500, { error: host.safeErrorMessage?.(error) ?? safeErrorMessage(error) });
 		});
 	});
+	// Dev servers started with Run and Claude Code/Codex processes stop with the runtime.
+	server.on("close", () => { scriptRunner.stopAll(); engines.abortAll(); });
 	return server;
 }
 
