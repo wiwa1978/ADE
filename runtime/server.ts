@@ -23,8 +23,52 @@ import {
 	writeWorkspaceFile,
 } from "./workspace-files.ts";
 import { openInExternalBrowser } from "./browser.ts";
-import type { ApprovalPolicy } from "./approvals.ts";
-import type { ModelProfileId, ModelRef } from "../packages/protocol/index.ts";
+import {
+	validateApprovalPolicy,
+	validateApprovalResolve,
+	validateArchiveProject,
+	validateArchiveSession,
+	validateArtifactReview,
+	validateBrowserInput,
+	validateBrowserUrl,
+	validateBrowserViewport,
+	validateChatThreadCreate,
+	validateCodingTaskCreate,
+	validateCopilotAuth,
+	validateEnvironmentActivate,
+	validateEnvironmentAdd,
+	validateFactoryAction,
+	validateFactoryRunCreate,
+	validateGitHubIssueLookup,
+	validateGitHubRepoCreate,
+	validateGitHubRepoSearch,
+	validateMcpSave,
+	validateModelCredentials,
+	validateOpenIn,
+	validateProcessInput,
+	validateProjectClone,
+	validateProjectDetectGit,
+	validateProjectInitLocal,
+	validateProjectSave,
+	validateProviderTools,
+	validateRenameTitle,
+	validateSendMessage,
+	validateSessionCompact,
+	validateSessionMove,
+	validateSessionPrCreate,
+	validateSessionPrMerge,
+	validateSessionSteer,
+	validateSubagentMessage,
+	validateTerminalCreate,
+	validateTerminalInput,
+	validateTerminalResize,
+	validateWorkspaceFileWrite,
+	validateWorkspaceGitCommit,
+	validateWorkspaceGitDiscard,
+	validateWorkspaceGitPaths,
+	validateWorktreeCreate,
+	validateWorktreeInspect,
+} from "./validators.ts";
 import { discoverSkillsAndRules } from "./skills.ts";
 import {
 	browseDirectories,
@@ -163,7 +207,7 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			if (environments && request.method === "GET" && path === "/api/environments") return json(response, 200, environments.list());
 			if (environments && request.method === "POST" && path === "/api/environments") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE Settings to add an SSH environment." });
-				return json(response, 200, { environment: environments.add(await readBody(request)) });
+				return json(response, 200, { environment: environments.add(validateEnvironmentAdd(await readBody(request))) });
 			}
 			const environmentConnect = /^\/api\/environments\/([0-9a-f-]{36})\/connect$/i.exec(path);
 			if (environments && request.method === "POST" && environmentConnect) {
@@ -173,8 +217,8 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			}
 			if (environments && request.method === "POST" && path === "/api/environments/active") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE Settings to switch environments." });
-				const input = await readBody(request);
-				return json(response, 200, await environments.activate(typeof input.id === "string" ? input.id : ""));
+				const input = validateEnvironmentActivate(await readBody(request));
+				return json(response, 200, await environments.activate(input.id));
 			}
 			const environment = /^\/api\/environments\/([0-9a-f-]{36})$/i.exec(path);
 			if (environments && request.method === "DELETE" && environment) {
@@ -191,17 +235,18 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			}
 			if (terminals && request.method === "POST" && path === "/api/terminals") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to start a terminal." });
-				return json(response, 200, terminals.create(await readBody(request)));
+				return json(response, 200, terminals.create(validateTerminalCreate(await readBody(request))));
 			}
 			const terminalInput = /^\/api\/terminals\/([0-9a-f-]{36})\/input$/i.exec(path);
 			if (terminals && request.method === "POST" && terminalInput) {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to send terminal input." });
-				return json(response, 200, terminals.write(terminalInput[1], (await readBody(request))?.data));
+				const input = validateTerminalInput(await readBody(request));
+				return json(response, 200, terminals.write(terminalInput[1], input.data));
 			}
 			const terminalResize = /^\/api\/terminals\/([0-9a-f-]{36})\/resize$/i.exec(path);
 			if (terminals && request.method === "POST" && terminalResize) {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to resize a terminal." });
-				return json(response, 200, terminals.resize(terminalResize[1], await readBody(request)));
+				return json(response, 200, terminals.resize(terminalResize[1], validateTerminalResize(await readBody(request))));
 			}
 			const terminalClose = /^\/api\/terminals\/([0-9a-f-]{36})$/i.exec(path);
 			if (terminals && request.method === "DELETE" && terminalClose) {
@@ -245,48 +290,23 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			}
 			if (request.method === "POST" && path === "/api/system/open-in") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to open a workspace in an external app." });
-				const input = await readBody(request);
-				const app = input.app;
-				if (app !== "cursor" && app !== "vscode" && app !== "windsurf" && app !== "finder") {
-					return json(response, 400, { error: "Unsupported app target." });
-				}
-				return json(response, 200, await openInExternalApp(app, typeof input.path === "string" ? input.path : undefined));
+				const input = validateOpenIn(await readBody(request));
+				return json(response, 200, await openInExternalApp(input.app, input.path));
 			}
 			if (request.method === "POST" && path === "/api/projects/clone") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to clone a repository." });
-				const input = await readBody(request);
-				return json(
-					response,
-					200,
-					await cloneProjectRepository({
-						url: String(input?.url ?? ""),
-						destinationParent: typeof input?.destinationParent === "string" ? input.destinationParent : undefined,
-						folderName: typeof input?.folderName === "string" ? input.folderName : undefined,
-					}),
-				);
+				const input = validateProjectClone(await readBody(request));
+				return json(response, 200, await cloneProjectRepository(input));
 			}
 			if (request.method === "POST" && path === "/api/projects/init-local") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to initialize a local project." });
-				const input = await readBody(request);
-				if (typeof input?.folderPath !== "string" || !input.folderPath.trim()) {
-					return json(response, 400, { error: "Provide a folder path." });
-				}
-				return json(
-					response,
-					200,
-					await initLocalFolderProject({
-						folderPath: input.folderPath,
-						initializeGit: input?.initializeGit !== false,
-					}),
-				);
+				const input = validateProjectInitLocal(await readBody(request));
+				return json(response, 200, await initLocalFolderProject(input));
 			}
 			if (request.method === "POST" && path === "/api/projects/detect-git") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to detect Git metadata." });
-				const input = await readBody(request);
-				if (typeof input?.path !== "string" || !input.path.trim()) {
-					return json(response, 400, { error: "Provide a local folder path." });
-				}
-				const resolved = await resolveCheckout(input.path.trim());
+				const input = validateProjectDetectGit(await readBody(request));
+				const resolved = await resolveCheckout(input.path);
 				const githubRepo = await detectGitHubRemoteFromCheckout(resolved);
 				return json(response, 200, { repository: resolved, githubRepo });
 			}
@@ -303,15 +323,15 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			}
 			if (request.method === "POST" && path === "/api/factory/runs") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to start a factory run." });
-				const input = await readBody(request);
+				const input = validateFactoryRunCreate(await readBody(request));
 				const project =
-					typeof input?.projectId === "string" && input.projectId !== "default"
+					input.projectId && input.projectId !== "default"
 						? host.projects().find((p) => p.id === input.projectId)
 						: null;
-				const blueprintId = String(input?.blueprintId ?? project?.blueprintId ?? "automated-factory");
+				const blueprintId = input.blueprintId ?? project?.blueprintId ?? "automated-factory";
 				if (!getBlueprint(blueprintId)) return json(response, 400, { error: `Unknown blueprint "${blueprintId}".` });
 				const repoPath =
-					(typeof input?.repoPath === "string" && input.repoPath.trim()) ||
+					(input.repoPath?.trim()) ||
 					(typeof project?.repository === "string" && project.repository.trim()) ||
 					"";
 				if (!repoPath) {
@@ -321,27 +341,21 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 					? String(project.githubUrl).replace(/^https:\/\/github\.com\//i, "").replace(/\/$/, "")
 					: undefined;
 				const detail = await host.factoryRunner.createRun({
-					runId: typeof input?.runId === "string" ? input.runId : undefined,
-					projectId: project?.id ?? (typeof input?.projectId === "string" ? input.projectId : undefined),
+					runId: input.runId,
+					projectId: project?.id ?? input.projectId,
 					blueprintId,
 					repoPath,
-					githubRepo:
-						typeof input?.githubRepo === "string" && input.githubRepo.trim()
-							? input.githubRepo.trim()
-							: projectGithubSlug,
-					issueNumber: typeof input?.issueNumber === "number" ? input.issueNumber : undefined,
-					taskPrompt: typeof input?.taskPrompt === "string" ? input.taskPrompt : undefined,
-					baseBranch: typeof input?.baseBranch === "string" && input.baseBranch.trim() ? input.baseBranch.trim() : undefined,
-					modelProfile: (typeof input.modelProfile === "string" ? input.modelProfile : project?.modelProfile) as ModelProfileId | undefined,
-					stageOverrides:
-						(input.stageOverrides && typeof input.stageOverrides === "object" && !Array.isArray(input.stageOverrides)
-							? input.stageOverrides
-							: project?.stageOverrides) as Record<string, ModelRef> | undefined,
-					euOnlyMode: typeof input?.euOnlyMode === "boolean" ? input.euOnlyMode : Boolean(project?.euOnlyMode),
-					cloudActFree: typeof input?.cloudActFree === "boolean" ? input.cloudActFree : Boolean(project?.cloudActFree),
-					disabledStageIds: Array.isArray(input?.disabledStageIds) ? input.disabledStageIds : undefined,
+					githubRepo: input.githubRepo?.trim() || projectGithubSlug,
+					issueNumber: input.issueNumber,
+					taskPrompt: input.taskPrompt,
+					baseBranch: input.baseBranch?.trim() || undefined,
+					modelProfile: input.modelProfile ?? (project?.modelProfile as typeof input.modelProfile),
+					stageOverrides: input.stageOverrides ?? project?.stageOverrides,
+					euOnlyMode: input.euOnlyMode ?? Boolean(project?.euOnlyMode),
+					cloudActFree: input.cloudActFree ?? Boolean(project?.cloudActFree),
+					disabledStageIds: input.disabledStageIds,
 				});
-				if (input?.autoStart) {
+				if (input.autoStart) {
 					return json(response, 201, { run: host.factoryRunner.startAutoRun(detail.run.runId) });
 				}
 				return json(response, 201, { run: detail });
@@ -357,7 +371,7 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to control factory runs." });
 				const runId = decodeURIComponent(factoryActionMatch[1]);
 				const action = factoryActionMatch[2];
-				const input = await readBody(request);
+				const input = validateFactoryAction(action, await readBody(request));
 				if (action === "step") {
 					return json(response, 200, { run: await host.factoryRunner.stepRun(runId) });
 				}
@@ -365,31 +379,25 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 					return json(response, 200, { run: host.factoryRunner.startAutoRun(runId) });
 				}
 				if (action === "steer") {
-					return json(response, 200, { run: await host.factoryRunner.steerRun(runId, String(input?.note ?? "")) });
+					return json(response, 200, { run: await host.factoryRunner.steerRun(runId, input.note ?? "") });
 				}
 				if (action === "approve") {
-					const decision = input?.decision === "request_changes" || input?.decision === "cancel" ? input.decision : "approve";
 					return json(response, 200, {
-						run: await host.factoryRunner.approveRunStage(
-							runId,
-							decision,
-							typeof input?.cardId === "string" ? input.cardId : undefined,
-							typeof input?.note === "string" ? input.note : undefined,
-						),
+						run: await host.factoryRunner.approveRunStage(runId, input.decision ?? "approve", input.cardId, input.note),
 					});
 				}
 				if (action === "pause") {
 					return json(response, 200, { run: await host.factoryRunner.pauseRun(runId) });
 				}
 				if (action === "takeover") {
-					return json(response, 200, { run: await host.factoryRunner.takeOverRun(runId, Boolean(input?.enable ?? true)) });
+					return json(response, 200, { run: await host.factoryRunner.takeOverRun(runId, input.enable ?? true) });
 				}
 			}
 			const archiveSession = /^\/api\/sessions\/([^/]+)\/archive$/.exec(path);
 			if (request.method === "POST" && archiveSession) {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to archive sessions." });
-				const input = await readBody(request);
-				const archived = input?.archived !== false;
+				const input = validateArchiveSession(await readBody(request));
+				const archived = input.archived;
 				const sessionId = decodeURIComponent(archiveSession[1]);
 				const removed = archived ? null : host.removedWorktree(sessionId);
 				if (removed && worktreeManager?.root) {
@@ -397,17 +405,16 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 					host.markWorktreeRestored(sessionId);
 				}
 				const result = await host.setSessionArchived(sessionId, archived);
-				const cleanup = archived ? await cleanUpArchivedWorkspace(result, input?.removeWorktree === true) : { terminalsClosed: 0, worktreeRemoved: false };
+				const cleanup = archived ? await cleanUpArchivedWorkspace(result, input.removeWorktree) : { terminalsClosed: 0, worktreeRemoved: false };
 				return json(response, 200, { ...result, ...cleanup });
 			}
 			const archiveProject = /^\/api\/projects\/([0-9a-f-]{36})\/archive$/i.exec(path);
 			if (request.method === "POST" && archiveProject) {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to archive projects." });
-				const input = await readBody(request);
-				const archived = input?.archived !== false;
-				const result = await host.setProjectArchived(archiveProject[1], archived);
+				const input = validateArchiveProject(await readBody(request));
+				const result = await host.setProjectArchived(archiveProject[1], input.archived);
 				const cleanups: Awaited<ReturnType<typeof cleanUpArchivedWorkspace>>[] = [];
-				for (const session of result.sessions) cleanups.push(await cleanUpArchivedWorkspace(session, input?.removeWorktrees === true));
+				for (const session of result.sessions) cleanups.push(await cleanUpArchivedWorkspace(session, input.removeWorktrees));
 				return json(response, 200, { project: result.project, sessions: result.sessions.map((session, index) => ({ ...session, ...cleanups[index] })) });
 			}
 			// --- Session branch, push and pull requests (GitHub CLI) ---
@@ -426,11 +433,11 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 				}
 				if (request.method === "POST") {
 					if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to change the branch or pull request." });
-					const input = await readBody(request);
+					const rawBody = await readBody(request);
 					if (action === "push") return json(response, 200, { ...(await sessionGit.push(workspace)), status: await sessionGit.status(workspace, base) });
-					if (action === "pr") return json(response, 200, { pullRequest: await sessionGit.createPullRequest(workspace, input ?? {}) });
+					if (action === "pr") return json(response, 200, { pullRequest: await sessionGit.createPullRequest(workspace, validateSessionPrCreate(rawBody)) });
 					if (action === "pr/ready") return json(response, 200, { pullRequest: await sessionGit.markReady(workspace) });
-					if (action === "pr/merge") return json(response, 200, { pullRequest: await sessionGit.merge(workspace, input?.method) });
+					if (action === "pr/merge") return json(response, 200, { pullRequest: await sessionGit.merge(workspace, validateSessionPrMerge(rawBody).method) });
 				}
 				return json(response, 405, { error: "Method not allowed." });
 			}
@@ -491,13 +498,8 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			}
 			if (request.method === "POST" && path === "/api/github/repositories/create") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to create a GitHub repository." });
-				const input = await readBody(request);
-				const created = await githubRepositories.create({
-					name: typeof input?.name === "string" ? input.name : undefined,
-					description: typeof input?.description === "string" ? input.description : "",
-					visibility: input?.visibility === "public" ? "public" : "private",
-					addReadme: input?.addReadme !== false,
-				});
+				const input = validateGitHubRepoCreate(await readBody(request));
+				const created = await githubRepositories.create(input);
 				if (!host.githubConnection().login) {
 					try {
 						const acc = await githubRepositories.connect();
@@ -511,9 +513,9 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			}
 			if (request.method === "POST" && path === "/api/github/repositories") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to search GitHub repositories." });
-				const input = await readBody(request);
+				const input = validateGitHubRepoSearch(await readBody(request));
 				const connection = host.githubConnection();
-				if (!connection.login || typeof input?.login !== "string" ||
+				if (!connection.login || typeof input.login !== "string" ||
 					input.login.toLowerCase() !== connection.login.toLowerCase()) {
 					throw Object.assign(new Error("Connect your GitHub CLI account in Settings before searching."), { statusCode: 409 });
 				}
@@ -526,17 +528,17 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			}
 			if (request.method === "POST" && path === "/api/github/issues/lookup") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to look up a GitHub issue." });
-				const input = await readBody(request);
-				return json(response, 200, { issue: await host.lookupGitHubIssue(input?.projectId, input?.url) });
+				const input = validateGitHubIssueLookup(await readBody(request));
+				return json(response, 200, { issue: await host.lookupGitHubIssue(input.projectId, input.url) });
 			}
 			if (request.method === "POST" && path === "/api/chat-threads") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to create a chat." });
-				return json(response, 200, { session: host.createChatThread(await readBody(request)) });
+				return json(response, 200, { session: host.createChatThread(validateChatThreadCreate(await readBody(request))) });
 			}
 			const chat = /^\/api\/chat-threads\/([0-9a-f-]{36})$/i.exec(path);
 			if (request.method === "PATCH" && chat) {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to rename a chat." });
-				return json(response, 200, { session: host.renameChatThread(chat[1], (await readBody(request))?.title) });
+				return json(response, 200, { session: host.renameChatThread(chat[1], validateRenameTitle(await readBody(request)).title) });
 			}
 			if (request.method === "DELETE" && chat) {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to delete a chat." });
@@ -551,18 +553,15 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			const sessionMove = /^\/api\/sessions\/([^/]+)\/move$/i.exec(path);
 			if (request.method === "PATCH" && sessionMove) {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to move a chat." });
-				const input = await readBody(request);
+				const input = validateSessionMove(await readBody(request));
 				return json(response, 200, {
-					session: host.moveSession(decodeURIComponent(sessionMove[1]), {
-						mode: input.mode === "coding" || input.mode === "personal" ? input.mode : undefined,
-						projectId: typeof input.projectId === "string" || input.projectId === null ? input.projectId : undefined,
-					}),
+					session: host.moveSession(decodeURIComponent(sessionMove[1]), input),
 				});
 			}
 			const chatMessage = /^\/api\/chat-threads\/([0-9a-f-]{36})\/messages$/i.exec(path);
 			if (request.method === "POST" && chatMessage) {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to send a chat message." });
-				const input = await readBody(request);
+				const input = validateSendMessage(await readBody(request));
 				const session = host.sessions().find(item => item.id === chatMessage[1]);
 				if (!session?.chatThread) throw Object.assign(new Error("Chat not found."), { statusCode: 404 });
 				return json(response, 200, { session: await host.send(session.mode, input, null, chatMessage[1]) });
@@ -572,18 +571,18 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			const project = /^\/api\/projects\/([0-9a-f-]+)$/i.exec(path);
 			if ((request.method === "POST" && path === "/api/projects") || (request.method === "PATCH" && project)) {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to manage projects." });
-				return json(response, 200, { project: await host.saveProject(await readBody(request), project?.[1]) });
+				return json(response, 200, { project: await host.saveProject(validateProjectSave(await readBody(request)), project?.[1]) });
 			}
 			const agents = /^\/api\/coding-tasks\/([0-9a-f-]+)\/agents$/i.exec(path);
 			if (request.method === "GET" && agents) return json(response, 200, { agents: await host.featureAgents(agents[1]) });
 			if (request.method === "POST" && path === "/api/coding-tasks") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to start a coding task." });
-				return json(response, 200, { session: await host.createCodingTask(await readBody(request), worktreeManager) });
+				return json(response, 200, { session: await host.createCodingTask(validateCodingTaskCreate(await readBody(request)), worktreeManager) });
 			}
 			const task = /^\/api\/coding-tasks\/([0-9a-f-]+)$/i.exec(path);
 			if (request.method === "PATCH" && task) {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to rename a session." });
-				return json(response, 200, { session: host.renameCodingTask(task[1], (await readBody(request))?.title) });
+				return json(response, 200, { session: host.renameCodingTask(task[1], validateRenameTitle(await readBody(request)).title) });
 			}
 			if (request.method === "DELETE" && task) {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to delete a session." });
@@ -592,34 +591,34 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			const taskMessage = /^\/api\/coding-tasks\/([0-9a-f-]+)\/messages$/i.exec(path);
 			if (request.method === "POST" && taskMessage) {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to send a coding task message." });
-				return json(response, 200, { session: await host.send("coding", await readBody(request), taskMessage[1]) });
+				return json(response, 200, { session: await host.send("coding", validateSendMessage(await readBody(request)), taskMessage[1]) });
 			}
 			if (request.method === "GET" && path === "/api/worktree-operations") {
 				return json(response, 200, { operations: worktreeManager.list() });
 			}
 			if (request.method === "POST" && path === "/api/worktrees/inspect") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to inspect a local repository." });
-				return json(response, 200, { worktrees: await inspectWorktrees((await readBody(request))?.repository) });
+				return json(response, 200, { worktrees: await inspectWorktrees(validateWorktreeInspect(await readBody(request)).repository) });
 			}
 			if (request.method === "POST" && path === "/api/worktrees/create") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to create a worktree." });
-				return json(response, 200, { operation: await worktreeManager.create(await readBody(request)) });
+				return json(response, 200, { operation: await worktreeManager.create(validateWorktreeCreate(await readBody(request))) });
 			}
 			if (request.method === "POST" && path === "/api/copilot/auth") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE Settings to manage Copilot sign-in." });
-				return json(response, 200, await host.copilotAuth((await readBody(request))?.action));
+				return json(response, 200, await host.copilotAuth(validateCopilotAuth(await readBody(request)).action));
 			}
 			if (request.method === "POST" && path === "/api/model-credentials") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE Settings to manage model credentials." });
-				return json(response, 200, await host.modelCredentials(await readBody(request)));
+				return json(response, 200, await host.modelCredentials(validateModelCredentials(await readBody(request))));
 			}
 			if (request.method === "POST" && path === "/api/provider-tools") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE Settings to scan providers." });
-				return json(response, 200, await host.providerTools(await readBody(request)));
+				return json(response, 200, await host.providerTools(validateProviderTools(await readBody(request))));
 			}
 			const match = /^\/api\/sessions\/(coding|personal)\/messages$/.exec(path);
 			if (request.method === "POST" && match) {
-				const session = await host.send(match[1], await readBody(request));
+				const session = await host.send(match[1], validateSendMessage(await readBody(request)));
 				return json(response, 200, { session });
 			}
 			// --- Live SSE Event Stream ---
@@ -637,8 +636,8 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			const sessionSteer = /^\/api\/sessions\/([^/]+)\/steer$/.exec(path);
 			if (request.method === "POST" && sessionSteer) {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to steer a session." });
-				const input = await readBody(request);
-				return json(response, 200, await host.steerOrFollowUp(decodeURIComponent(sessionSteer[1]), typeof input.content === "string" ? input.content : "", input.mode === "follow-up" ? "follow-up" : "steer"));
+				const input = validateSessionSteer(await readBody(request));
+				return json(response, 200, await host.steerOrFollowUp(decodeURIComponent(sessionSteer[1]), input.content, input.mode));
 			}
 			const sessionAbort = /^\/api\/sessions\/([^/]+)\/abort$/.exec(path);
 			if (request.method === "POST" && sessionAbort) {
@@ -648,15 +647,15 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			const sessionCompact = /^\/api\/sessions\/([^/]+)\/compact$/.exec(path);
 			if (request.method === "POST" && sessionCompact) {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to compact a session." });
-				const input = await readBody(request);
-				return json(response, 200, await host.compactSession(decodeURIComponent(sessionCompact[1]), typeof input.instructions === "string" ? input.instructions : undefined));
+				const input = validateSessionCompact(await readBody(request));
+				return json(response, 200, await host.compactSession(decodeURIComponent(sessionCompact[1]), input.instructions));
 			}
 			// --- Subagent Live Controls ---
 			const subagentMessage = /^\/api\/sessions\/([^/]+)\/subagents\/([^/]+)\/message$/.exec(path);
 			if (request.method === "POST" && subagentMessage) {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to message a subagent." });
-				const input = await readBody(request);
-				return json(response, 200, await host.messageSubagent(decodeURIComponent(subagentMessage[1]), decodeURIComponent(subagentMessage[2]), typeof input.message === "string" ? input.message : "", input.mode === "steer" ? "steer" : "follow-up"));
+				const input = validateSubagentMessage(await readBody(request));
+				return json(response, 200, await host.messageSubagent(decodeURIComponent(subagentMessage[1]), decodeURIComponent(subagentMessage[2]), input.message, input.mode));
 			}
 			const subagentStop = /^\/api\/sessions\/([^/]+)\/subagents\/([^/]+)\/stop$/.exec(path);
 			if (request.method === "POST" && subagentStop) {
@@ -674,23 +673,15 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			}
 			if (request.method === "POST" && path === "/api/approvals/policy") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to update approval policy." });
-				const input = await readBody(request);
-				const sessionId = typeof input.sessionId === "string" ? input.sessionId : undefined;
-				host.approvals.setPolicy(String(input.policy ?? "") as ApprovalPolicy, sessionId);
-				return json(response, 200, { policy: host.approvals.policy(sessionId) });
+				const input = validateApprovalPolicy(await readBody(request));
+				host.approvals.setPolicy(input.policy, input.sessionId);
+				return json(response, 200, { policy: host.approvals.policy(input.sessionId) });
 			}
 			const approvalResolve = /^\/api\/approvals\/([^/]+)\/resolve$/.exec(path);
 			if (request.method === "POST" && approvalResolve) {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to resolve an approval." });
-				const input = await readBody(request);
-				return json(response, 200, {
-					resolved: await host.approvals.resolve(decodeURIComponent(approvalResolve[1]), {
-						allow: Boolean(input.allow),
-						alwaysAllow: typeof input.alwaysAllow === "boolean" ? input.alwaysAllow : undefined,
-						prefix: typeof input.prefix === "string" ? input.prefix : undefined,
-						reason: typeof input.reason === "string" ? input.reason : undefined,
-					}),
-				});
+				const input = validateApprovalResolve(await readBody(request));
+				return json(response, 200, { resolved: await host.approvals.resolve(decodeURIComponent(approvalResolve[1]), input) });
 			}
 			const approvalRuleDelete = /^\/api\/approvals\/rules\/([^/]+)$/.exec(path);
 			if (request.method === "DELETE" && approvalRuleDelete) {
@@ -709,8 +700,8 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			const procInput = /^\/api\/processes\/([^/]+)\/input$/.exec(path);
 			if (request.method === "POST" && procInput) {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to send process input." });
-				const input = await readBody(request);
-				return json(response, 200, { process: host.processes.sendInput(decodeURIComponent(procInput[1]), typeof input.input === "string" ? input.input : "") });
+				const input = validateProcessInput(await readBody(request));
+				return json(response, 200, { process: host.processes.sendInput(decodeURIComponent(procInput[1]), input.input) });
 			}
 			const procKill = /^\/api\/processes\/([^/]+)\/kill$/.exec(path);
 			if (request.method === "POST" && procKill) {
@@ -732,10 +723,10 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			}
 			if (request.method === "PUT" && path === "/api/workspace/file") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to edit workspace files." });
-				const input = await readBody(request, 2_500_000);
-				const workspace = host.getWorkspacePath(typeof input.sessionId === "string" ? input.sessionId : "");
+				const input = validateWorkspaceFileWrite(await readBody(request, 2_500_000));
+				const workspace = host.getWorkspacePath(input.sessionId);
 				if (!workspace) return json(response, 404, { error: "Session has no ready workspace." });
-				return json(response, 200, writeWorkspaceFile(workspace, typeof input.path === "string" ? input.path : "", typeof input.content === "string" ? input.content : ""));
+				return json(response, 200, writeWorkspaceFile(workspace, input.path, input.content));
 			}
 			if (request.method === "GET" && path === "/api/workspace/git") {
 				const sessionId = url.searchParams.get("sessionId") ?? "";
@@ -752,34 +743,34 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			}
 			if (request.method === "POST" && path === "/api/workspace/git/stage") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to stage changes." });
-				const input = await readBody(request);
-				const workspace = host.getWorkspacePath(typeof input.sessionId === "string" ? input.sessionId : "");
+				const input = validateWorkspaceGitPaths(await readBody(request));
+				const workspace = host.getWorkspacePath(input.sessionId);
 				if (!workspace) return json(response, 404, { error: "Session has no ready workspace." });
-				await gitStageFiles(workspace, Array.isArray(input.paths) ? input.paths.filter((p): p is string => typeof p === "string") : []);
+				await gitStageFiles(workspace, input.paths);
 				return json(response, 200, await getWorkspaceGitSummary(workspace));
 			}
 			if (request.method === "POST" && path === "/api/workspace/git/unstage") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to unstage changes." });
-				const input = await readBody(request);
-				const workspace = host.getWorkspacePath(typeof input.sessionId === "string" ? input.sessionId : "");
+				const input = validateWorkspaceGitPaths(await readBody(request));
+				const workspace = host.getWorkspacePath(input.sessionId);
 				if (!workspace) return json(response, 404, { error: "Session has no ready workspace." });
-				await gitUnstageFiles(workspace, Array.isArray(input.paths) ? input.paths.filter((p): p is string => typeof p === "string") : []);
+				await gitUnstageFiles(workspace, input.paths);
 				return json(response, 200, await getWorkspaceGitSummary(workspace));
 			}
 			if (request.method === "POST" && path === "/api/workspace/git/discard") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to discard changes." });
-				const input = await readBody(request);
-				const workspace = host.getWorkspacePath(typeof input.sessionId === "string" ? input.sessionId : "");
+				const input = validateWorkspaceGitDiscard(await readBody(request));
+				const workspace = host.getWorkspacePath(input.sessionId);
 				if (!workspace) return json(response, 404, { error: "Session has no ready workspace." });
-				await gitDiscardFile(workspace, typeof input.path === "string" ? input.path : "");
+				await gitDiscardFile(workspace, input.path);
 				return json(response, 200, await getWorkspaceGitSummary(workspace));
 			}
 			if (request.method === "POST" && path === "/api/workspace/git/commit") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to commit changes." });
-				const input = await readBody(request);
-				const workspace = host.getWorkspacePath(typeof input.sessionId === "string" ? input.sessionId : "");
+				const input = validateWorkspaceGitCommit(await readBody(request));
+				const workspace = host.getWorkspacePath(input.sessionId);
 				if (!workspace) return json(response, 404, { error: "Session has no ready workspace." });
-				const commit = await gitCommitChanges(workspace, typeof input.message === "string" ? input.message : "");
+				const commit = await gitCommitChanges(workspace, input.message);
 				const summary = await getWorkspaceGitSummary(workspace);
 				return json(response, 200, { commit, summary });
 			}
@@ -789,8 +780,8 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			}
 			if (request.method === "POST" && path === "/api/browser/navigate") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to control the browser." });
-				const input = await readBody(request);
-				return json(response, 200, await host.browser.navigate(typeof input.url === "string" ? input.url : ""));
+				const input = validateBrowserUrl(await readBody(request));
+				return json(response, 200, await host.browser.navigate(input.url));
 			}
 			if (request.method === "POST" && path === "/api/browser/back") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to control the browser." });
@@ -806,16 +797,8 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			}
 			if (request.method === "POST" && path === "/api/browser/viewport") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to resize the browser." });
-				const input = await readBody(request);
-				const preset = input.preset === "mobile" || input.preset === "tablet" || input.preset === "desktop" ? input.preset : "desktop";
-				return json(
-					response,
-					200,
-					await host.browser.setViewport(preset, {
-						width: typeof input.width === "number" ? input.width : undefined,
-						height: typeof input.height === "number" ? input.height : undefined,
-					}),
-				);
+				const input = validateBrowserViewport(await readBody(request));
+				return json(response, 200, await host.browser.setViewport(input.preset, { width: input.width, height: input.height }));
 			}
 			if (request.method === "POST" && path === "/api/browser/screenshot") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to capture browser screenshot." });
@@ -824,28 +807,16 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			}
 			if (request.method === "POST" && path === "/api/browser/input") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to interact with the browser." });
-				const input = await readBody(request);
-				if (input.kind === "mouse") {
-					const mouseType = input.type;
-					if (mouseType === "mousePressed" || mouseType === "mouseReleased" || mouseType === "mouseMoved" || mouseType === "mouseWheel") {
-						await host.browser.dispatchMouse({
-							type: mouseType,
-							x: typeof input.x === "number" ? input.x : 0,
-							y: typeof input.y === "number" ? input.y : 0,
-							button: input.button === "right" ? "right" : "left",
-							clickCount: typeof input.clickCount === "number" ? input.clickCount : undefined,
-							deltaX: typeof input.deltaX === "number" ? input.deltaX : undefined,
-							deltaY: typeof input.deltaY === "number" ? input.deltaY : undefined,
-						});
-					}
-				} else if (input.kind === "text") await host.browser.dispatchText(String(input.text ?? ""));
-				else if (input.kind === "key") await host.browser.dispatchKey(String(input.key ?? ""));
+				const input = validateBrowserInput(await readBody(request));
+				if (input.kind === "mouse") await host.browser.dispatchMouse(input);
+				else if (input.kind === "text") await host.browser.dispatchText(input.text);
+				else if (input.kind === "key") await host.browser.dispatchKey(input.key);
 				return json(response, 200, { ok: true });
 			}
 			if (request.method === "POST" && path === "/api/browser/open-external") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to open external links." });
-				const input = await readBody(request);
-				return json(response, 200, openInExternalBrowser(typeof input.url === "string" ? input.url : ""));
+				const input = validateBrowserUrl(await readBody(request));
+				return json(response, 200, openInExternalBrowser(input.url));
 			}
 			// --- Artifacts & Tasks ---
 			const sessionArtifacts = /^\/api\/sessions\/([^/]+)\/artifacts$/.exec(path);
@@ -855,9 +826,8 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			const artifactReview = /^\/api\/artifacts\/([^/]+)\/review$/.exec(path);
 			if (request.method === "POST" && artifactReview) {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to review artifacts." });
-				const input = await readBody(request);
-				const decision = input.decision === "changes_requested" ? "changes_requested" : "approved";
-				return json(response, 200, { artifact: host.artifacts.reviewArtifact(decodeURIComponent(artifactReview[1]), decision, typeof input.feedback === "string" ? input.feedback : undefined) });
+				const input = validateArtifactReview(await readBody(request));
+				return json(response, 200, { artifact: host.artifacts.reviewArtifact(decodeURIComponent(artifactReview[1]), input.decision, input.feedback) });
 			}
 			const sessionTasks = /^\/api\/sessions\/([^/]+)\/tasks$/.exec(path);
 			if (request.method === "GET" && sessionTasks) {
@@ -875,7 +845,7 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			}
 			if (request.method === "POST" && path === "/api/mcp") {
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE Settings to configure MCP servers." });
-				return json(response, 200, { server: host.mcp.save(await readBody(request)) });
+				return json(response, 200, { server: host.mcp.save(validateMcpSave(await readBody(request))) });
 			}
 			const mcpConnect = /^\/api\/mcp\/([^/]+)\/connect$/.exec(path);
 			if (request.method === "POST" && mcpConnect) {
