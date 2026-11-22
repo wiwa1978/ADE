@@ -1,22 +1,28 @@
 # ADE local agent workspace
 
-ADE is an early Tauri 2 and React application with a local Pi Durable chat host.
-The local runtime provides independent, persistent coding tasks, additional
+ADE is an early Tauri 2 and React application with a local Pi Durable chat host
+and optional SSH-connected ADE runtimes. The active runtime provides independent,
+persistent coding tasks, additional
 coding and personal chats, and a project-free personal conversation. Projects
 group coding sessions and show their subagent assignments and reports. A coding
 session may use a Git checkout or an automatically created worktree, with
 workspace file tools. GitHub links are references; a coding session can also
 load a public issue from its project's linked repository as session context.
-Shell, GitHub write actions, MCP, and skills are not connected.
+An interactive terminal is available to the user, but no shell tool is connected to agents. GitHub write actions, MCP, and skills are not connected.
 
 Use the **+** beside Projects to create a project with an automatic name.
 Creating or selecting a project opens **Project settings** in the right pane,
 where you can rename it, link a GitHub repository, or set a default local
 checkout. Use the **+** beside a project to start a session. Sessions inherit
-their project, take their initial name from the first message, and can be
-renamed from the left-pane ellipsis or right-click menu.
+their project and host, shown at the top of **New workspace**. Choose a
+workspace type there, use **Link GitHub issue** to open the right inspector
+for a linked repository, and press **Alt+L** (**Option+L** on Mac) to focus
+the prompt. On desktop, **Enter** sends and **Shift+Enter** inserts a newline;
+use the Send button on compact screens. Sessions take their initial name from
+the first message and can be renamed from the left-pane ellipsis or right-click
+menu.
 
-In **Settings → Connections**, ADE automatically detects and links the active
+In **Settings → App → Integrations**, ADE automatically detects and links the active
 `github.com` account in the local GitHub CLI. In **Project settings**, type
 in **GitHub repository**, choose a matching repository from the dropdown, and
 save. You can also enter an `owner/repository` or URL manually. Install GitHub CLI and run
@@ -55,18 +61,58 @@ the loopback-only Pi Durable host at <http://127.0.0.1:4319>. Vite proxies
 same-origin `/api` requests to the host. The host rejects non-local Host
 headers and unapproved browser origins. `npm run tauri dev` uses the same
 development startup. Native Tauri builds still require the Windows Rust, MSVC,
-and WebView2 prerequisites.
+and WebView2 prerequisites. The terminal uses the native `node-pty` package; on
+Windows, installing it may also require the MSVC C++ build tools.
 
-In **Settings → Connections**, sign in to Copilot or save an API key for
-OpenAI, Anthropic, Radius, or an OpenAI-compatible provider. In **Settings →
-Agent defaults → Model provider**, choose a provider and then a model. Pi Durable
+A user-operated terminal is available in the bottom panel for coding sessions
+with a ready checkout or worktree. Click **Start terminal** to spawn the active
+host's system shell in that workspace. Commands run with the host OS user's
+permissions and are not exposed to the model as a tool. Terminal font size and
+scrollback are in **Settings → App → Terminal**.
+
+## SSH environments
+
+Open **Settings → Host → Connections** to add an SSH host. Enter a display name, an
+OpenSSH host or alias (for example `ade-build` from `~/.ssh/config`), and the
+SSH and ADE runtime ports. ADE uses the system OpenSSH client with key/agent
+authentication, `BatchMode=yes`, and strict known-host checking. It does not
+collect or save SSH passwords. If needed, connect to the host once from a
+terminal to verify its host key before adding it in ADE.
+
+The remote machine must already have this project’s dependencies installed and
+its ADE runtime running on loopback. From the repository on that machine, run:
+
+```sh
+node runtime/server.ts
+```
+
+The runtime listens on `127.0.0.1:4319` by default; set `ADE_RUNTIME_PORT` if
+you need a different port, then enter that port in ADE. ADE creates an SSH
+local-forwarding tunnel and proxies app API requests through it. The remote
+runtime is not exposed directly to the network, and ADE does not install or
+start software on the remote host. User-started terminals run on the active host.
+When creating a project, choose its environment;
+all sessions in that project inherit the host. The active environment determines which
+projects are shown, and changing environments does not migrate project data. Provider
+credentials and durable chat data remain on their selected host.
+
+Environment definitions (names, SSH aliases, and ports only) are stored in
+`ADE_STATE_DIR/environments.json` or the default `.ade/state` directory. They
+remain saved after ADE exits, but SSH tunnels are closed and remote hosts must
+be reconnected. On startup, ADE selects **This computer**. Direct network
+connections and pairing/relay connections are not implemented yet.
+
+In **Settings → App → Integrations**, sign in to Copilot. Save API keys for
+OpenAI, Anthropic, Radius, or an OpenAI-compatible provider in **Settings →
+Host → Providers**. In **Settings → App → Chat**, choose the model provider,
+model, harness, and reasoning level. Pi Durable
 remains the harness for both conversations. Switching providers does not reset
 the conversation: the new provider receives its context on the next turn.
 The composer also lets you change the model and reasoning for the next turn;
-these choices stay in sync with Settings. Its harness dropdown shows Pi Durable
-as active and the Copilot SDK as unavailable until that harness is connected.
+these choices stay in sync with Settings. The conversation composer's harness
+dropdown shows Pi Durable as active and the Copilot SDK as unavailable.
 
-**GitHub Copilot:** In **Settings → Connections**, click **Sign in to GitHub
+**GitHub Copilot:** In **Settings → App → Integrations**, click **Sign in to GitHub
 Copilot**. Follow the new device link and code shown in ADE, then select GitHub
 Copilot as the model provider. This uses the
 pinned Pi SDK's Copilot OAuth flow, not the credential from `copilot login`.
@@ -146,9 +192,12 @@ links/junctions, but these application-level checks are **not an OS sandbox**:
 do not treat them as protection against hostile local processes or repositories.
 ADE checks the workspace directory identity, but cannot detect every in-place
 repository replacement, filesystem race, or hard link.
-File edits are real and may modify the selected checkout. No shell is connected.
-Harness and execution-host selections other than Pi Durable/local remain
-preferences only. A session lead can delegate read-only analysis to Pi Durable
+File edits are real and may modify the selected checkout. A user-started terminal
+is available in the bottom panel for coding sessions with a checkout or worktree;
+commands run as the active host user. Terminal input is not exposed as an agent tool.
+Pi Durable is the only connected harness. SSH environments run the same ADE
+runtime on a selected remote host; Docker and cloud execution platform choices
+remain preferences only. A session lead can delegate read-only analysis to Pi Durable
 subagents; they cannot edit files or run commands. The project overview shows
 the assignment and report with session-scoped identifiers. Inactive stored
 sessions with unsettled work show an unknown status, not a live-running claim.
@@ -163,13 +212,27 @@ project's linked repository, stores its URL and summary with the session, and
 includes the bounded issue description in the initial message as untrusted
 reference data. Private issues are not supported. This does not publish a
 branch or PR, or track CI and review activity. Worktree adoption/removal, MCP, skills,
-approvals, cloud hosts, and mobile clients are not implemented.
+approvals, direct network or pairing/relay hosts, cloud-managed hosts, and mobile clients are not implemented.
 Do not treat this host as a security boundary for multiple OS users.
 
 `npm run test:runtime` exercises the Pi Durable integration and API with a faux
 provider; it makes no external model calls. `npm run test:ui` runs frontend
 fixtures. `npm run build` type-checks and builds the web UI, and `npm run lint`
 checks frontend source.
+
+## Frontend structure
+
+`App.tsx` coordinates navigation, projects, and durable conversations.
+New workspace follows the [Paseo composer dock](https://github.com/getpaseo/paseo/blob/0c02cfdfb1bec887591560011cb6df231896a7f8/packages/app/src/composer/dock/index.tsx)
+and [warm Claude theme](https://github.com/getpaseo/paseo/blob/0c02cfdfb1bec887591560011cb6df231896a7f8/packages/app/src/styles/theme.ts#L515-L532),
+using ADE's web layout, Radix controls, and project/host bindings.
+`ProjectsView.tsx`, `FeatureAgents.tsx`, and `MessageContent.tsx` render their
+respective views. `SettingsView.tsx` and `WorktreeDiagnostics.tsx` render the
+settings and diagnostics screens; `useSettings.ts`, `useConnections.ts`, and
+`useWorktrees.ts` own their state, persistence, and runtime requests. These
+hooks stay mounted in `App` so navigating between screens retains their state.
+Shared runtime types live in `app-types.ts`, the JSON request helper in
+`api.ts`, and pending task-start persistence in `pending-task-starts.ts`.
 
 The Pi packages in `runtime/vendor` are unmodified compiled artifacts from
 upstream commit `4afe78de1e51162c01c946dcf080e6a266685a01`, matching the existing

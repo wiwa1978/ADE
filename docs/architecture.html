@@ -1,0 +1,1669 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ADE — Software Factory Architecture Explorer</title>
+<style>
+  :root {
+    --bg: #121110;
+    --bg-elev: #1a1917;
+    --bg-card: #211f1d;
+    --bg-card-hover: #292623;
+    --border: #33302c;
+    --border-strong: #4a453f;
+    --text: #f3efe9;
+    --text-muted: #a9a299;
+    --text-dim: #77716a;
+    --accent: #e07a5f;
+    --accent-soft: rgba(224, 122, 95, 0.14);
+    --blue: #60a5fa;
+    --blue-soft: rgba(96, 165, 250, 0.14);
+    --green: #4ade80;
+    --green-soft: rgba(74, 222, 128, 0.14);
+    --amber: #fbbf24;
+    --amber-soft: rgba(251, 191, 36, 0.14);
+    --purple: #c084fc;
+    --purple-soft: rgba(192, 132, 252, 0.14);
+    --eu: #38bdf8;
+    --eu-soft: rgba(56, 189, 248, 0.14);
+    --danger: #f87171;
+    --radius: 12px;
+    --radius-sm: 8px;
+    --shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    --font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  [data-theme="light"] {
+    --bg: #faf7f2;
+    --bg-elev: #ffffff;
+    --bg-card: #f4efe8;
+    --bg-card-hover: #ece5dc;
+    --border: #dfd8ce;
+    --border-strong: #c8bfb2;
+    --text: #1c1917;
+    --text-muted: #57534e;
+    --text-dim: #78716c;
+    --accent: #c85a3a;
+    --accent-soft: rgba(200, 90, 58, 0.12);
+    --blue: #2563eb;
+    --blue-soft: rgba(37, 99, 235, 0.10);
+    --green: #16a34a;
+    --green-soft: rgba(22, 163, 74, 0.10);
+    --amber: #d97706;
+    --amber-soft: rgba(217, 119, 6, 0.12);
+    --purple: #7c3aed;
+    --purple-soft: rgba(124, 58, 237, 0.10);
+    --eu: #0284c7;
+    --eu-soft: rgba(2, 132, 199, 0.11);
+    --danger: #dc2626;
+    --shadow: 0 10px 28px rgba(28, 25, 23, 0.08);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+
+  .app-shell {
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 24px 20px 64px;
+  }
+
+  /* Header */
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .brand-mark {
+    width: 42px;
+    height: 42px;
+    border-radius: 11px;
+    background: linear-gradient(135deg, var(--accent), #f4a261);
+    display: grid;
+    place-items: center;
+    font-weight: 800;
+    color: #fff;
+    font-size: 15px;
+    letter-spacing: -0.03em;
+    box-shadow: 0 4px 14px rgba(224, 122, 95, 0.35);
+  }
+
+  .brand h1 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .brand p {
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .pill-btn {
+    border: 1px solid var(--border);
+    background: var(--bg-elev);
+    color: var(--text);
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .pill-btn:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-card);
+  }
+
+  /* Main Navigation Tabs */
+  .nav-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 22px;
+    background: var(--bg-elev);
+    padding: 6px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+  }
+
+  .nav-tab {
+    flex: 1;
+    min-width: 190px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    padding: 11px 16px;
+    border-radius: 10px;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .nav-tab span.sub {
+    font-size: 11.5px;
+    font-weight: 400;
+    opacity: 0.78;
+  }
+
+  .nav-tab:hover {
+    color: var(--text);
+    background: var(--bg-card);
+  }
+
+  .nav-tab.active {
+    background: var(--bg-card);
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+
+  .view-panel { display: none; }
+  .view-panel.active { display: block; animation: fadeIn 0.2s ease; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Controls Bar */
+  .controls-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    margin-bottom: 18px;
+  }
+
+  .control-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .control-label {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    margin-right: 4px;
+  }
+
+  .seg-btn {
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text-muted);
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .seg-btn:hover { color: var(--text); border-color: var(--border-strong); }
+  .seg-btn.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+
+  .seg-btn.eu-active {
+    background: var(--eu-soft);
+    color: var(--eu);
+    border-color: var(--eu);
+    font-weight: 600;
+  }
+
+  /* Main Grid: Diagram + Inspector */
+  .arch-grid {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 18px;
+    align-items: start;
+  }
+
+  @media (max-width: 1020px) {
+    .arch-grid { grid-template-columns: 1fr; }
+  }
+
+  .diagram-card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+    box-shadow: var(--shadow);
+  }
+
+  .status-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    margin-bottom: 14px;
+    font-size: 13px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+  }
+
+  .status-banner.running {
+    background: var(--green-soft);
+    border-color: rgba(74, 222, 128, 0.35);
+    color: var(--text);
+  }
+
+  .status-banner.paused {
+    background: var(--amber-soft);
+    border-color: rgba(251, 191, 36, 0.35);
+    color: var(--text);
+  }
+
+  .status-banner.eu {
+    background: var(--eu-soft);
+    border-color: rgba(56, 189, 248, 0.4);
+  }
+
+  .dot {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    margin-right: 8px;
+  }
+
+  .dot.green { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .dot.amber { background: var(--amber); }
+  .dot.blue { background: var(--eu); box-shadow: 0 0 8px var(--eu); }
+
+  /* SVG Diagram Styling */
+  svg.arch-svg {
+    width: 100%;
+    height: auto;
+    display: block;
+    user-select: none;
+  }
+
+  .zone-box {
+    fill: var(--bg-card);
+    stroke: var(--border-strong);
+    stroke-width: 1.25;
+    stroke-dasharray: 5 4;
+    rx: 12;
+  }
+
+  .zone-box.eu-zone {
+    fill: var(--eu-soft);
+    stroke: var(--eu);
+    stroke-width: 1.5;
+  }
+
+  .zone-box.sleep-zone {
+    opacity: 0.45;
+    stroke: var(--amber);
+  }
+
+  .zone-title {
+    fill: var(--text-dim);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .node { cursor: pointer; transition: opacity 0.2s ease; }
+  .node rect {
+    fill: var(--bg-elev);
+    stroke: var(--border-strong);
+    stroke-width: 1.5;
+    rx: 10;
+    transition: all 0.15s ease;
+  }
+
+  .node:hover rect {
+    stroke: var(--accent);
+    fill: var(--bg-card-hover);
+  }
+
+  .node.selected rect {
+    stroke: var(--accent);
+    stroke-width: 2.3;
+    fill: var(--accent-soft);
+  }
+
+  .node.sleeping { opacity: 0.42; }
+  .node.sleeping rect { stroke-dasharray: 4 3; stroke: var(--amber); }
+
+  .node.highlight-eu rect { stroke: var(--eu); }
+  .node.highlight-green rect { stroke: var(--green); }
+  .node.highlight-purple rect { stroke: var(--purple); }
+
+  .node-title {
+    fill: var(--text);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .node-sub {
+    fill: var(--text-muted);
+    font-size: 11px;
+  }
+
+  .node-tag {
+    font-size: 10px;
+    font-weight: 700;
+    font-family: var(--mono);
+  }
+
+  .flow-line {
+    fill: none;
+    stroke: var(--border-strong);
+    stroke-width: 1.8;
+  }
+
+  .flow-line.active-flow {
+    stroke: var(--accent);
+    stroke-dasharray: 6 5;
+    animation: dash 1.2s linear infinite;
+  }
+
+  .flow-line.eu-flow {
+    stroke: var(--eu);
+    stroke-dasharray: 6 5;
+    animation: dash 1.2s linear infinite;
+  }
+
+  .flow-line.paused-flow {
+    stroke: var(--amber);
+    stroke-dasharray: 3 5;
+    opacity: 0.5;
+  }
+
+  @keyframes dash {
+    to { stroke-dashoffset: -22; }
+  }
+
+  .flow-label {
+    fill: var(--text-dim);
+    font-size: 10.5px;
+    font-family: var(--mono);
+  }
+
+  /* Inspector Card */
+  .inspector-card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+    position: sticky;
+    top: 20px;
+  }
+
+  .inspector-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: var(--mono);
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+
+  .inspector-card h3 {
+    font-size: 17px;
+    margin-bottom: 6px;
+  }
+
+  .inspector-card p.desc {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 14px;
+  }
+
+  .inspector-section {
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+    margin-top: 12px;
+  }
+
+  .inspector-section h4 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+
+  .inspector-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12.5px;
+    color: var(--text-muted);
+  }
+
+  .inspector-list li::before {
+    content: "→ ";
+    color: var(--accent);
+    font-weight: 700;
+  }
+
+  .code-chip {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    padding: 2px 7px;
+    border-radius: 5px;
+    color: var(--text);
+    margin: 2px 4px 2px 0;
+  }
+
+  /* Pipeline View */
+  .pipeline-track {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+    gap: 12px;
+    margin-top: 14px;
+  }
+
+  .stage-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px;
+    transition: all 0.2s ease;
+    position: relative;
+  }
+
+  .stage-card.disabled {
+    opacity: 0.32;
+    border-style: dashed;
+  }
+
+  .stage-card.has-gate {
+    border-color: var(--accent);
+  }
+
+  .stage-num {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+
+  .gate-pill {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .stage-card h4 {
+    font-size: 14.5px;
+    margin-bottom: 5px;
+  }
+
+  .stage-card p {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+    min-height: 36px;
+  }
+
+  .model-box {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 7px 9px;
+    font-size: 11.5px;
+  }
+
+  .model-box .role {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    display: block;
+  }
+
+  .model-box .mname {
+    font-family: var(--mono);
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .model-box.eu-model {
+    border-color: var(--eu);
+    background: var(--eu-soft);
+  }
+
+  .model-box.eu-model .mname { color: var(--eu); }
+
+  /* Seams & Pricing View */
+  .two-col {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .seam-card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+  }
+
+  .seam-card h3 {
+    font-size: 15.5px;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .seam-tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: var(--blue-soft);
+    color: var(--blue);
+  }
+
+  .seam-card p {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+  }
+
+  .adapter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .adapter-pill {
+    font-size: 11.5px;
+    padding: 4px 9px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+  }
+
+  .adapter-pill.day1 {
+    border-color: var(--green);
+    background: var(--green-soft);
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .adapter-pill.future {
+    color: var(--text-dim);
+    border-style: dashed;
+  }
+
+  /* Margin Calculator */
+  .tiers-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+    margin-top: 14px;
+  }
+
+  .tier-card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+  }
+
+  .tier-card.featured {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent-soft);
+  }
+
+  .tier-price {
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    margin: 6px 0 12px;
+  }
+
+  .tier-price span {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-muted);
+  }
+
+  .metric-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12.5px;
+    padding: 6px 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .margin-bar-bg {
+    height: 8px;
+    background: var(--bg-card);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-top: 10px;
+  }
+
+  .margin-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--green), var(--eu));
+    border-radius: 999px;
+    transition: width 0.25s ease;
+  }
+
+  .slider-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 13px;
+  }
+
+  input[type="range"] {
+    accent-color: var(--accent);
+    width: 180px;
+    cursor: pointer;
+  }
+
+  .hint-bar {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 10px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <header>
+    <div class="brand">
+      <div class="brand-mark">ADE</div>
+      <div>
+        <h1>ADE — Software Factory Architecture Explorer</h1>
+        <p>GitHub Issue → Single Captain → Modular Stages → Merge-Ready PR</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="pill-btn" id="themeToggle" type="button">☀️ Light Mode</button>
+    </div>
+  </header>
+
+  <nav class="nav-tabs" role="tablist">
+    <button class="nav-tab active" data-view="local" type="button">
+      Flavor 1 · All Local ($0)
+      <span class="sub">Local Captain + Local Docker (+ optional BYO Boat)</span>
+    </button>
+    <button class="nav-tab" data-view="remote" type="button">
+      Flavor 2 · All Remote (Always-On)
+      <span class="sub">Cloudflare DO / EU Cluster + Boat.dev + Phone Handover</span>
+    </button>
+    <button class="nav-tab" data-view="pipeline" type="button">
+      Factory Blueprints &amp; Model Router
+      <span class="sub">Automated Factory, OpenSpec, Spec Kit, BMAD + EU-Only Mode</span>
+    </button>
+    <button class="nav-tab" data-view="seams" type="button">
+      4 Modular Seams & Margins
+      <span class="sub">Portability contracts + Bronze/Silver/Gold calculator</span>
+    </button>
+  </nav>
+
+  <!-- ==================== VIEW 1: FLAVOR 1 LOCAL ==================== -->
+  <section class="view-panel active" id="view-local">
+    <div class="controls-bar">
+      <div class="control-group">
+        <span class="control-label">Laptop State</span>
+        <button class="seg-btn active" data-local-lid="open" type="button">💻 Lid Open</button>
+        <button class="seg-btn" data-local-lid="closed" type="button">🌙 Lid Closed (Commute)</button>
+      </div>
+      <div class="control-group">
+        <span class="control-label">Worker Sandbox</span>
+        <button class="seg-btn active" data-local-worker="docker" type="button">🐳 Local Docker ($0)</button>
+        <button class="seg-btn" data-local-worker="boat" type="button">🚤 Optional BYO Boat.dev (EU)</button>
+      </div>
+    </div>
+
+    <div class="arch-grid">
+      <div class="diagram-card">
+        <div class="status-banner running" id="localBanner">
+          <div><span class="dot green"></span><strong>All Local · Active:</strong> Mac/Win app, local Captain (Pi Durable + SQLite), and local Docker workers running at $0 infra cost.</div>
+        </div>
+
+        <svg class="arch-svg" viewBox="0 0 820 470" id="localSvg">
+          <!-- Laptop Boundary -->
+          <rect id="localLaptopZone" class="zone-box" x="18" y="18" width="540" height="432" />
+          <text class="zone-title" x="34" y="40">USER'S MAC / WINDOWS LAPTOP (FLAVOR 1 · $0)</text>
+
+          <!-- External Zone -->
+          <rect id="localExtZone" class="zone-box" x="580" y="18" width="222" height="432" />
+          <text class="zone-title" x="596" y="40">EXTERNAL / OPTIONAL</text>
+
+          <!-- Edges -->
+          <path id="l-edge-ui-cap" class="flow-line active-flow" d="M 190 120 L 245 120" />
+          <text class="flow-label" x="197" y="112">WS/HTTP</text>
+
+          <path id="l-edge-cap-work" class="flow-line active-flow" d="M 380 185 L 380 245" />
+          <text class="flow-label" x="390" y="220">Sandbox HTTP API</text>
+
+          <path id="l-edge-cap-relay" class="flow-line active-flow" d="M 525 110 L 605 110" />
+          <text class="flow-label" x="536" y="102">Outbound WS</text>
+
+          <path id="l-edge-cap-llm" class="flow-line active-flow" d="M 525 150 L 605 225" />
+          <text class="flow-label" x="534" y="205">pi-ai</text>
+
+          <path id="l-edge-cap-gh" class="flow-line active-flow" d="M 110 180 L 110 250 L 245 250" opacity="0" />
+          <path id="l-edge-boat" class="flow-line" d="M 525 168 L 605 350" opacity="0.25" />
+
+          <!-- Nodes inside Laptop -->
+          <g class="node selected" data-inspect="local-ui" id="node-local-ui">
+            <rect x="38" y="65" width="152" height="115" />
+            <text class="node-title" x="52" y="92">ADE Desktop UI</text>
+            <text class="node-sub" x="52" y="112">Tauri 2 + React 19</text>
+            <text class="node-sub" x="52" y="130">1 Captain Thread</text>
+            <text class="node-sub" x="52" y="148">Subagent Glass Box</text>
+            <text class="node-tag" fill="#e07a5f" x="52" y="168">src/ + App.tsx</text>
+          </g>
+
+          <g class="node highlight-green" data-inspect="local-captain" id="node-local-captain">
+            <rect x="245" y="65" width="280" height="120" />
+            <text class="node-title" x="262" y="92">Local Captain (Pi Durable)</text>
+            <text class="node-sub" x="262" y="112">packages/captain-core (90% shared)</text>
+            <text class="node-sub" x="262" y="130">Node/TS Wrapper + Local SQLite</text>
+            <text class="node-sub" x="262" y="148">Modular Workflow + Model Router</text>
+            <text class="node-tag" fill="#4ade80" x="262" y="170">127.0.0.1:4319 · Keychain Keys</text>
+          </g>
+
+          <g class="node" data-inspect="local-gh" id="node-local-gh">
+            <rect x="38" y="245" width="152" height="105" />
+            <text class="node-title" x="52" y="272">GitHub CLI (gh)</text>
+            <text class="node-sub" x="52" y="292">Public &amp; Private Issues</text>
+            <text class="node-sub" x="52" y="310">Branch Push + PRs</text>
+            <text class="node-tag" fill="#60a5fa" x="52" y="334">Local Auth</text>
+          </g>
+
+          <g class="node" data-inspect="local-docker" id="node-local-docker">
+            <rect x="245" y="245" width="280" height="175" />
+            <text class="node-title" x="262" y="272">Local Docker Sandbox Bridge</text>
+            <text class="node-sub" x="262" y="292">HTTP Bridge → Docker Containers</text>
+            <rect x="262" y="308" width="116" height="58" style="fill:var(--bg-card);stroke:var(--border-strong);rx:7;" />
+            <text class="node-sub" x="272" y="330" style="fill:var(--text);font-weight:600;">Worker A</text>
+            <text class="node-sub" x="272" y="348">Implement + Test</text>
+            <rect x="392" y="308" width="116" height="58" style="fill:var(--bg-card);stroke:var(--border-strong);rx:7;" />
+            <text class="node-sub" x="402" y="330" style="fill:var(--text);font-weight:600;">Worker B</text>
+            <text class="node-sub" x="402" y="348">Verify / E2E</text>
+            <text class="node-tag" fill="#fbbf24" x="262" y="400">Git worktrees · Isolated OS containers</text>
+          </g>
+
+          <!-- External Nodes -->
+          <g class="node" data-inspect="local-phone" id="node-local-phone">
+            <rect x="605" y="65" width="178" height="105" />
+            <text class="node-title" x="620" y="92">Phone / Web PWA</text>
+            <text class="node-sub" x="620" y="112">Via Outbound Relay</text>
+            <text class="node-sub" x="620" y="130">Works while Mac awake</text>
+            <text class="node-tag" fill="#c084fc" x="620" y="152">No port forwarding</text>
+          </g>
+
+          <g class="node" data-inspect="models" id="node-local-models">
+            <rect x="605" y="192" width="178" height="100" />
+            <text class="node-title" x="620" y="218">Model Providers</text>
+            <text class="node-sub" x="620" y="238">Anthropic / OpenAI /</text>
+            <text class="node-sub" x="620" y="255">OpenRouter / EU / Ollama</text>
+            <text class="node-tag" fill="#60a5fa" x="620" y="278">Per-stage via pi-ai</text>
+          </g>
+
+          <g class="node" data-inspect="local-boat" id="node-local-boat" style="opacity:0.45;">
+            <rect x="605" y="315" width="178" height="105" />
+            <text class="node-title" x="620" y="341">BYO Boat.dev (Opt.)</text>
+            <text class="node-sub" x="620" y="361">User's own API key</text>
+            <text class="node-sub" x="620" y="378">Active task survives lid</text>
+            <text class="node-tag" fill="#38bdf8" x="620" y="400">EU Linux VMs</text>
+          </g>
+        </svg>
+        <div class="hint-bar">Click any box in the diagram to inspect its contract, state, and role in ADE.</div>
+      </div>
+
+      <aside class="inspector-card" id="localInspector"></aside>
+    </div>
+  </section>
+
+  <!-- ==================== VIEW 2: FLAVOR 2 REMOTE ==================== -->
+  <section class="view-panel" id="view-remote">
+    <div class="controls-bar">
+      <div class="control-group">
+        <span class="control-label">Captain Host</span>
+        <button class="seg-btn active" data-remote-host="cf" type="button">☁️ Cloudflare DO (eu)</button>
+        <button class="seg-btn" data-remote-host="eu-strict" type="button">🇪🇺 Strict 100% EU Cluster</button>
+        <button class="seg-btn" data-remote-host="celld" type="button">🧱 celld.dev Exit (VPS + S3)</button>
+      </div>
+      <div class="control-group">
+        <span class="control-label">Laptop State</span>
+        <button class="seg-btn active" data-remote-lid="open" type="button">💻 Desk (Mac + Phone)</button>
+        <button class="seg-btn" data-remote-lid="closed" type="button">🚆 Commute (Lid Closed)</button>
+      </div>
+    </div>
+
+    <div class="arch-grid">
+      <div class="diagram-card">
+        <div class="status-banner running" id="remoteBanner">
+          <div><span class="dot green"></span><strong>All Remote · Always-On:</strong> Captain runs 24/7 in Cloudflare Durable Objects (<code>jurisdiction("eu")</code>) orchestrating Boat.dev EU VMs.</div>
+        </div>
+
+        <svg class="arch-svg" viewBox="0 0 820 485" id="remoteSvg">
+          <!-- Client Zone -->
+          <rect id="rClientZone" class="zone-box" x="18" y="18" width="210" height="448" />
+          <text class="zone-title" x="34" y="40">THIN CLIENTS (1 PROTOCOL)</text>
+
+          <!-- Cloud Control Plane Zone -->
+          <rect id="rControlZone" class="zone-box eu-zone" x="248" y="18" width="285" height="448" />
+          <text class="zone-title" id="rControlTitle" x="264" y="40">HOSTED CAPTAIN · CLOUDFLARE DO (EU)</text>
+
+          <!-- Compute & Inference Zone -->
+          <rect id="rComputeZone" class="zone-box eu-zone" x="553" y="18" width="249" height="448" />
+          <text class="zone-title" id="rComputeTitle" x="569" y="40">EU WORKER VMs &amp; MODELS</text>
+
+          <!-- Flow lines -->
+          <path id="r-edge-mac" class="flow-line active-flow" d="M 208 115 L 268 155" />
+          <path id="r-edge-phone" class="flow-line active-flow" d="M 208 235 L 268 205" />
+          <path id="r-edge-gh" class="flow-line active-flow" d="M 208 380 L 268 355" />
+          <path id="r-edge-boat" class="flow-line eu-flow" d="M 513 175 L 573 145" />
+          <path id="r-edge-cb" class="flow-line eu-flow" d="M 573 190 L 513 215" />
+          <path id="r-edge-llm" class="flow-line eu-flow" d="M 513 350 L 573 350" />
+
+          <text class="flow-label" x="215" y="122">WSS</text>
+          <text class="flow-label" x="215" y="242">WSS+Push</text>
+          <text class="flow-label" x="518" y="148">spawn</text>
+          <text class="flow-label" x="518" y="220">callback</text>
+
+          <!-- Clients -->
+          <g class="node" data-inspect="remote-mac" id="node-remote-mac">
+            <rect x="36" y="65" width="172" height="100" />
+            <text class="node-title" x="50" y="92">Mac / Win Desktop</text>
+            <text class="node-sub" x="50" y="112">Thin Tauri Client</text>
+            <text class="node-sub" x="50" y="130">Live Diffs + Glass Box</text>
+            <text class="node-tag" fill="#e07a5f" x="50" y="150">wss://cloud.ade</text>
+          </g>
+
+          <g class="node highlight-purple" data-inspect="remote-phone" id="node-remote-phone">
+            <rect x="36" y="188" width="172" height="112" />
+            <text class="node-title" x="50" y="214">iPhone / Android / Web</text>
+            <text class="node-sub" x="50" y="234">Mobile-First PWA</text>
+            <text class="node-sub" x="50" y="252">1-Tap Approvals + Voice</text>
+            <text class="node-sub" x="50" y="270">Web Push Notifications</text>
+            <text class="node-tag" fill="#c084fc" x="50" y="288">Instant Handover</text>
+          </g>
+
+          <g class="node" data-inspect="remote-gh" id="node-remote-gh">
+            <rect x="36" y="328" width="172" height="114" />
+            <text class="node-title" x="50" y="355">GitHub App</text>
+            <text class="node-sub" x="50" y="375">24/7 Issue Webhooks</text>
+            <text class="node-sub" x="50" y="393">Scoped Repo Tokens</text>
+            <text class="node-sub" x="50" y="411">Auto-Open Mergeable PR</text>
+            <text class="node-tag" fill="#60a5fa" x="50" y="429">GH Cloud / GH EU / GitLab</text>
+          </g>
+
+          <!-- Control Plane -->
+          <g class="node selected highlight-eu" data-inspect="remote-captain" id="node-remote-captain">
+            <rect x="268" y="75" width="245" height="205" />
+            <text class="node-title" id="rCapTitle" x="284" y="102">Captain Durable Object</text>
+            <text class="node-sub" id="rCapLine1" x="284" y="122">1 Project/Issue = 1 Isolated DO</text>
+            <text class="node-sub" id="rCapLine2" x="284" y="140">PiHarness + @pi-durable + SQLite</text>
+            <text class="node-sub" id="rCapLine3" x="284" y="158">Hibernates while workers/humans wait</text>
+            <text class="node-sub" id="rCapLine4" x="284" y="176">DO Alarms = watchdog &amp; retries</text>
+            <rect x="284" y="194" width="213" height="44" style="fill:var(--bg-card);stroke:var(--border-strong);rx:7;" />
+            <text class="node-sub" x="295" y="213" style="fill:var(--text);font-weight:600;">packages/captain-core</text>
+            <text class="node-sub" x="295" y="229">Same 90% TS core as Flavor 1</text>
+            <text class="node-tag" id="rCapTag" fill="#38bdf8" x="284" y="264">jurisdiction("eu") · Zero VPS ops</text>
+          </g>
+
+          <g class="node" data-inspect="remote-gateway" id="node-remote-gateway">
+            <rect x="268" y="302" width="245" height="140" />
+            <text class="node-title" x="284" y="328">Model &amp; Quota Gateway</text>
+            <text class="node-sub" x="284" y="348">Encrypted KMS Key Vault</text>
+            <text class="node-sub" x="284" y="366">Short-lived tokens → workers</text>
+            <text class="node-sub" x="284" y="384">Enforces Bronze/Silver/Gold quotas</text>
+            <text class="node-sub" x="284" y="402">EU-Only Mode fail-closed guard</text>
+            <text class="node-tag" fill="#4ade80" x="284" y="428">Raw keys never enter VMs</text>
+          </g>
+
+          <!-- Workers & Models -->
+          <g class="node highlight-eu" data-inspect="remote-boat" id="node-remote-boat">
+            <rect x="573" y="75" width="210" height="205" />
+            <text class="node-title" x="589" y="102">Boat.dev EU Sandboxes</text>
+            <text class="node-sub" x="589" y="122">Full Ubuntu VMs + Chrome</text>
+            <text class="node-sub" x="589" y="140">Fast disk fork for subagents</text>
+            <rect x="589" y="155" width="178" height="36" style="fill:var(--bg-card);stroke:var(--eu);rx:6;" />
+            <text class="node-sub" x="599" y="177" style="fill:var(--text);">Subagent 1 · Feature Code</text>
+            <rect x="589" y="200" width="178" height="36" style="fill:var(--bg-card);stroke:var(--eu);rx:6;" />
+            <text class="node-sub" x="599" y="222" style="fill:var(--text);">Subagent 2 · Tests &amp; E2E</text>
+            <text class="node-tag" fill="#38bdf8" x="589" y="264">Auto-pause on idle · Per-sec bill</text>
+          </g>
+
+          <g class="node" data-inspect="remote-llm" id="node-remote-llm">
+            <rect x="573" y="302" width="210" height="140" />
+            <text class="node-title" id="rLlmTitle" x="589" y="328">LLM Endpoints (pi-ai)</text>
+            <text class="node-sub" id="rLlmLine1" x="589" y="348">• Bedrock EU (Claude)</text>
+            <text class="node-sub" id="rLlmLine2" x="589" y="366">• Vertex AI EU (Claude/Gemini)</text>
+            <text class="node-sub" id="rLlmLine3" x="589" y="384">• Azure OpenAI EU / Mistral</text>
+            <text class="node-sub" id="rLlmLine4" x="589" y="402">• Global BYO (if EU mode off)</text>
+            <text class="node-tag" fill="#fbbf24" x="589" y="428">BYO Keys · Per-Stage Routing</text>
+          </g>
+        </svg>
+        <div class="hint-bar">Switch Captain Host above to compare Cloudflare DO, Strict 100% EU Sovereignty, and the celld.dev exit ramp.</div>
+      </div>
+
+      <aside class="inspector-card" id="remoteInspector"></aside>
+    </div>
+  </section>
+
+  <!-- ==================== VIEW 3: BLUEPRINTS & MODEL ROUTER ==================== -->
+  <section class="view-panel" id="view-pipeline">
+    <div class="controls-bar">
+      <div class="control-group">
+        <span class="control-label">Project Blueprint</span>
+        <button class="seg-btn" data-preset="factory" type="button">⚡ Automated Factory</button>
+        <button class="seg-btn active" data-preset="openspec" type="button">🔄 OpenSpec (Brownfield)</button>
+        <button class="seg-btn" data-preset="speckit" type="button">📐 Spec Kit (Greenfield)</button>
+        <button class="seg-btn" data-preset="egm" type="button">🐘 EGM (Elephant-Goldfish)</button>
+        <button class="seg-btn" data-preset="squad" type="button">👥 Squad (.squad/)</button>
+        <button class="seg-btn" data-preset="bmad" type="button">🏢 BMAD (Enterprise)</button>
+      </div>
+      <div class="control-group">
+        <span class="control-label">Compliance Policy</span>
+        <button class="seg-btn" id="euModeToggle" type="button">🇪🇺 EU-Only Mode: OFF</button>
+      </div>
+    </div>
+
+    <div class="diagram-card">
+      <div class="status-banner" id="pipelineSummary"></div>
+      <div class="pipeline-track" id="pipelineTrack"></div>
+      <div class="inspector-section" style="margin-top:18px;">
+        <h4>Declarative Blueprint &amp; Model Resolution Hierarchy</h4>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12.5px;margin-top:6px;">
+          <span class="code-chip">Project Blueprint (.ade/blueprint.json)</span>
+          <span style="color:var(--text-dim);">→</span>
+          <span class="code-chip">1. App Default</span>
+          <span style="color:var(--text-dim);">→</span>
+          <span class="code-chip">2. Project Config</span>
+          <span style="color:var(--text-dim);">→</span>
+          <span class="code-chip">3. Blueprint Stage (e.g. specify vs. review)</span>
+          <span style="color:var(--text-dim);">→</span>
+          <span class="code-chip">4. Run / Subagent Override</span>
+          <span style="color:var(--text-dim);">→</span>
+          <span class="code-chip" style="border-color:var(--eu);color:var(--eu);">Hard Guard: EU-Only Mode (Fail-Closed)</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== VIEW 4: SEAMS & MARGINS ==================== -->
+  <section class="view-panel" id="view-seams">
+    <div class="two-col">
+      <div class="seam-card">
+        <h3>1. Blueprint Seam <span class="seam-tag">BlueprintEngine</span></h3>
+        <p>100% declarative Factory Blueprints (stages, Git artifact layout, personas, deterministic hooks &amp; gates). Select per project; zero hardcoded branches.</p>
+        <div class="adapter-row">
+          <span class="adapter-pill day1">MVP: Automated Factory</span>
+          <span class="adapter-pill day1">MVP: OpenSpec (Brownfield)</span>
+          <span class="adapter-pill day1">MVP: Spec Kit + Goldfish Quality Auditor</span>
+          <span class="adapter-pill future">Phase 3: EGM + Squad (.squad/) + BMAD + Org Blueprints</span>
+        </div>
+      </div>
+
+      <div class="seam-card">
+        <h3>2. Captain Host Seam <span class="seam-tag">CaptainHost</span></h3>
+        <p>90% shared <code>captain-core</code> (pure Web TS) wired via 3 primitives: Storage, Alarms, Transport.</p>
+        <div class="adapter-row">
+          <span class="adapter-pill day1">Day 1: Local Node + SQLite</span>
+          <span class="adapter-pill day1">Day 1: Cloudflare DO (PiHarness)</span>
+          <span class="adapter-pill future">Exit/EU: Scaleway / Azure EU / celld.dev</span>
+        </div>
+      </div>
+
+      <div class="seam-card">
+        <h3>3. Worker Sandbox Seam <span class="seam-tag">Hands on Demand</span></h3>
+        <p>Uniform HTTP contract (<code>create / exec / spawnWorker / pause / resume / getDiff</code>). Attached lazily only for <code>implement/verify</code> (~40–60% VM savings); brain-only stages use <code>pi-codemode</code>.</p>
+        <div class="adapter-row">
+          <span class="adapter-pill day1">Day 1: Local Docker HTTP Bridge</span>
+          <span class="adapter-pill day1">Day 1: Boat.dev (EU VMs)</span>
+          <span class="adapter-pill future">Later: Local Mac as Hand (VPN) / Azure ACA</span>
+        </div>
+      </div>
+
+      <div class="seam-card">
+        <h3>4. Model &amp; Token Economy Seam <span class="seam-tag">pi-ai + TokenEconomizer</span></h3>
+        <p>Per-stage switching, fail-closed EU-Only enforcement, plus built-in <strong>TokenEconomizer</strong> (repo micro-skills, tool pruning &amp; failure-loop watchdog cutting token burn 20–40%).</p>
+        <div class="adapter-row">
+          <span class="adapter-pill day1">Day 1: Anthropic / OpenAI / OpenRouter</span>
+          <span class="adapter-pill day1">Day 1: EU Endpoints + TokenEconomizer</span>
+          <span class="adapter-pill future">Later: Private Enterprise vLLM</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="diagram-card">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;">
+        <div>
+          <h3 style="font-size:16px;">Flavor 2 Margin Model (Bronze / Silver / Gold)</h3>
+          <p style="font-size:12.5px;color:var(--text-muted);">BYO LLM keys kept strictly outside flat tiers · VMs auto-pause on idle (~$0.10/hr blended VM cost)</p>
+        </div>
+        <div class="slider-wrap">
+          <label for="utilSlider"><strong>Quota Utilization:</strong> <span id="utilVal">50%</span></label>
+          <input type="range" id="utilSlider" min="15" max="100" value="50" step="5" />
+        </div>
+      </div>
+
+      <div class="tiers-grid" id="tiersGrid"></div>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  // Theme toggle
+  const html = document.documentElement;
+  const themeBtn = document.getElementById("themeToggle");
+  themeBtn.addEventListener("click", () => {
+    const next = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    html.setAttribute("data-theme", next);
+    themeBtn.textContent = next === "dark" ? "☀️ Light Mode" : "🌙 Dark Mode";
+  });
+
+  // Top-level View Tabs
+  const tabs = document.querySelectorAll(".nav-tab");
+  const panels = document.querySelectorAll(".view-panel");
+  tabs.forEach(tab => {
+    tab.addEventListener("click", () => {
+      tabs.forEach(t => t.classList.remove("active"));
+      panels.forEach(p => p.classList.remove("active"));
+      tab.classList.add("active");
+      document.getElementById("view-" + tab.dataset.view).classList.add("active");
+    });
+  });
+
+  // Inspector knowledge base
+  const INSPECT = {
+    "local-ui": {
+      badge: "Client · Desktop",
+      title: "ADE Desktop UI (Tauri 2 + React 19)",
+      desc: "One shared frontend codebase talking to localhost (Flavor 1) or wss://cloud (Flavor 2) via the exact same API/WS protocol.",
+      points: [
+        "Center pane: 1 Captain conversation per issue with structured approval cards",
+        "Right pane: Read-only subagent glass box (live logs, diffs, preview URLs)",
+        "Already bootstrapped in your ADE repo (App.tsx, src/, src-tauri/)"
+      ],
+      files: ["App.tsx", "src/composer/", "src/panels/", "src-tauri/"]
+    },
+    "local-captain": {
+      badge: "Captain · Local Node",
+      title: "Local Captain (Pi Durable + SQLite)",
+      desc: "Runs packages/captain-core inside a lightweight local Node/TS daemon. Checkpoints every step to SQLite so closing the lid never loses progress.",
+      points: [
+        "Coordinates modular stages: triage → spec → plan → implement → verify → review → PR",
+        "Switches models mid-session per stage via @earendil-works/pi-ai",
+        "Keys live in OS Keychain / Windows DPAPI — never exposed to browser UI"
+      ],
+      files: ["packages/captain-core/", "runtime/host.ts", "runtime/server.ts"]
+    },
+    "local-gh": {
+      badge: "Intake · Local",
+      title: "GitHub CLI (gh) Integration",
+      desc: "Reuses the developer's authenticated local gh CLI for public & private issues, pushing feature branches, and opening merge-ready PRs.",
+      points: [
+        "Zero OAuth app setup needed in Flavor 1",
+        "Upgrades existing runtime/github-issues.ts from read-only to full Issue → PR lifecycle"
+      ],
+      files: ["runtime/github-issues.ts", "runtime/github-repositories.ts"]
+    },
+    "local-docker": {
+      badge: "Sandbox · Local",
+      title: "Local Docker Sandbox Bridge",
+      desc: "Exposes a tiny localhost HTTP Sandbox API matching Boat.dev's contract so captain-core stays 100% pure HTTP without direct OS coupling.",
+      points: [
+        "Each subagent runs in an isolated container with its own git worktree",
+        "Safe shell, build, test, and Playwright verification inside container",
+        "Pauses cleanly when laptop sleeps; resumes on reopen"
+      ],
+      files: ["packages/sandbox-docker/", "runtime/subagents.ts"]
+    },
+    "local-phone": {
+      badge: "Handover · Awake Only",
+      title: "Mobile / Web PWA via Outbound Relay",
+      desc: "Just like Claude Code Remote Control: the local Captain opens an encrypted outbound WebSocket to a tiny relay (no port forwarding, works over 5G).",
+      points: [
+        "Steer your Mac from the couch or coffee shop while awake",
+        "Shows 'Mac offline' when lid closes — natural upgrade trigger to Flavor 2"
+      ],
+      files: ["packages/relay-client/"]
+    },
+    "models": {
+      badge: "Seam 4 · pi-ai",
+      title: "Pluggable Model Router (pi-ai)",
+      desc: "Resolves provider + model per workflow stage and per subagent, with optional fail-closed EU-Only Mode.",
+      points: [
+        "Frontier model for Spec/Plan, strong coder for Implement, different family for Review",
+        "Supports Anthropic, OpenAI, OpenRouter, Bedrock/Vertex/Azure EU, Mistral, Ollama"
+      ],
+      files: ["runtime/models.ts", "packages/captain-core/model-router.ts"]
+    },
+    "local-boat": {
+      badge: "Sandbox · Optional BYO",
+      title: "Optional BYO Boat.dev Workers",
+      desc: "Flavor 1 users can optionally plug in their own Boat.dev API key (billed directly by Boat.dev) using the exact same SandboxProvider adapter as Flavor 2.",
+      points: [
+        "Active remote subagent finishes its task even if laptop lid closes",
+        "Captain resumes orchestration once laptop reopens"
+      ],
+      files: ["packages/sandbox-boat/"]
+    },
+    "remote-mac": {
+      badge: "Client · Thin",
+      title: "Desktop App (Thin Client Mode)",
+      desc: "In Flavor 2, the desktop app connects over WSS directly to the hosted Captain. Closing the lid only disconnects the UI — zero brain migration or leases.",
+      points: [
+        "Identical UI to Flavor 1",
+        "Zero local Docker required; instant start on Mac or Windows"
+      ],
+      files: ["App.tsx", "api.ts"]
+    },
+    "remote-phone": {
+      badge: "Handover · 24/7",
+      title: "iPhone / Android / Web PWA",
+      desc: "Connects to the exact same hosted Captain over WebSocket. Close laptop at work, approve a decision on the train, review the PR at home.",
+      points: [
+        "4 focused screens: Issue Inbox, Captain Chat (+ voice), Spec/PR Card, New Issue",
+        "Web Push notifications when Captain hits an approval gate or opens a PR",
+        "Multiplayer sync: desktop & phone can be open simultaneously"
+      ],
+      files: ["src/mobile/", "public/manifest.webmanifest"]
+    },
+    "remote-gh": {
+      badge: "Intake · 24/7",
+      title: "GitHub App & Webhooks",
+      desc: "Receives issue webhooks 24/7 so the Captain can triage labeled issues while you sleep and push verified, merge-ready PRs.",
+      points: [
+        "Short-lived installation tokens scoped per repository",
+        "Works with GitHub.com, GitHub Enterprise Cloud EU, and GitLab EU"
+      ],
+      files: ["packages/github-app/"]
+    },
+    "remote-captain": {
+      badge: "Captain · Always-On",
+      title: "Hosted Captain (Durable Object / EU / celld)",
+      desc: "One isolated stateful Captain per project/issue backed by SQLite + Pi Durable. Runs the exact same packages/captain-core as Flavor 1.",
+      points: [
+        "Cloudflare DO: PiHarness + jurisdiction('eu') + WebSocket Hibernation (pennies/user)",
+        "Strict 100% EU: Same Node/TS Captain on Scaleway / Hetzner / Azure EU (no US edge)",
+        "Cloudflare Exit: Same wrangler.json bundle on celld.dev across multi-node VPS + S3"
+      ],
+      files: ["packages/captain-core/", "packages/host-cloudflare/", "packages/host-node/"]
+    },
+    "remote-gateway": {
+      badge: "Security · Billing",
+      title: "Model & Quota Gateway",
+      desc: "Protects margins and credentials. Customer LLM keys live encrypted in KMS; worker VMs only receive short-lived scoped tokens.",
+      points: [
+        "Tracks worker-hours and enforces Bronze / Silver / Gold concurrency limits",
+        "Enforces fail-closed EU-Only Mode on every model request",
+        "Raw API keys never enter untrusted worker VMs"
+      ],
+      files: ["packages/gateway/"]
+    },
+    "remote-boat": {
+      badge: "Sandbox · Hands on Demand",
+      title: "Boat.dev Managed EU Sandboxes",
+      desc: "Full Ubuntu VMs in European data centers with Docker, Chrome/Playwright, persistent disks, and fast disk forking for parallel subagents.",
+      points: [
+        "Lazy attach: never booted during Triage/Spec/Plan/Review (~40–60% VM cost savings)",
+        "Auto-paused after 2–5 min idle; detached immediately after Verify finishes",
+        "Streams progress back to Captain callback URL so Captain DO can hibernate"
+      ],
+      files: ["packages/sandbox-boat/"]
+    },
+    "remote-llm": {
+      badge: "Inference · EU-Ready",
+      title: "LLM Providers (BYO Keys / EU Endpoints)",
+      desc: "Strictly separated from flat subscription tiers so heavy token usage never breaks your unit economics.",
+      points: [
+        "EU-Only Mode locks to Bedrock EU, Vertex AI EU, Azure OpenAI EU, or Mistral",
+        "Per-stage model routing cuts token burn while using adversarial models for Review"
+      ],
+      files: ["packages/captain-core/model-router.ts"]
+    }
+  };
+
+  function renderInspector(containerId, key) {
+    const info = INSPECT[key];
+    if (!info) return;
+    const el = document.getElementById(containerId);
+    el.innerHTML = `
+      <span class="inspector-badge">${info.badge}</span>
+      <h3>${info.title}</h3>
+      <p class="desc">${info.desc}</p>
+      <div class="inspector-section">
+        <h4>Key Responsibilities</h4>
+        <ul class="inspector-list">
+          ${info.points.map(p => `<li>${p}</li>`).join("")}
+        </ul>
+      </div>
+      <div class="inspector-section">
+        <h4>Codebase Mapping</h4>
+        <div>${info.files.map(f => `<span class="code-chip">${f}</span>`).join("")}</div>
+      </div>
+    `;
+  }
+
+  // Click binding for SVG nodes
+  function wireSvgInspector(svgId, inspectorId, defaultKey) {
+    const svg = document.getElementById(svgId);
+    svg.querySelectorAll(".node").forEach(node => {
+      node.addEventListener("click", () => {
+        svg.querySelectorAll(".node").forEach(n => n.classList.remove("selected"));
+        node.classList.add("selected");
+        renderInspector(inspectorId, node.dataset.inspect);
+      });
+    });
+    renderInspector(inspectorId, defaultKey);
+  }
+
+  wireSvgInspector("localSvg", "localInspector", "local-ui");
+  wireSvgInspector("remoteSvg", "remoteInspector", "remote-captain");
+
+  // ==================== FLAVOR 1 STATE ====================
+  let localLid = "open";
+  let localWorker = "docker";
+
+  function updateLocalView() {
+    const zone = document.getElementById("localLaptopZone");
+    const banner = document.getElementById("localBanner");
+    const sleepingNodes = ["node-local-ui", "node-local-captain", "node-local-gh", "node-local-docker"];
+    const activeEdges = ["l-edge-ui-cap", "l-edge-cap-work", "l-edge-cap-relay", "l-edge-cap-llm"];
+    const boatNode = document.getElementById("node-local-boat");
+    const boatEdge = document.getElementById("l-edge-boat");
+
+    const isClosed = localLid === "closed";
+    const isBoat = localWorker === "boat";
+
+    zone.classList.toggle("sleep-zone", isClosed);
+    sleepingNodes.forEach(id => document.getElementById(id).classList.toggle("sleeping", isClosed));
+
+    activeEdges.forEach(id => {
+      const e = document.getElementById(id);
+      e.classList.toggle("active-flow", !isClosed);
+      e.classList.toggle("paused-flow", isClosed);
+    });
+
+    // Boat highlight
+    boatNode.style.opacity = isBoat ? "1" : "0.38";
+    boatEdge.style.opacity = isBoat ? "1" : "0.2";
+    boatEdge.classList.toggle("eu-flow", isBoat && !isClosed);
+    boatEdge.classList.toggle("paused-flow", isBoat && isClosed);
+    document.getElementById("node-local-docker").style.opacity = isBoat ? "0.45" : (isClosed ? "0.42" : "1");
+
+    if (!isClosed && !isBoat) {
+      banner.className = "status-banner running";
+      banner.innerHTML = `<div><span class="dot green"></span><strong>All Local · Active:</strong> Mac/Win app, Local Captain (Pi Durable + SQLite), and Local Docker containers running at <strong>$0 infra cost</strong>. Phone steering works via relay.</div>`;
+    } else if (!isClosed && isBoat) {
+      banner.className = "status-banner running";
+      banner.innerHTML = `<div><span class="dot blue"></span><strong>Local Captain + BYO Boat.dev:</strong> Captain runs locally for $0; heavy subagents execute in your own EU Boat.dev VMs.</div>`;
+    } else if (isClosed && !isBoat) {
+      banner.className = "status-banner paused";
+      banner.innerHTML = `<div><span class="dot amber"></span><strong>Laptop Sleeping · Paused Cleanly:</strong> Pi Durable checkpoints state to local SQLite; Docker pauses. Everything resumes seamlessly when you reopen the lid. Phone shows <em>Mac offline</em>.</div>`;
+    } else {
+      banner.className = "status-banner paused";
+      banner.innerHTML = `<div><span class="dot amber"></span><strong>Laptop Sleeping · Active Subagent Finishes on Boat.dev:</strong> Remote Boat.dev worker finishes its current task, then waits for Local Captain to wake up and advance to the next stage.</div>`;
+    }
+  }
+
+  document.querySelectorAll("[data-local-lid]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("[data-local-lid]").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      localLid = btn.dataset.localLid;
+      updateLocalView();
+    });
+  });
+
+  document.querySelectorAll("[data-local-worker]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("[data-local-worker]").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      localWorker = btn.dataset.localWorker;
+      updateLocalView();
+    });
+  });
+
+  // ==================== FLAVOR 2 STATE ====================
+  let remoteHost = "cf";
+  let remoteLid = "open";
+
+  function updateRemoteView() {
+    const banner = document.getElementById("remoteBanner");
+    const macNode = document.getElementById("node-remote-mac");
+    const macEdge = document.getElementById("r-edge-mac");
+    const controlTitle = document.getElementById("rControlTitle");
+    const capTitle = document.getElementById("rCapTitle");
+    const cap1 = document.getElementById("rCapLine1");
+    const cap2 = document.getElementById("rCapLine2");
+    const cap3 = document.getElementById("rCapLine3");
+    const cap4 = document.getElementById("rCapLine4");
+    const capTag = document.getElementById("rCapTag");
+    const llm4 = document.getElementById("rLlmLine4");
+
+    const isClosed = remoteLid === "closed";
+    macNode.classList.toggle("sleeping", isClosed);
+    macEdge.classList.toggle("active-flow", !isClosed);
+    macEdge.classList.toggle("paused-flow", isClosed);
+
+    if (remoteHost === "cf") {
+      controlTitle.textContent = "HOSTED CAPTAIN · CLOUDFLARE DO (EU)";
+      capTitle.textContent = "Captain Durable Object";
+      cap1.textContent = "1 Project/Issue = 1 Isolated DO";
+      cap2.textContent = "PiHarness + @pi-durable + SQLite";
+      cap3.textContent = "Hibernates while workers/humans wait";
+      cap4.textContent = "DO Alarms = watchdog & retries";
+      capTag.textContent = 'jurisdiction("eu") · Zero VPS ops';
+      llm4.textContent = "• Global BYO (if EU mode off)";
+      banner.className = "status-banner running";
+      banner.innerHTML = isClosed
+        ? `<div><span class="dot green"></span><strong>Commute Mode · Still Running 24/7:</strong> Laptop is closed in your bag, yet Captain DO + Boat.dev EU VMs keep building &amp; testing. Steer &amp; approve from iPhone/Android PWA.</div>`
+        : `<div><span class="dot green"></span><strong>Standard Cloud (GDPR Residency):</strong> Cloudflare DO (<code>jurisdiction("eu")</code>) + Boat.dev EU VMs. Pennies/user Captain cost, zero server maintenance.</div>`;
+    } else if (remoteHost === "eu-strict") {
+      controlTitle.textContent = "HOSTED CAPTAIN · TRUE EU SOVEREIGN";
+      capTitle.textContent = "EU-Owned Captain Cluster";
+      cap1.textContent = "Scaleway (FR) / Hetzner (DE) / OVH";
+      cap2.textContent = "Same Node wrapper + EU Postgres/SQLite";
+      cap3.textContent = "Zero US hyperscalers · CLOUD Act free";
+      cap4.textContent = "GitLab EU / Gitea + Mistral / EU GPU";
+      capTag.textContent = "EU-Owned End-to-End (Enterprise)";
+      llm4.textContent = "• Mistral EU + EU self-hosted Qwen";
+      banner.className = "status-banner eu";
+      banner.innerHTML = `<div><span class="dot blue"></span><strong>True EU Sovereignty (CLOUD-Act-Free · Enterprise):</strong> EU-owned compute (Scaleway/Hetzner/OVH), EU-owned/self-hosted models (Mistral + open weights on EU GPUs), and EU GitLab/Gitea — zero US hyperscalers.</div>`;
+    } else {
+      controlTitle.textContent = "CLOUDFLARE EXIT · CELLD.DEV FLEET";
+      capTitle.textContent = "celld.dev Multi-Node DOs";
+      cap1.textContent = "Exact same wrangler.json DO bundle";
+      cap2.textContent = "Rust daemon + workerd + SQLite cells";
+      cap3.textContent = "EU S3 bucket leases + LTX replication";
+      cap4.textContent = "Node dies → peer takes over from S3";
+      capTag.textContent = "Zero Cloudflare Lock-In Escape Hatch";
+      llm4.textContent = "• Any pi-ai or EU-locked provider";
+      banner.className = "status-banner eu";
+      banner.innerHTML = `<div><span class="dot blue"></span><strong>Cloudflare Exit Ramp (celld.dev):</strong> If Cloudflare ever hikes prices, deploy the exact same Durable Object bundle onto cheap multi-node EU VPSes + S3 (adopt once celld exits alpha).</div>`;
+    }
+  }
+
+  document.querySelectorAll("[data-remote-host]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("[data-remote-host]").forEach(b => b.classList.remove("active", "eu-active"));
+      btn.classList.add(btn.dataset.remoteHost === "cf" ? "active" : "eu-active");
+      remoteHost = btn.dataset.remoteHost;
+      updateRemoteView();
+    });
+  });
+
+  document.querySelectorAll("[data-remote-lid]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("[data-remote-lid]").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      remoteLid = btn.dataset.remoteLid;
+      updateRemoteView();
+    });
+  });
+
+  // ==================== VIEW 3: BLUEPRINTS & MODEL ROUTER ====================
+  const BLUEPRINTS = {
+    factory: {
+      label: "Automated Factory (Lite) — Fast hook-and-gate pipeline for high-velocity repos & bugs.",
+      artifactHint: "Git artifacts: branch diff + deterministic test/lint logs · Hands attached lazily only for Implement & Hooks",
+      stages: [
+        { num: "01", name: "Triage", desc: "Inspect GH issue & repo via pi-codemode; ask 0–2 questions if blocked.", role: "Captain", gate: false, hands: false, artifact: "issue-context", globalModel: "claude-haiku-4.5", euModel: "bedrock-eu/haiku-4.5" },
+        { num: "02", name: "Light Plan", desc: "Sketch files to change & verification commands.", role: "Captain", gate: false, hands: false, artifact: "plan.md", globalModel: "claude-sonnet-4.5", euModel: "bedrock-eu/sonnet-4.5" },
+        { num: "03", name: "Implement", desc: "Isolated subagent edits code in Docker / EU VM.", role: "Subagent", gate: false, hands: true, artifact: "git worktree", globalModel: "sonnet-4.5 / codex", euModel: "bedrock-eu/sonnet-4.5" },
+        { num: "04", name: "Deterministic Hooks", desc: "Run lint, typecheck, unit tests & build scripts automatically.", role: "Hook Runner", gate: false, hands: true, artifact: "ci-checks.log", globalModel: "script + haiku fix", euModel: "script + bedrock-eu" },
+        { num: "05", name: "Goldfish Quality Audit", desc: "Zero coder chat history + full codebase read access; catches regressions & drift.", role: "Independent Auditor", gate: false, hands: false, goldfish: true, artifact: "review.md", globalModel: "gpt-5 / gemini-pro", euModel: "azure-eu/gpt-5" },
+        { num: "06", name: "Merge-Ready PR", desc: "Push branch & open PR with test/review summary.", role: "Captain", gate: true, hands: false, artifact: "GitHub PR", globalModel: "claude-haiku-4.5", euModel: "bedrock-eu/haiku-4.5" }
+      ]
+    },
+    openspec: {
+      label: "OpenSpec (Brownfield) — Change-centric delta specs against a living master spec. Fast & iterative.",
+      artifactHint: "Git artifacts: openspec/spec.md + openspec/changes/<issue>/delta.md · Hands attached only for Build & Verify",
+      stages: [
+        { num: "01", name: "Triage", desc: "Load living master spec + GH issue via pi-codemode; scope delta.", role: "Captain", gate: false, hands: false, artifact: "openspec/spec.md", globalModel: "claude-haiku-4.5", euModel: "bedrock-eu/haiku-4.5" },
+        { num: "02", name: "Propose Delta", desc: "Draft concise ADDED/MODIFIED/REMOVED delta spec.", role: "Captain", gate: true, hands: false, artifact: "changes/*/delta.md", globalModel: "claude-opus-4.5", euModel: "vertex-eu/claude-opus" },
+        { num: "03", name: "Parallel Build", desc: "Subagents implement delta in isolated containers/VMs.", role: "Subagents", gate: false, hands: true, artifact: "git worktrees", globalModel: "sonnet-4.5 / codex", euModel: "bedrock-eu/sonnet-4.5" },
+        { num: "04", name: "Verify & E2E", desc: "Run tests, build & Playwright checks against delta.", role: "Verify Worker", gate: false, hands: true, artifact: "verify-report.md", globalModel: "gemini-flash / haiku", euModel: "vertex-eu/gemini-flash" },
+        { num: "05", name: "Goldfish Quality Audit", desc: "Zero coder memory + full codebase read via pi-codemode; checks every delta requirement.", role: "Independent Auditor", gate: false, hands: false, goldfish: true, artifact: "audit.md", globalModel: "gpt-5 / gemini-pro", euModel: "azure-eu/gpt-5" },
+        { num: "06", name: "Archive & PR", desc: "Merge delta into master living spec & open PR.", role: "Captain", gate: true, hands: false, artifact: "spec.md + PR", globalModel: "claude-haiku-4.5", euModel: "bedrock-eu/haiku-4.5" }
+      ]
+    },
+    speckit: {
+      label: "Spec Kit (Greenfield) — Structured phase-gated development with constitution, spec, plan & tasks.",
+      artifactHint: "Git artifacts: .specify/constitution.md + specs/<feature>/{spec,plan,tasks}.md · $0 VM until Implement",
+      stages: [
+        { num: "01", name: "Constitution", desc: "Load or establish repo principles via pi-codemode.", role: "Captain", gate: false, hands: false, artifact: ".specify/constitution", globalModel: "claude-sonnet-4.5", euModel: "bedrock-eu/sonnet-4.5" },
+        { num: "02", name: "Specify", desc: "Author full user stories, edge cases & acceptance criteria.", role: "Captain", gate: true, hands: false, artifact: "specs/*/spec.md", globalModel: "claude-opus-4.5", euModel: "vertex-eu/claude-opus" },
+        { num: "03", name: "Plan", desc: "Design architecture, data models & API contracts.", role: "Captain", gate: true, hands: false, artifact: "specs/*/plan.md", globalModel: "claude-opus-4.5", euModel: "vertex-eu/claude-opus" },
+        { num: "04", name: "Tasks DAG", desc: "Break plan into ordered, parallelizable task packets.", role: "Captain", gate: false, hands: false, artifact: "specs/*/tasks.md", globalModel: "claude-sonnet-4.5", euModel: "bedrock-eu/sonnet-4.5" },
+        { num: "05", name: "Implement", desc: "Parallel subagents execute task packets in sandboxes.", role: "Subagents", gate: false, hands: true, artifact: "git worktrees", globalModel: "sonnet-4.5 / codex", euModel: "bedrock-eu/sonnet-4.5" },
+        { num: "06", name: "Verify & Review", desc: "Deterministic test suite + adversarial spec audit.", role: "QA + Critic", gate: false, hands: true, artifact: "verify + review", globalModel: "gpt-5 / gemini-pro", euModel: "azure-eu/gpt-5" },
+        { num: "07", name: "Publish PR", desc: "Open merge-ready PR linked to spec & task checklist.", role: "Captain", gate: true, hands: false, artifact: "GitHub PR", globalModel: "claude-haiku-4.5", euModel: "bedrock-eu/haiku-4.5" }
+      ]
+    },
+    egm: {
+      label: "EGM (Elephant-Goldfish Model) — Context-rich Elephant drafts specs; zero-memory Goldfish auditors catch blind spots before & after coding.",
+      artifactHint: "Git artifacts: concepts_brief.md + design_draft.md + goldfish-audit.md · Zero coder bias on spec & code quality checks",
+      stages: [
+        { num: "01", name: "Brainstorm (Elephant)", desc: "Deep-context Captain interviews dev & maps constraints across repo.", role: "Elephant Captain", gate: false, hands: false, artifact: "concepts_brief.md", globalModel: "claude-sonnet-4.5", euModel: "bedrock-eu/sonnet-4.5" },
+        { num: "02", name: "Draft Spec (Elephant)", desc: "Author rigorous architecture spec section-by-section.", role: "Elephant Captain", gate: true, hands: false, artifact: "design_draft.md", globalModel: "claude-opus-4.5", euModel: "vertex-eu/claude-opus" },
+        { num: "03", name: "Goldfish Spec Audit", desc: "Stateless reviewer (zero chat memory) probes spec + codebase for hidden assumptions.", role: "Goldfish Auditor", gate: true, hands: false, goldfish: true, artifact: "spec-audit.md", globalModel: "gpt-5 / gemini-pro", euModel: "azure-eu/gpt-5" },
+        { num: "04", name: "Implement", desc: "Isolated workers build strictly against the locked design contract.", role: "Subagents", gate: false, hands: true, artifact: "git worktrees", globalModel: "sonnet-4.5 / codex", euModel: "bedrock-eu/sonnet-4.5" },
+        { num: "05", name: "Verify & Tests", desc: "Run deterministic test suite, typecheck & Playwright checks.", role: "Verify Worker", gate: false, hands: true, artifact: "verify.log", globalModel: "gemini-flash / haiku", euModel: "vertex-eu/gemini-flash" },
+        { num: "06", name: "Goldfish Drift & Quality", desc: "Fresh Goldfish reads full codebase + diff + spec to flag drift & quality issues.", role: "Goldfish Auditor", gate: false, hands: false, goldfish: true, artifact: "drift-report.md", globalModel: "gpt-5 / gemini-pro", euModel: "azure-eu/gpt-5" },
+        { num: "07", name: "Publish PR", desc: "Open merge-ready PR with spec contract, drift report & test logs.", role: "Captain", gate: true, hands: false, artifact: "GitHub PR", globalModel: "claude-haiku-4.5", euModel: "bedrock-eu/haiku-4.5" }
+      ]
+    },
+    squad: {
+      label: "Squad (.squad/ Repo Team) — Git-native charters & decisions.md portable across 7 AI tools, run on ADE's Pi Durable Captain.",
+      artifactHint: "Git artifacts: .squad/agents/*/charter.md + .squad/decisions.md · Hands attached only for Build & Tester Verify",
+      stages: [
+        { num: "01", name: "Load Team Memory", desc: "Read .squad/decisions.md, charters & conventions via pi-codemode.", role: "Captain", gate: false, hands: false, artifact: ".squad/decisions.md", globalModel: "claude-haiku-4.5", euModel: "bedrock-eu/haiku-4.5" },
+        { num: "02", name: "Lead Triage & Cast", desc: "Lead charter scopes GH issue & assigns specialist subagents.", role: "Lead Charter", gate: true, hands: false, artifact: "agents/lead/charter", globalModel: "claude-sonnet-4.5", euModel: "bedrock-eu/sonnet-4.5" },
+        { num: "03", name: "Specialist Build", desc: "Backend/Frontend subagents code in isolated Docker / EU VMs.", role: "Dev Charters", gate: false, hands: true, artifact: "agents/*/charter.md", globalModel: "sonnet-4.5 / codex", euModel: "bedrock-eu/sonnet-4.5" },
+        { num: "04", name: "Tester Verify", desc: "Tester charter runs unit, integration & browser E2E checks.", role: "Tester Charter", gate: false, hands: true, artifact: "agents/tester/charter", globalModel: "gemini-flash / haiku", euModel: "vertex-eu/gemini-flash" },
+        { num: "05", name: "Lead Review", desc: "Independent model checks diff against decisions.md & PR goals.", role: "Critic / Lead", gate: false, hands: false, artifact: "review-notes.md", globalModel: "gpt-5 / gemini-pro", euModel: "azure-eu/gpt-5" },
+        { num: "06", name: "Scribe & PR", desc: "Scribe appends new architectural decisions & opens merge-ready PR.", role: "Scribe Charter", gate: true, hands: false, artifact: "decisions.md + PR", globalModel: "claude-haiku-4.5", euModel: "bedrock-eu/haiku-4.5" }
+      ]
+    },
+    bmad: {
+      label: "BMAD (Enterprise Multi-Persona) — Full org personas orchestrated behind 1 Captain (zero tab switching).",
+      artifactHint: "Git artifacts: docs/{prd,architecture,stories,qa-report}.md · $0 VM during PRD, Architecture & Sharding",
+      stages: [
+        { num: "01", name: "Analyst / PRD", desc: "Elicitation & formal PRD drafted by PM persona subagent.", role: "PM Persona", gate: true, hands: false, artifact: "docs/prd.md", globalModel: "claude-opus-4.5", euModel: "vertex-eu/claude-opus" },
+        { num: "02", name: "Architecture", desc: "System design, security boundaries & ADRs.", role: "Architect Persona", gate: true, hands: false, artifact: "docs/arch.md", globalModel: "claude-opus-4.5", euModel: "vertex-eu/claude-opus" },
+        { num: "03", name: "Story Sharding", desc: "Scrum Master shards architecture into dev-ready stories.", role: "SM Persona", gate: false, hands: false, artifact: "docs/stories/*.md", globalModel: "claude-sonnet-4.5", euModel: "bedrock-eu/sonnet-4.5" },
+        { num: "04", name: "Parallel Dev", desc: "Dev subagents build stories in isolated EU containers/VMs.", role: "Dev Personas", gate: false, hands: true, artifact: "git branches", globalModel: "sonnet-4.5 / codex", euModel: "bedrock-eu/sonnet-4.5" },
+        { num: "05", name: "QA & E2E", desc: "Dedicated QA persona runs Playwright, security & coverage.", role: "QA Persona", gate: false, hands: true, artifact: "docs/qa-report.md", globalModel: "gemini-flash / haiku", euModel: "vertex-eu/gemini-flash" },
+        { num: "06", name: "Adversarial Loop", desc: "Cross-family critic challenges code vs. PRD & ADRs.", role: "Critic Persona", gate: true, hands: false, artifact: "audit-trail.md", globalModel: "gpt-5 / gemini-pro", euModel: "azure-eu/gpt-5" },
+        { num: "07", name: "Compliance PR", desc: "Captain bundles full audit trail & opens merge-ready PR.", role: "Captain", gate: true, hands: false, artifact: "GitHub PR + Audit", globalModel: "claude-haiku-4.5", euModel: "bedrock-eu/haiku-4.5" }
+      ]
+    }
+  };
+
+  let currentPreset = "openspec";
+  let euOnlyMode = false;
+
+  function renderPipeline() {
+    const bp = BLUEPRINTS[currentPreset];
+    const gateCount = bp.stages.filter(s => s.gate).length;
+    const handsCount = bp.stages.filter(s => s.hands).length;
+    const summary = document.getElementById("pipelineSummary");
+    summary.className = euOnlyMode ? "status-banner eu" : "status-banner running";
+    summary.innerHTML = `
+      <div>
+        <span class="dot ${euOnlyMode ? "blue" : "green"}"></span>
+        <strong>${bp.label}</strong>
+        <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">${bp.artifactHint}</div>
+      </div>
+      <div style="font-size:12px;font-family:var(--mono);white-space:nowrap;">
+        ${bp.stages.length} stages · ${handsCount} with VM hands · ${gateCount} gate${gateCount !== 1 ? "s" : ""}
+      </div>
+    `;
+
+    const track = document.getElementById("pipelineTrack");
+    track.innerHTML = bp.stages.map(s => {
+      const model = euOnlyMode ? s.euModel : s.globalModel;
+      const execPill = s.hands
+        ? `<span class="code-chip" style="font-size:10px;border-color:var(--amber);color:var(--amber);">🦾 Hands (VM/Docker)</span>`
+        : `<span class="code-chip" style="font-size:10px;border-color:var(--green);color:var(--green);">🧠 Brain Only · $0 VM</span>`;
+      const goldfishPill = s.goldfish
+        ? `<span class="code-chip" style="font-size:10px;border-color:var(--purple);color:var(--purple);">🐟 Goldfish · Full Repo</span>`
+        : ``;
+      return `
+        <div class="stage-card ${s.gate ? "has-gate" : ""}">
+          <div class="stage-num">
+            <span>STAGE ${s.num}</span>
+            ${s.gate ? `<span class="gate-pill">HUMAN GATE</span>` : `<span>AUTO</span>`}
+          </div>
+          <h4>${s.name}</h4>
+          <p>${s.desc}</p>
+          <div style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:4px;">
+            ${execPill}
+            ${goldfishPill}
+            <span class="code-chip" style="font-size:10px;">${s.artifact}</span>
+          </div>
+          <div class="model-box ${euOnlyMode ? "eu-model" : ""}">
+            <span class="role">${s.role}</span>
+            <span class="mname">${model}</span>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  document.querySelectorAll("[data-preset]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("[data-preset]").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentPreset = btn.dataset.preset;
+      renderPipeline();
+    });
+  });
+
+  const euToggle = document.getElementById("euModeToggle");
+  euToggle.addEventListener("click", () => {
+    euOnlyMode = !euOnlyMode;
+    euToggle.classList.toggle("eu-active", euOnlyMode);
+    euToggle.textContent = euOnlyMode ? "🇪🇺 EU-Only Mode: ON (Fail-Closed)" : "🇪🇺 EU-Only Mode: OFF";
+    renderPipeline();
+  });
+
+  renderPipeline();
+
+  // ==================== VIEW 4: MARGIN CALCULATOR ====================
+  const TIERS = [
+    { name: "Pro · Always-On", price: 39, hours: 30, conc: 3, captainCost: 2.00, vmRate: 0.16, featured: false, extras: "Always-on Captain, GH webhooks, phone steering, bounded EU containers" },
+    { name: "Team · Factory", price: 119, hours: 120, conc: 8, captainCost: 6.00, vmRate: 0.18, featured: true, extras: "Shared playbooks, E2E verification, Goldfish audit, GDPR EU residency" },
+    { name: "EU Sovereign · Enterprise", price: 2900, hours: 1500, conc: 25, captainCost: 180.00, vmRate: 0.14, featured: false, extras: "Dedicated Scaleway/Hetzner cluster, Mistral/EU GPU, GitLab EU, DPA + SLA" }
+  ];
+
+  function renderTiers(utilPct) {
+    const grid = document.getElementById("tiersGrid");
+    const u = utilPct / 100;
+    grid.innerHTML = TIERS.map(t => {
+      const usedHrs = Math.round(t.hours * u);
+      const stripeFee = +(t.price * 0.029 + 0.30).toFixed(2);
+      const infraCost = +(t.captainCost + usedHrs * t.vmRate).toFixed(2);
+      const totalCost = +(infraCost + stripeFee).toFixed(2);
+      const net = +(t.price - totalCost).toFixed(2);
+      const marginPct = Math.max(0, Math.round((net / t.price) * 100));
+      return `
+        <div class="tier-card ${t.featured ? "featured" : ""}">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong>${t.name}</strong>
+            ${t.featured ? `<span class="gate-pill">POPULAR</span>` : ""}
+          </div>
+          <div class="tier-price">$${t.price} <span>/ mo</span></div>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">${t.extras}</p>
+          <div class="metric-row"><span>Worker quota</span><strong>${t.hours} hrs/mo (${t.conc} parallel)</strong></div>
+          <div class="metric-row"><span>Est. used (${utilPct}%)</span><span>${usedHrs} worker-hrs</span></div>
+          <div class="metric-row"><span>Captain + VM + Stripe</span><span>$${totalCost.toFixed(2)}</span></div>
+          <div class="metric-row"><span>Gross profit / user</span><strong style="color:var(--green);">$${net.toFixed(2)} (${marginPct}%)</strong></div>
+          <div class="margin-bar-bg"><div class="margin-bar-fill" style="width:${marginPct}%;"></div></div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  const slider = document.getElementById("utilSlider");
+  const utilVal = document.getElementById("utilVal");
+  slider.addEventListener("input", () => {
+    utilVal.textContent = slider.value + "%";
+    renderTiers(Number(slider.value));
+  });
+  renderTiers(50);
+})();
+</script>
+</body>
+</html>

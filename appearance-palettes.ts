@@ -2,7 +2,7 @@ import type { CSSProperties } from "react"
 
 export type Theme = "light" | "dark" | "system"
 export type ResolvedTheme = Exclude<Theme, "system">
-export type ColorPalette = "aitomium" | "monokai" | "github" | "anthropic" | "tokyo" | "classic" | "solarized" | "nord" | "dracula" | "rose-pine" | "catppuccin" | "gruvbox" | "crimson" | "raspberry" | "one" | "ayu" | "material" | "night-owl" | "everforest" | "cobalt" | "vitesse"
+export type ColorPalette = "aitomium" | "monokai" | "github" | "anthropic" | "tokyo" | "classic" | "solarized" | "nord" | "dracula" | "rose-pine" | "catppuccin" | "gruvbox" | "crimson" | "raspberry" | "one" | "ayu" | "material" | "night-owl" | "everforest" | "cobalt" | "vitesse" | "paseo"
 
 export const colorPalettes: { id: ColorPalette; name: string; description: string }[] = [
   { id: "aitomium", name: "AItomium", description: "The original purple and rose." },
@@ -26,6 +26,7 @@ export const colorPalettes: { id: ColorPalette; name: string; description: strin
   { id: "everforest", name: "Everforest", description: "Everforest-inspired moss green and earthy cream." },
   { id: "cobalt", name: "Cobalt", description: "Cobalt-inspired royal blue with a golden accent." },
   { id: "vitesse", name: "Vitesse", description: "Vitesse-inspired jade and understated stone neutrals." },
+  { id: "paseo", name: "Paseo", description: "Warm charcoal surfaces with a soft coral accent." },
 ]
 
 // Background, text, surface, navigation, muted text, border, accent, button, button text, secondary accent.
@@ -115,6 +116,10 @@ const palettes: Record<ColorPalette, Record<ResolvedTheme, PaletteColors>> = {
     light: ["#fafaf7", "#303630", "#f0f1ec", "#e7e9e2", "#596357", "#c9d0c4", "#236d52", "#236d52", "#ffffff", "#8a6c38"],
     dark: ["#171b18", "#e5ebe3", "#232b24", "#111612", "#b3c2b1", "#475c48", "#8ccfa8", "#8ccfa8", "#152c20", "#c8b787"],
   },
+  paseo: {
+    light: ["#f7f5f2", "#252321", "#f0eeea", "#f3f1ed", "#77716b", "#dedad4", "#bd6247", "#bd6247", "#fffaf7", "#9b4d52"],
+    dark: ["#1f1f1e", "#fafafa", "#262523", "#1a1918", "#ada9a5", "#36332f", "#d97757", "#d97757", "#211815", "#e19b82"],
+  },
 }
 
 export function isTheme(value: unknown): value is Theme {
@@ -132,15 +137,17 @@ function rgb(hex: string) {
 export function paletteVariables(palette: ColorPalette, mode: ResolvedTheme): CSSProperties & Record<`--${string}`, string> {
   const [background, foreground, surface, nav, muted, border, primary, strong, primaryForeground, rose] = palettes[palette][mode].map(rgb)
   const original = palette === "aitomium"
+  const paseoDark = palette === "paseo" && mode === "dark"
   return {
     "--background": background,
     "--foreground": foreground,
     "--card": original ? (mode === "light" ? "255 255 255" : "27 27 31") : background,
     "--surface": surface,
-    "--surface-raised": original ? (mode === "light" ? "255 255 255" : "36 34 43") : surface,
+    "--surface-raised": paseoDark ? rgb("#2f2d2b") : original ? (mode === "light" ? "255 255 255" : "36 34 43") : surface,
     "--field": original ? (mode === "light" ? "255 255 255" : "18 18 22") : background,
     "--nav": nav,
     "--muted": muted,
+    "--placeholder": paseoDark ? rgb("#78746f") : muted,
     "--border": border,
     "--card-border": original ? (mode === "light" ? "146 137 161" : "255 255 255") : border,
     "--primary": primary,

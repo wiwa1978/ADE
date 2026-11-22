@@ -1,0 +1,9 @@
+{
+  "name": "ADE Software Factory",
+  "short_name": "ADE",
+  "description": "Single-Captain Software Factory — GitHub Issue to Merge-Ready PR",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#121110",
+  "theme_color": "#e07a5f"
+}

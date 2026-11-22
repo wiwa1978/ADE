@@ -1,9 +1,31 @@
 import { useEffect, useId, useState, type FormEvent, type KeyboardEvent } from "react"
-import { ArrowLeft, ArrowUpRight, FolderGit2, GitBranch, PanelRight } from "lucide-react"
+import { ArrowLeft, ArrowUpRight, FolderGit2, GitBranch, PanelRight, Plus } from "lucide-react"
+import { request } from "./api"
 import type { FeatureAgent } from "./FeatureAgents"
+import { BUILTIN_BLUEPRINTS } from "./packages/blueprints/index.ts"
 
-export type Project = { id: string; name: string; githubUrl: string | null; repository: string | null }
-export type ProjectInput = { id: string; name: string; githubUrl: string; repository: string }
+export type Project = {
+  id: string
+  name: string
+  githubUrl: string | null
+  repository: string | null
+  blueprintId?: string
+  modelProfile?: string
+  euOnlyMode?: boolean
+  cloudActFree?: boolean
+  stageOverrides?: Record<string, { provider: string; model: string }>
+}
+export type ProjectInput = {
+  id: string
+  name: string
+  githubUrl: string
+  repository: string
+  blueprintId?: string
+  modelProfile?: string
+  euOnlyMode?: boolean
+  cloudActFree?: boolean
+  stageOverrides?: Record<string, { provider: string; model: string }>
+}
 export type GitHubConnection = { login: string | null }
 export type GitHubRepository = { fullName: string; private: boolean }
 export type GitHubRepositoryPage = { repositories: GitHubRepository[]; nextPage: number | null }
@@ -21,15 +43,62 @@ function filterGitHubRepositories(repositories: GitHubRepository[], value: strin
   return repositories.filter(repo => repo.fullName.toLowerCase().includes(query))
 }
 
-function GitHubRepositoryPicker({ login, value, disabled, onChange, onOpenSettings, onSearch }: {
-  login: string | null; value: string; disabled: boolean; onChange: (value: string) => void; onOpenSettings: () => void
+export type CreatedGitHubRepository = { fullName: string; url: string; private: boolean }
+type CreateGitHubRepository = (input: {
+  name: string
+  description?: string
+  visibility: "private" | "public"
+  addReadme?: boolean
+}) => Promise<CreatedGitHubRepository>
+
+async function defaultCreateGitHubRepository(input: {
+  name: string
+  description?: string
+  visibility: "private" | "public"
+  addReadme?: boolean
+}): Promise<CreatedGitHubRepository> {
+  const res = await request<{ repository: CreatedGitHubRepository }>("/api/github/repositories/create", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  })
+  return res.repository
+}
+
+export function GitHubRepositoryPicker({
+  login,
+  value,
+  disabled,
+  inputId = "project-github-repo",
+  onChange,
+  onOpenSettings,
+  onSearch,
+  onCreateRepository = defaultCreateGitHubRepository,
+  onQuickConnect,
+}: {
+  login: string | null
+  value: string
+  disabled: boolean
+  inputId?: string
+  onChange: (value: string) => void
+  onOpenSettings?: () => void
   onSearch: SearchGitHubRepositories
+  onCreateRepository?: CreateGitHubRepository
+  onQuickConnect?: () => Promise<string | null>
 }) {
   const [open, setOpen] = useState(false)
   const [repositories, setRepositories] = useState<GitHubRepository[]>([])
   const [nextPage, setNextPage] = useState<number | null>(1)
   const [error, setError] = useState("")
   const [activeIndex, setActiveIndex] = useState(-1)
+  const [creatingOpen, setCreatingOpen] = useState(false)
+  const [newRepoName, setNewRepoName] = useState("")
+  const [newRepoDesc, setNewRepoDesc] = useState("")
+  const [newRepoVisibility, setNewRepoVisibility] = useState<"private" | "public">("private")
+  const [newRepoReadme, setNewRepoReadme] = useState(true)
+  const [creatingBusy, setCreatingBusy] = useState(false)
+  const [createError, setCreateError] = useState("")
+  const [connecting, setConnecting] = useState(false)
   const listId = useId()
   const expanded = Boolean(login && open && !disabled)
   const matches = filterGitHubRepositories(repositories, value)
@@ -78,6 +147,42 @@ function GitHubRepositoryPicker({ login, value, disabled, onChange, onOpenSettin
     onChange(repo.fullName)
     setActiveIndex(-1)
     setOpen(false)
+    setCreatingOpen(false)
+  }
+
+  function openCreateForm() {
+    const cleaned = repositoryName(value.trim()).replace(/^[^/]+\//, "")
+    setNewRepoName(cleaned)
+    setNewRepoDesc("")
+    setCreateError("")
+    setCreatingOpen(true)
+    setOpen(false)
+  }
+
+  async function handleCreateRepo() {
+    if (!newRepoName.trim()) {
+      setCreateError("Enter a repository name (e.g. my-app).")
+      return
+    }
+    setCreatingBusy(true)
+    setCreateError("")
+    try {
+      const created = await onCreateRepository({
+        name: newRepoName.trim(),
+        description: newRepoDesc.trim() || undefined,
+        visibility: newRepoVisibility,
+        addReadme: newRepoReadme,
+      })
+      setRepositories(prev => [{ fullName: created.fullName, private: created.private }, ...prev])
+      onChange(created.fullName)
+      setCreatingOpen(false)
+      setNewRepoName("")
+      setNewRepoDesc("")
+    } catch (cause) {
+      setCreateError(cause instanceof Error ? cause.message : "Could not create repository on GitHub.")
+    } finally {
+      setCreatingBusy(false)
+    }
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -107,29 +212,120 @@ function GitHubRepositoryPicker({ login, value, disabled, onChange, onOpenSettin
       setActiveIndex(-1)
     }
   }}>
-    <input id="project-github-repo" value={value} disabled={disabled} placeholder="Search or enter owner/repository"
-      aria-describedby="project-github-hint" role={login ? "combobox" : undefined} aria-autocomplete={login ? "list" : undefined}
-      aria-expanded={login ? expanded : undefined} aria-controls={expanded ? listId : undefined}
-      aria-activedescendant={expanded && activeIndex >= 0 && activeIndex < visible.length ? `${listId}-${activeIndex}` : undefined}
-      autoComplete="off" onFocus={show} onClick={show} onKeyDown={handleKeyDown}
-      onChange={event => { onChange(event.target.value); setActiveIndex(-1); show() }} />
-    {expanded && <div className="github-repo-dropdown">
-      <ul className="github-repo-results" id={listId} role="listbox" aria-label="GitHub repositories" aria-busy={nextPage !== null && !error}>
-        {visible.map((repo, index) => <li id={`${listId}-${index}`} role="option" aria-selected={index === activeIndex} key={repo.fullName}
-          onMouseDown={event => event.preventDefault()} onMouseMove={() => setActiveIndex(index)} onClick={() => select(repo)}>
-          <span>{repo.fullName}</span><small>{repo.private ? "Private" : "Public"}</small>
-        </li>)}
-      </ul>
-      {error ? <div className="github-repo-status"><p role="alert">{error}</p><button type="button" className="text-button" onClick={() => setError("")}>Try again</button> <button type="button" className="text-button" onClick={onOpenSettings}>Connection settings</button></div>
-        : nextPage !== null ? <p className="github-repo-status" role="status">{visible.length ? "Loading more repositories…" : "Loading repositories…"}</p>
-        : !visible.length ? <p className="github-repo-status" role="status">No matches. You can enter a repository manually.</p>
-        : matches.length > visible.length ? <p className="github-repo-status">Keep typing to narrow the results.</p> : null}
-    </div>}
+    <div className="github-repo-input-anchor">
+      <input id={inputId} value={value} disabled={disabled} placeholder="Search or enter owner/repository"
+        aria-describedby="project-github-hint" role={login ? "combobox" : undefined} aria-autocomplete={login ? "list" : undefined}
+        aria-expanded={login ? expanded : undefined} aria-controls={expanded ? listId : undefined}
+        aria-activedescendant={expanded && activeIndex >= 0 && activeIndex < visible.length ? `${listId}-${activeIndex}` : undefined}
+        autoComplete="off" onFocus={show} onClick={show} onKeyDown={handleKeyDown}
+        onChange={event => { onChange(event.target.value); setActiveIndex(-1); show() }} />
+      {expanded && <div className="github-repo-dropdown">
+        <ul className="github-repo-results" id={listId} role="listbox" aria-label="GitHub repositories" aria-busy={nextPage !== null && !error}>
+          {visible.map((repo, index) => <li id={`${listId}-${index}`} role="option" aria-selected={index === activeIndex} key={repo.fullName}
+            onMouseDown={event => event.preventDefault()} onMouseMove={() => setActiveIndex(index)} onClick={() => select(repo)}>
+            <span>{repo.fullName}</span><small>{repo.private ? "Private" : "Public"}</small>
+          </li>)}
+        </ul>
+        {error ? <div className="github-repo-status"><p role="alert">{error}</p><button type="button" className="text-button" onClick={() => setError("")}>Try again</button> {onOpenSettings ? <button type="button" className="text-button" onClick={onOpenSettings}>Connection settings</button> : null}</div>
+          : nextPage !== null ? <p className="github-repo-status" role="status">{visible.length ? "Loading more repositories…" : "Loading repositories…"}</p>
+          : !visible.length ? <p className="github-repo-status" role="status">No matches. Enter a repository manually or create one below.</p>
+          : matches.length > visible.length ? <p className="github-repo-status">Keep typing to narrow the results.</p> : null}
+        <div className="github-repo-footer">
+          <button type="button" className="text-button" onMouseDown={e => e.preventDefault()} onClick={openCreateForm}>
+            <Plus size={12} /> Create new repository on GitHub{value.trim() ? `: "${repositoryName(value.trim())}"` : ""}
+          </button>
+        </div>
+      </div>}
+    </div>
+
+    <div className="github-repo-create-row" style={{ marginTop: 6 }}>
+      {!login && onQuickConnect ? (
+        <button
+          type="button"
+          className="text-button"
+          disabled={disabled || connecting}
+          onClick={async () => {
+            setConnecting(true)
+            try { await onQuickConnect() } finally { setConnecting(false) }
+          }}
+        >
+          {connecting ? "Connecting GitHub CLI…" : "Connect GitHub CLI to search"}
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="text-button"
+        disabled={disabled}
+        onClick={() => (creatingOpen ? setCreatingOpen(false) : openCreateForm())}
+      >
+        <Plus size={12} /> {creatingOpen ? "Hide create repo" : "Create new repo on GitHub"}
+      </button>
+    </div>
+
+    {creatingOpen ? (
+      <div className="github-repo-create-box">
+        <div style={{ fontSize: 12, fontWeight: 600 }}>Create new GitHub repository</div>
+        {createError ? <p className="error" role="alert" style={{ margin: 0 }}>{createError}</p> : null}
+        <input
+          value={newRepoName}
+          placeholder="repository-name (or org/repository-name)"
+          disabled={creatingBusy}
+          onChange={e => setNewRepoName(e.target.value)}
+        />
+        <input
+          value={newRepoDesc}
+          placeholder="Short description (optional)"
+          disabled={creatingBusy}
+          onChange={e => setNewRepoDesc(e.target.value)}
+        />
+        <div className="github-repo-create-row">
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <label style={{ display: "inline-flex", gap: 4, alignItems: "center", margin: 0, cursor: "pointer" }}>
+              <input
+                type="radio"
+                name={`vis-${listId}`}
+                checked={newRepoVisibility === "private"}
+                onChange={() => setNewRepoVisibility("private")}
+                style={{ width: "auto", height: "auto" }}
+              />
+              Private
+            </label>
+            <label style={{ display: "inline-flex", gap: 4, alignItems: "center", margin: 0, cursor: "pointer" }}>
+              <input
+                type="radio"
+                name={`vis-${listId}`}
+                checked={newRepoVisibility === "public"}
+                onChange={() => setNewRepoVisibility("public")}
+                style={{ width: "auto", height: "auto" }}
+              />
+              Public
+            </label>
+            <label style={{ display: "inline-flex", gap: 4, alignItems: "center", margin: 0, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={newRepoReadme}
+                onChange={e => setNewRepoReadme(e.target.checked)}
+                style={{ width: "auto", height: "auto" }}
+              />
+              README
+            </label>
+          </div>
+          <button
+            type="button"
+            className="action-button"
+            disabled={creatingBusy || !newRepoName.trim()}
+            onClick={() => void handleCreateRepo()}
+          >
+            {creatingBusy ? "Creating…" : "Create & Link"}
+          </button>
+        </div>
+      </div>
+    ) : null}
   </div>
 }
 
-export function ProjectSettings({ project, open, initialDraft, githubConnection, githubStatusError, onSave, onClose, onOpenSettings, onSearchRepositories }: {
-  project: Project; open: boolean; onSave: (input: ProjectInput) => Promise<Project>; onClose: () => void
+export function ProjectSettings({ project, open, initialDraft, githubConnection, githubStatusError, environmentName, onSave, onClose, onOpenSettings, onSearchRepositories }: {
+  project: Project; open: boolean; environmentName?: string; onSave: (input: ProjectInput) => Promise<Project>; onClose: () => void
   initialDraft?: ProjectInput; githubConnection: GitHubConnection | null; githubStatusError: string
   onOpenSettings: (draft: ProjectInput) => void
   onSearchRepositories: SearchGitHubRepositories
@@ -137,12 +333,19 @@ export function ProjectSettings({ project, open, initialDraft, githubConnection,
   const [name, setName] = useState(initialDraft?.name ?? project.name)
   const [githubUrl, setGithubUrl] = useState(repositoryName(initialDraft?.githubUrl ?? project.githubUrl ?? ""))
   const [repository, setRepository] = useState(initialDraft?.repository ?? project.repository ?? "")
+  const [blueprintId, setBlueprintId] = useState(initialDraft?.blueprintId ?? project.blueprintId ?? "automated-factory")
+  const [modelProfile, setModelProfile] = useState(initialDraft?.modelProfile ?? project.modelProfile ?? "balanced")
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState("")
   const [saved, setSaved] = useState(false)
   const githubAccount = githubConnection?.login ?? null
-  const dirty = name !== project.name || githubUrl !== repositoryName(project.githubUrl ?? "") || repository !== (project.repository ?? "")
-  const openConnectionSettings = () => onOpenSettings({ id: project.id, name, githubUrl, repository })
+  const dirty =
+    name !== project.name ||
+    githubUrl !== repositoryName(project.githubUrl ?? "") ||
+    repository !== (project.repository ?? "") ||
+    blueprintId !== (project.blueprintId ?? "automated-factory") ||
+    modelProfile !== (project.modelProfile ?? "balanced")
+  const openConnectionSettings = () => onOpenSettings({ id: project.id, name, githubUrl, repository, blueprintId, modelProfile })
   const searchableAccount = githubStatusError ? null : githubAccount
 
   async function save(event: FormEvent<HTMLFormElement>) {
@@ -151,10 +354,19 @@ export function ProjectSettings({ project, open, initialDraft, githubConnection,
     setSaving(true)
     setSaveError("")
     try {
-      const updated = await onSave({ id: project.id, name: name.trim(), githubUrl: githubUrl.trim(), repository: repository.trim() })
+      const updated = await onSave({
+        id: project.id,
+        name: name.trim(),
+        githubUrl: githubUrl.trim(),
+        repository: repository.trim(),
+        blueprintId,
+        modelProfile,
+      })
       setName(updated.name)
       setGithubUrl(repositoryName(updated.githubUrl ?? ""))
       setRepository(updated.repository ?? "")
+      setBlueprintId(updated.blueprintId ?? "automated-factory")
+      setModelProfile(updated.modelProfile ?? "balanced")
       setSaved(true)
     } catch (cause) {
       setSaveError(cause instanceof Error ? cause.message : "Could not save this project.")
@@ -164,12 +376,13 @@ export function ProjectSettings({ project, open, initialDraft, githubConnection,
   return <aside id="project-settings" className="inspector project-settings" aria-labelledby="project-settings-title" hidden={!open}>
     <div className="panel-title"><h2 id="project-settings-title">Project settings</h2><button className="icon-button" aria-label="Close project settings" onClick={onClose}><PanelRight size={16} /></button></div>
     <form className="project-form" onSubmit={save}>
+      <div className="project-environment-label"><span>Environment</span><strong>{environmentName ?? "This computer"}</strong><small>New sessions inherit this project’s environment.</small></div>
       <label>Project name<input value={name} onChange={event => setName(event.target.value)} maxLength={100} required disabled={saving} /></label>
       <div className="project-field">
         <label htmlFor="project-github-repo">GitHub repository <small>Optional</small></label>
         <GitHubRepositoryPicker key={`${searchableAccount ?? "none"}:${open}`} login={searchableAccount} value={githubUrl} disabled={saving}
           onChange={setGithubUrl} onOpenSettings={openConnectionSettings} onSearch={onSearchRepositories} />
-        <p id="project-github-hint" className="hint">Choose a repository or enter its URL. This does not clone it.</p>
+        <p id="project-github-hint" className="hint">Search existing repositories, enter a URL, or create a new repository on GitHub.</p>
         {!githubConnection && !githubStatusError ? <p className="hint" role="status">Checking GitHub connection…</p> : !githubAccount || githubStatusError ? <>
           <p className="hint">{githubStatusError ? "GitHub connection is unavailable." : "Connect GitHub in Settings to search repositories."}</p>
           <button type="button" className="text-button project-link" disabled={saving} onClick={openConnectionSettings}>Open connection settings</button>
@@ -177,8 +390,31 @@ export function ProjectSettings({ project, open, initialDraft, githubConnection,
         {project.githubUrl && <a className="text-button project-link" href={project.githubUrl} target="_blank" rel="noreferrer">Open on GitHub <ArrowUpRight size={13} /></a>}
       </div>
       <div className="project-field">
-        <label>Default local checkout <small>Optional</small><input value={repository} onChange={event => setRepository(event.target.value)} placeholder="C:\Code\your-repository" aria-describedby="project-checkout-hint" disabled={saving} /></label>
-        <p id="project-checkout-hint" className="hint">Applies to new sessions only.</p>
+        <label>Default local checkout <small>Optional</small><input value={repository} onChange={event => setRepository(event.target.value)} placeholder="/Users/you/Code/your-repository" aria-describedby="project-checkout-hint" disabled={saving} /></label>
+        <p id="project-checkout-hint" className="hint">Applies to new sessions and Factory runs.</p>
+      </div>
+      <div className="project-field">
+        <label>
+          Factory Blueprint
+          <select className="sf-field" style={{ marginTop: 6 }} value={blueprintId} onChange={e => setBlueprintId(e.target.value)} disabled={saving}>
+            {BUILTIN_BLUEPRINTS.map(bp => (
+              <option key={bp.id} value={bp.id}>{bp.name}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="project-field">
+        <label>
+          Model Profile
+          <select className="sf-field" style={{ marginTop: 6 }} value={modelProfile} onChange={e => setModelProfile(e.target.value)} disabled={saving}>
+            <option value="balanced">Balanced</option>
+            <option value="max-quality">Max Quality</option>
+            <option value="budget">Budget / Fast</option>
+            <option value="eu-only">EU Data Residency (GDPR)</option>
+            <option value="eu-sovereign">EU Sovereign (CLOUD-Act-Free)</option>
+            <option value="local-ollama">Local / Ollama ($0)</option>
+          </select>
+        </label>
       </div>
       {saveError && <p className="error" role="alert">{saveError}</p>}
       <div className="form-actions"><button className="action-button" disabled={saving || !dirty || !name.trim()}>{saving ? "Saving…" : "Save changes"}</button>{saved && !dirty && <span className="hint" role="status">Saved</span>}</div>

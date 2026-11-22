@@ -4,11 +4,15 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/dev.mjs",
+    "dev": "node scripts/dev.ts",
+    "postinstall": "node scripts/fix-node-pty-permissions.ts",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test:runtime": "node --test runtime/*.test.mjs",
-    "test:ui": "node --test --test-concurrency=1 scripts/*.test.mjs",
+    "test:core": "node --test packages/captain-core/*.test.ts",
+    "test:factory": "node --test runtime/factory-runner.test.ts runtime/factory-pi-executor.test.ts",
+    "test:platform": "node --test packages/host-remote/platform.test.ts",
+    "test:runtime": "node --test runtime/*.test.ts",
+    "test:ui": "node --test --test-concurrency=1 scripts/*.test.ts",
     "preview": "vite preview",
     "tauri": "tauri"
   },
@@ -19,13 +23,25 @@
     "@earendil-works/pi-durable": "file:runtime/vendor/earendil-works-pi-durable-1.5.2.tgz",
     "@earendil-works/pi-schema": "file:runtime/vendor/earendil-works-pi-schema-1.5.2.tgz",
     "@earendil-works/pi-telemetry": "file:runtime/vendor/earendil-works-pi-telemetry-1.5.2.tgz",
+    "@radix-ui/react-dialog": "^1.3.1",
+    "@radix-ui/react-select": "^2.4.1",
+    "@radix-ui/react-slot": "^1.5.0",
+    "@radix-ui/react-tabs": "^1.2.1",
+    "@tailwindcss/vite": "^4.3.5",
     "@tauri-apps/api": "^2.0.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
+    "node-pty": "^1.1.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-markdown": "^10.1.0",
     "rehype-highlight": "^7.0.2",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^3.7.1",
+    "tailwindcss": "^4.3.5"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
@@ -37,5 +53,8 @@
     "oxlint": "^1.90.0",
     "typescript": "~7.0.2",
     "vite": "^8.3.6"
+  },
+  "allowScripts": {
+    "node-pty@1.1.0": true
   }
 }
