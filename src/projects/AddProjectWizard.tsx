@@ -1,33 +1,12 @@
 import { useCallback, useEffect, useState } from "react"
-import {
-  ArrowLeft,
-  ChevronRight,
-  Folder,
-  FolderGit2,
-  FolderOpen,
-  FolderPlus,
-  GitBranch,
-  Link2,
-  Sparkles,
-  X,
-} from "lucide-react"
+import { ArrowLeft, ChevronRight, FolderOpen, FolderPlus, GitBranch, Link2, Sparkles, X } from "lucide-react"
 import { request } from "../../api"
 import type { ModelProfileId } from "../../app-types"
 import { BUILTIN_BLUEPRINTS } from "../../packages/blueprints/index.ts"
-import {
-  GitHubRepositoryPicker,
-  type GitHubRepositoryPage,
-  type Project,
-} from "../../ProjectsView"
+import type { GitHubRepositoryPage, Project } from "../../ProjectsView"
+import { AddProjectSourceFields, type DirBrowserState } from "./AddProjectForms"
 
 export type AddProjectSource = "menu" | "github" | "url" | "local" | "scratch"
-
-type DirBrowserState = {
-  currentPath: string
-  parentPath: string | null
-  isGitRepo: boolean
-  entries: { name: string; path: string; isGitRepo: boolean }[]
-}
 
 export function AddProjectWizard({
   open,
@@ -44,31 +23,20 @@ export function AddProjectWizard({
 }) {
   const [source, setSource] = useState<AddProjectSource>(initialSource)
   const [activeGhLogin, setActiveGhLogin] = useState<string | null>(githubLogin)
-
-  // Shared project settings
   const [projectName, setProjectName] = useState("")
   const [blueprintId, setBlueprintId] = useState("automated-factory")
   const [modelProfile, setModelProfile] = useState<ModelProfileId>("balanced")
-
-  // GitHub mode
   const [ghRepo, setGhRepo] = useState("")
   const [cloneLocally, setCloneLocally] = useState(true)
   const [cloneParentDir, setCloneParentDir] = useState("")
-
-  // Git URL mode (GitHub, GitLab, Azure DevOps, Bitbucket, SSH)
   const [gitUrl, setGitUrl] = useState("")
-
-  // Local folder mode
   const [localPath, setLocalPath] = useState("")
   const [detectedGh, setDetectedGh] = useState<string | null>(null)
   const [initGitIfMissing, setInitGitIfMissing] = useState(true)
   const [showBrowser, setShowBrowser] = useState(false)
   const [dirState, setDirState] = useState<DirBrowserState | null>(null)
-
-  // Scratch mode
   const [createOnGitHub, setCreateOnGitHub] = useState(true)
   const [visibility, setVisibility] = useState<"private" | "public">("private")
-
   const [busy, setBusy] = useState(false)
   const [statusMsg, setStatusMsg] = useState("")
   const [error, setError] = useState("")
@@ -89,16 +57,12 @@ export function AddProjectWizard({
       setDirState(res)
       if (!cloneParentDir) setCloneParentDir(res.currentPath)
     } catch (err) {
-      if (!silent) {
-        setError(err instanceof Error ? err.message : "Could not browse local folders.")
-      }
+      if (!silent) setError(err instanceof Error ? err.message : "Could not browse local folders.")
     }
   }, [cloneParentDir])
 
   useEffect(() => {
-    if (open && !cloneParentDir) {
-      void loadDirectory(undefined, true)
-    }
+    if (open && !cloneParentDir) void loadDirectory(undefined, true)
   }, [open, cloneParentDir, loadDirectory])
 
   const searchRepos = useCallback(
@@ -124,6 +88,19 @@ export function AddProjectWizard({
 
   if (!open) return null
 
+  async function detectRemoteForPath(path: string) {
+    try {
+      const res = await request<{ repository: string; githubRepo: string | null }>("/api/projects/detect-git", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path }),
+      })
+      setDetectedGh(res.githubRepo)
+    } catch {
+      setDetectedGh(null)
+    }
+  }
+
   async function pickFolderNative(target: "local" | "parent") {
     setError("")
     try {
@@ -142,22 +119,8 @@ export function AddProjectWizard({
         void detectRemoteForPath(res.path)
       }
     } catch {
-      // Fallback gracefully to the built-in folder browser
       setShowBrowser(true)
       void loadDirectory(target === "parent" ? cloneParentDir : localPath || undefined)
-    }
-  }
-
-  async function detectRemoteForPath(path: string) {
-    try {
-      const res = await request<{ repository: string; githubRepo: string | null }>("/api/projects/detect-git", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ path }),
-      })
-      setDetectedGh(res.githubRepo)
-    } catch {
-      setDetectedGh(null)
     }
   }
 
@@ -265,14 +228,10 @@ export function AddProjectWizard({
             ) : null}
             <div>
               <h2 className="text-[15px] font-semibold">
-                {source === "menu"
-                  ? "Add Project"
-                  : source === "github"
-                    ? "Add from GitHub"
-                    : source === "url"
-                      ? "Add from Git URL"
-                      : source === "local"
-                        ? "Add Local Folder or Repository"
+                {source === "menu" ? "Add Project"
+                  : source === "github" ? "Add from GitHub"
+                    : source === "url" ? "Add from Git URL"
+                      : source === "local" ? "Add Local Folder or Repository"
                         : "New Project from Scratch"}
               </h2>
               <p className="text-xs opacity-65 mt-0.5">
@@ -292,30 +251,10 @@ export function AddProjectWizard({
         {source === "menu" ? (
           <div className="grid gap-2">
             {[
-              {
-                id: "github" as const,
-                icon: <GitBranch className="size-4 text-[rgb(var(--primary))]" />,
-                title: "Add from GitHub",
-                desc: "Search your public/private GitHub repos (or create a new one) and clone locally.",
-              },
-              {
-                id: "url" as const,
-                icon: <Link2 className="size-4 text-sky-400" />,
-                title: "Add from Git URL",
-                desc: "Clone from Azure DevOps, GitLab, Bitbucket, GitHub HTTPS, or SSH URL.",
-              },
-              {
-                id: "local" as const,
-                icon: <FolderOpen className="size-4 text-amber-400" />,
-                title: "Add local folder or repository",
-                desc: "Pick an existing folder on this device, auto-detect GitHub remote, or initialize Git.",
-              },
-              {
-                id: "scratch" as const,
-                icon: <FolderPlus className="size-4 text-emerald-400" />,
-                title: "Create brand-new project",
-                desc: "Create a fresh local folder, run git init, and optionally create a GitHub repo.",
-              },
+              { id: "github" as const, icon: <GitBranch className="size-4 text-[rgb(var(--primary))]" />, title: "Add from GitHub", desc: "Search your public/private GitHub repos (or create a new one) and clone locally." },
+              { id: "url" as const, icon: <Link2 className="size-4 text-sky-400" />, title: "Add from Git URL", desc: "Clone from Azure DevOps, GitLab, Bitbucket, GitHub HTTPS, or SSH URL." },
+              { id: "local" as const, icon: <FolderOpen className="size-4 text-amber-400" />, title: "Add local folder or repository", desc: "Pick an existing folder on this device, auto-detect GitHub remote, or initialize Git." },
+              { id: "scratch" as const, icon: <FolderPlus className="size-4 text-emerald-400" />, title: "Create brand-new project", desc: "Create a fresh local folder, run git init, and optionally create a GitHub repo." },
             ].map(item => (
               <button
                 key={item.id}
@@ -336,217 +275,49 @@ export function AddProjectWizard({
           </div>
         ) : (
           <div className="grid gap-3.5">
-            {source === "github" ? (
-              <>
-                <div className="sf-label">
-                  <span>GitHub Repository</span>
-                  <GitHubRepositoryPicker
-                    inputId="wizard-github-repo"
-                    login={activeGhLogin}
-                    value={ghRepo}
-                    disabled={busy}
-                    onChange={val => {
-                      setGhRepo(val)
-                      if (!projectName.trim() && val.includes("/")) {
-                        setProjectName(val.split("/").pop() || "")
-                      }
-                    }}
-                    onSearch={searchRepos}
-                    onQuickConnect={quickConnectGh}
-                  />
-                </div>
-                <label className="flex items-center gap-2 text-xs cursor-pointer">
-                  <input type="checkbox" checked={cloneLocally} onChange={e => setCloneLocally(e.target.checked)} />
-                  <span>Clone repository locally into workspace folder</span>
-                </label>
-                {cloneLocally ? (
-                  <div className="sf-label">
-                    <span>Clone into parent folder</span>
-                    <div className="flex gap-2">
-                      <input
-                        className="sf-field flex-1"
-                        value={cloneParentDir}
-                        onChange={e => setCloneParentDir(e.target.value)}
-                        placeholder="/Users/you/Code"
-                      />
-                      <button type="button" className="sf-btn-secondary" onClick={() => void pickFolderNative("parent")}>
-                        <Folder className="size-3.5" /> Browse…
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-              </>
-            ) : null}
+            <AddProjectSourceFields
+              source={source}
+              busy={busy}
+              activeGhLogin={activeGhLogin}
+              ghRepo={ghRepo}
+              cloneLocally={cloneLocally}
+              cloneParentDir={cloneParentDir}
+              gitUrl={gitUrl}
+              localPath={localPath}
+              detectedGh={detectedGh}
+              initGitIfMissing={initGitIfMissing}
+              showBrowser={showBrowser}
+              dirState={dirState}
+              projectName={projectName}
+              createOnGitHub={createOnGitHub}
+              visibility={visibility}
+              onGhRepoChange={setGhRepo}
+              onCloneLocallyChange={setCloneLocally}
+              onCloneParentDirChange={setCloneParentDir}
+              onGitUrlChange={setGitUrl}
+              onLocalPathChange={setLocalPath}
+              onProjectNameChange={setProjectName}
+              onInitGitChange={setInitGitIfMissing}
+              onToggleBrowser={() => {
+                setShowBrowser(v => !v)
+                if (!showBrowser) void loadDirectory(localPath || undefined)
+              }}
+              onCreateOnGitHubChange={setCreateOnGitHub}
+              onVisibilityChange={setVisibility}
+              onSearchRepos={searchRepos}
+              onQuickConnectGh={quickConnectGh}
+              onPickFolderNative={target => void pickFolderNative(target)}
+              onDetectRemote={path => void detectRemoteForPath(path)}
+              onLoadDirectory={path => void loadDirectory(path)}
+              onUseBrowserFolder={path => {
+                setLocalPath(path)
+                const nm = path.split(/[\\/]/).filter(Boolean).pop() ?? ""
+                if (!projectName.trim() && nm) setProjectName(nm)
+                setShowBrowser(false)
+                void detectRemoteForPath(path)
+              }}
+            />
 
-            {source === "url" ? (
-              <>
-                <label className="sf-label">
-                  <span>Git Repository URL (GitHub, Azure DevOps, GitLab, SSH)</span>
-                  <input
-                    className="sf-field"
-                    placeholder="https://dev.azure.com/org/proj/_git/repo  or  git@github.com:org/repo.git"
-                    value={gitUrl}
-                    onChange={e => {
-                      setGitUrl(e.target.value)
-                      const tail = e.target.value.trim().replace(/\/+$/, "").replace(/\.git$/i, "").split(/[/:]/).pop()
-                      if (!projectName.trim() && tail && /^[a-z0-9._-]+$/i.test(tail)) setProjectName(tail)
-                    }}
-                    autoFocus
-                  />
-                </label>
-                <div className="sf-label">
-                  <span>Clone into parent folder</span>
-                  <div className="flex gap-2">
-                    <input
-                      className="sf-field flex-1"
-                      value={cloneParentDir}
-                      onChange={e => setCloneParentDir(e.target.value)}
-                      placeholder="/Users/you/Code"
-                    />
-                    <button type="button" className="sf-btn-secondary" onClick={() => void pickFolderNative("parent")}>
-                      <Folder className="size-3.5" /> Browse…
-                    </button>
-                  </div>
-                </div>
-              </>
-            ) : null}
-
-            {source === "local" ? (
-              <>
-                <div className="sf-label">
-                  <span>Local Folder or Repository</span>
-                  <div className="flex gap-2">
-                    <input
-                      className="sf-field flex-1"
-                      placeholder="/Users/you/Code/my-project"
-                      value={localPath}
-                      onChange={e => setLocalPath(e.target.value)}
-                      onBlur={() => { if (localPath.trim()) void detectRemoteForPath(localPath.trim()) }}
-                      autoFocus
-                    />
-                    <button type="button" className="sf-btn-secondary" onClick={() => void pickFolderNative("local")}>
-                      <FolderOpen className="size-3.5" /> Browse…
-                    </button>
-                    <button
-                      type="button"
-                      className="sf-btn-ghost"
-                      onClick={() => {
-                        setShowBrowser(v => !v)
-                        if (!showBrowser) void loadDirectory(localPath || undefined)
-                      }}
-                    >
-                      Tree
-                    </button>
-                  </div>
-                  {detectedGh ? (
-                    <span className="text-[11px] text-emerald-400">
-                      Detected GitHub remote: <code>{detectedGh}</code>
-                    </span>
-                  ) : null}
-                </div>
-
-                {showBrowser && dirState ? (
-                  <div className="rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] overflow-hidden text-xs">
-                    <div className="px-3 py-2 border-b border-[rgb(var(--border)/0.7)] flex items-center justify-between gap-2 font-mono text-[11px]">
-                      <span className="truncate">{dirState.currentPath}</span>
-                      <div className="flex gap-1.5 shrink-0">
-                        {dirState.parentPath ? (
-                          <button type="button" className="sf-btn-ghost !h-6 !px-2 !text-[11px]" onClick={() => void loadDirectory(dirState.parentPath!)}>
-                            Up
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="sf-btn-primary !h-6 !px-2 !text-[11px]"
-                          onClick={() => {
-                            setLocalPath(dirState.currentPath)
-                            const nm = dirState.currentPath.split(/[\\/]/).filter(Boolean).pop() ?? ""
-                            if (!projectName.trim() && nm) setProjectName(nm)
-                            setShowBrowser(false)
-                            void detectRemoteForPath(dirState.currentPath)
-                          }}
-                        >
-                          Use This Folder
-                        </button>
-                      </div>
-                    </div>
-                    <div className="max-h-40 overflow-y-auto divide-y divide-[rgb(var(--border)/0.45)]">
-                      {dirState.entries.map(entry => (
-                        <button
-                          key={entry.path}
-                          type="button"
-                          className="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-[rgb(var(--surface-raised))]"
-                          onClick={() => void loadDirectory(entry.path)}
-                        >
-                          <span className="flex items-center gap-2 truncate">
-                            {entry.isGitRepo ? <FolderGit2 className="size-3.5 text-[rgb(var(--primary))]" /> : <Folder className="size-3.5 opacity-60" />}
-                            <span>{entry.name}</span>
-                          </span>
-                          {entry.isGitRepo ? <span className="sf-badge sf-badge-ok">Git</span> : null}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                <label className="flex items-center gap-2 text-xs cursor-pointer">
-                  <input type="checkbox" checked={initGitIfMissing} onChange={e => setInitGitIfMissing(e.target.checked)} />
-                  <span>Run <code>git init</code> automatically if this folder is not a Git repository yet</span>
-                </label>
-              </>
-            ) : null}
-
-            {source === "scratch" ? (
-              <>
-                <label className="sf-label">
-                  <span>Project Name *</span>
-                  <input
-                    className="sf-field"
-                    placeholder="my-awesome-service"
-                    value={projectName}
-                    onChange={e => setProjectName(e.target.value)}
-                    autoFocus
-                  />
-                </label>
-                <div className="sf-label">
-                  <span>Create inside folder</span>
-                  <div className="flex gap-2">
-                    <input
-                      className="sf-field flex-1"
-                      value={cloneParentDir}
-                      onChange={e => setCloneParentDir(e.target.value)}
-                    />
-                    <button type="button" className="sf-btn-secondary" onClick={() => void pickFolderNative("parent")}>
-                      <Folder className="size-3.5" /> Browse…
-                    </button>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={createOnGitHub} onChange={e => setCreateOnGitHub(e.target.checked)} />
-                    <span>Also create repository on GitHub</span>
-                  </label>
-                  {createOnGitHub ? (
-                    <div className="sf-segmented">
-                      <button type="button" className={`sf-seg-btn !h-6 !text-[11px] ${visibility === "private" ? "is-active" : ""}`} onClick={() => setVisibility("private")}>Private</button>
-                      <button type="button" className={`sf-seg-btn !h-6 !text-[11px] ${visibility === "public" ? "is-active" : ""}`} onClick={() => setVisibility("public")}>Public</button>
-                    </div>
-                  ) : null}
-                </div>
-              </>
-            ) : (
-              <label className="sf-label">
-                <span>Project Display Name</span>
-                <input
-                  className="sf-field"
-                  placeholder="Auto-filled from repository name"
-                  value={projectName}
-                  onChange={e => setProjectName(e.target.value)}
-                />
-              </label>
-            )}
-
-            {/* Project-Level Blueprint & Model Defaults */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-[rgb(var(--border)/0.75)]">
               <label className="sf-label">
                 <span>Default Factory Blueprint</span>

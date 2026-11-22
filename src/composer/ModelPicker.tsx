@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Check, ChevronDown, ChevronUp, Search, Shield, ShieldAlert, ShieldOff, Star } from "lucide-react"
+import { Check, ChevronDown, Search, Star } from "lucide-react"
 import type { ApprovalPolicy, ProviderCatalogEntry } from "../../app-types"
+import { ProviderGlyph } from "./ProviderGlyph"
+import { ModelPickerFooter } from "./ModelPickerFooter"
+
+export { ProviderGlyph }
 
 const FAVORITES_STORAGE_KEY = "ade.favorite-models-v1"
 
@@ -13,13 +17,7 @@ const THINKING_LEVELS: { value: string; label: string }[] = [
   { value: "max", label: "Max" },
 ]
 
-const ACCESS_OPTIONS: { value: ApprovalPolicy; label: string; description: string }[] = [
-  { value: "auto-all", label: "Full access", description: "Run commands without pausing" },
-  { value: "auto-safe", label: "Auto-safe", description: "Auto-allow read-only commands" },
-  { value: "ask", label: "Ask every cmd", description: "Require approval for every command" },
-]
-
-type FavoriteKey = string // `${provider}::${modelId}`
+type FavoriteKey = string
 
 function loadFavorites(): FavoriteKey[] {
   try {
@@ -36,116 +34,8 @@ function saveFavorites(list: FavoriteKey[]) {
   try {
     localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(list))
   } catch (err) {
-    // localStorage may be unavailable in private browsing or when quota is exceeded.
     console.warn("[ADE] Could not persist model favorites:", err instanceof Error ? err.message : String(err))
   }
-}
-
-export function ProviderGlyph({ provider, size = 16 }: { provider: string; size?: number }) {
-  if (provider === "anthropic" || provider === "claude") {
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0">
-        <g stroke="#d97757" strokeWidth="2.1" strokeLinecap="round">
-          <line x1="12" y1="3" x2="12" y2="21" />
-          <line x1="3" y1="12" x2="21" y2="12" />
-          <line x1="5.6" y1="5.6" x2="18.4" y2="18.4" />
-          <line x1="18.4" y1="5.6" x2="5.6" y2="18.4" />
-        </g>
-      </svg>
-    )
-  }
-  if (provider === "openai" || provider === "codex") {
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0">
-        <rect x="4" y="3" width="16" height="18" rx="3" stroke="currentColor" strokeWidth="2.2" />
-        <rect x="8.5" y="7.5" width="7" height="9" rx="1" fill="currentColor" opacity="0.55" />
-      </svg>
-    )
-  }
-  if (provider === "github-copilot" || provider === "copilot") {
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0">
-        <path
-          d="M6.5 10.5C6.5 7.5 8.8 5.5 12 5.5C15.2 5.5 17.5 7.5 17.5 10.5V15.5C17.5 17 16.3 18 14.8 18H9.2C7.7 18 6.5 17 6.5 15.5V10.5Z"
-          stroke="currentColor"
-          strokeWidth="1.9"
-        />
-        <circle cx="9.8" cy="12" r="1.4" fill="currentColor" />
-        <circle cx="14.2" cy="12" r="1.4" fill="currentColor" />
-        <path d="M4 11.5V14.5M20 11.5V14.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      </svg>
-    )
-  }
-  if (provider === "radius" || provider === "pi") {
-    return (
-      <svg width={size} height={size} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" className="shrink-0">
-        <rect x="3" y="3" width="4.2" height="14" rx="0.6" />
-        <rect x="3" y="3" width="10.5" height="4.2" rx="0.6" />
-        <rect x="9.3" y="7.2" width="4.2" height="4.2" rx="0.6" />
-        <rect x="13.5" y="12.5" width="3.5" height="4.5" rx="0.6" />
-      </svg>
-    )
-  }
-  if (provider === "oh-my-pi") {
-    return (
-      <svg width={size} height={size} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" className="shrink-0">
-        <rect x="2.5" y="4" width="3.8" height="12.5" rx="0.6" />
-        <rect x="2.5" y="4" width="9.5" height="3.8" rx="0.6" />
-        <rect x="8.2" y="7.8" width="3.8" height="3.8" rx="0.6" />
-        <circle cx="15.5" cy="5.5" r="2.1" fill="#d97757" />
-        <rect x="12.8" y="12.2" width="3.8" height="4.3" rx="0.6" />
-      </svg>
-    )
-  }
-  if (provider === "opencode") {
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0">
-        <rect x="3.5" y="4.5" width="17" height="15" rx="3" stroke="currentColor" strokeWidth="2" />
-        <path d="M8 9.5L11 12L8 14.5M12.5 14.5H16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    )
-  }
-  if (provider === "antigravity") {
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0">
-        <path d="M12 3.5L19 19.5H15.2L12 11.8L8.8 19.5H5L12 3.5Z" stroke="currentColor" strokeWidth="1.9" strokeLinejoin="round" />
-      </svg>
-    )
-  }
-  if (provider === "muse-code") {
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0">
-        <path d="M4.5 18V6L12 13L19.5 6V18" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    )
-  }
-  if (provider === "hermes") {
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0">
-        <path d="M13 3L5.5 13H12L11 21L18.5 11H12L13 3Z" stroke="currentColor" strokeWidth="1.9" strokeLinejoin="round" />
-      </svg>
-    )
-  }
-  if (provider === "cursor") {
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0">
-        <path d="M5.5 4L18.5 11.2L12.3 13.1L10.1 19.5L5.5 4Z" stroke="currentColor" strokeWidth="1.9" strokeLinejoin="round" />
-      </svg>
-    )
-  }
-  if (provider === "devin") {
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0">
-        <path d="M6 5H12.5C16.2 5 18.5 7.7 18.5 12C18.5 16.3 16.2 19 12.5 19H6V5Z" stroke="currentColor" strokeWidth="2.1" strokeLinejoin="round" />
-      </svg>
-    )
-  }
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0">
-      <circle cx="12" cy="12" r="7.5" stroke="currentColor" strokeWidth="2" />
-      <circle cx="12" cy="12" r="2.5" fill="currentColor" />
-    </svg>
-  )
 }
 
 function shortModelLabel(name: string): string {
@@ -213,7 +103,6 @@ export function ModelPicker({
     })
   }, [catalog])
 
-  // Keep activeTab synced when opening
   const openPicker = () => {
     const nextTab = orderedCatalog.some(p => p.id === selectedProvider)
       ? selectedProvider
@@ -226,7 +115,6 @@ export function ModelPicker({
     setTimeout(() => searchRef.current?.focus(), 10)
   }
 
-  // Close on outside click
   useEffect(() => {
     if (!open) return
     const onPointerDown = (e: MouseEvent) => {
@@ -269,7 +157,6 @@ export function ModelPicker({
   const visibleEntries = useMemo<ModelEntry[]>(() => {
     const q = query.trim().toLowerCase()
     if (q) {
-      // Search across ALL providers when typing
       return allEntries.filter(
         e => e.name.toLowerCase().includes(q) || e.id.toLowerCase().includes(q) || e.provider.toLowerCase().includes(q),
       )
@@ -278,7 +165,6 @@ export function ModelPicker({
       const favSet = new Set(favorites)
       const pinned = allEntries.filter(e => favSet.has(`${e.provider}::${e.id}`))
       if (pinned.length > 0) return pinned
-      // If user has no stars yet, show quick picks across all enabled providers
       return orderedCatalog.flatMap(p => {
         if (p.models.length === 0) {
           return [{
@@ -339,7 +225,6 @@ export function ModelPicker({
     setOpen(false)
   }
 
-  // Keyboard shortcuts while open (Cmd+1..9, arrows, Enter, Escape)
   useEffect(() => {
     if (!open) return
     const onKeyDown = (e: KeyboardEvent) => {
@@ -382,10 +267,6 @@ export function ModelPicker({
   const highlightedEntry = visibleEntries[highlightIndex]
   const rightHeaderModelName = shortModelLabel((highlightedEntry && !highlightedEntry.isDefault ? highlightedEntry.name : triggerModelName))
   const effectiveReasoning = reasoning === "off" ? "none" : reasoning
-
-  const currentAccess = ACCESS_OPTIONS.find(a => a.value === (approvalPolicy ?? "auto-safe")) ?? ACCESS_OPTIONS[1]
-  const AccessIcon = currentAccess.value === "auto-all" ? ShieldOff : currentAccess.value === "ask" ? ShieldAlert : Shield
-
   const activeProviderMeta = activeTab !== "favorites" ? orderedCatalog.find(p => p.id === activeTab) : null
 
   return (
@@ -411,7 +292,6 @@ export function ModelPicker({
           aria-label="Select model and thinking level"
         >
           <div className="ade-mp-columns">
-            {/* Left Vertical Provider Rail */}
             <nav className="ade-mp-rail" aria-label="Model providers">
               <button
                 type="button"
@@ -435,7 +315,6 @@ export function ModelPicker({
               ))}
             </nav>
 
-            {/* Middle Searchable Model List */}
             <div className="ade-mp-models-col">
               <div className="ade-mp-search-wrap">
                 <Search className="size-3.5 opacity-55 shrink-0" />
@@ -460,11 +339,7 @@ export function ModelPicker({
                           : "No models available."}
                     </p>
                     {onOpenSettings && activeProviderMeta && !activeProviderMeta.configured ? (
-                      <button
-                        type="button"
-                        className="ade-chip-btn"
-                        onClick={() => { setOpen(false); onOpenSettings() }}
-                      >
+                      <button type="button" className="ade-chip-btn" onClick={() => { setOpen(false); onOpenSettings() }}>
                         Configure in Settings
                       </button>
                     ) : null}
@@ -485,26 +360,19 @@ export function ModelPicker({
                       >
                         <ProviderGlyph provider={entry.provider} size={15} />
                         <span className="ade-mp-row-name ade-truncate" title={entry.name}>{entry.name}</span>
-                        {entry.providerLabel ? (
-                          <span className="ade-mp-row-provider ade-truncate">{entry.providerLabel}</span>
-                        ) : null}
+                        {entry.providerLabel ? <span className="ade-mp-row-provider ade-truncate">{entry.providerLabel}</span> : null}
                         <div className="ade-mp-row-right">
                           {!entry.isDefault ? (
                             <button
                               type="button"
                               className={`ade-mp-star-btn ${isFav ? "is-fav" : ""}`}
                               title={isFav ? "Unpin favorite" : "Pin to favorites"}
-                              onClick={e => {
-                                e.stopPropagation()
-                                toggleFavorite(entry.provider, entry.id)
-                              }}
+                              onClick={e => { e.stopPropagation(); toggleFavorite(entry.provider, entry.id) }}
                             >
                               <Star className="size-3" fill={isFav ? "currentColor" : "none"} />
                             </button>
                           ) : null}
-                          {idx < 9 ? (
-                            <kbd className="ade-mp-shortcut">⌘{idx + 1}</kbd>
-                          ) : null}
+                          {idx < 9 ? <kbd className="ade-mp-shortcut">⌘{idx + 1}</kbd> : null}
                         </div>
                       </div>
                     )
@@ -513,7 +381,6 @@ export function ModelPicker({
               </div>
             </div>
 
-            {/* Right Thinking Level Column */}
             <div className="ade-mp-thinking-col" aria-label="Thinking level">
               <div className="ade-mp-thinking-head">
                 <span>Thinking</span>
@@ -541,50 +408,13 @@ export function ModelPicker({
             </div>
           </div>
 
-          {/* Bottom Footer Bar (Access / Approval Policy Switcher) */}
-          <div className="ade-mp-footer">
-            <span className="ade-mp-footer-hint">
-              {activeTab === "favorites" ? "Pinned & quick-pick models" : activeProviderMeta?.name ?? ""}
-            </span>
-
-            {onChangeApprovalPolicy ? (
-              <div className="ade-mp-access-wrap">
-                {accessMenuOpen ? (
-                  <div className="ade-mp-access-menu" role="menu">
-                    {ACCESS_OPTIONS.map(opt => (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={currentAccess.value === opt.value}
-                        className={`ade-mp-access-item ${currentAccess.value === opt.value ? "is-selected" : ""}`}
-                        onClick={() => {
-                          onChangeApprovalPolicy(opt.value)
-                          setAccessMenuOpen(false)
-                        }}
-                      >
-                        <div>
-                          <strong>{opt.label}</strong>
-                          <small>{opt.description}</small>
-                        </div>
-                        {currentAccess.value === opt.value ? <Check className="size-3.5 text-[rgb(var(--primary))]" /> : null}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                <button
-                  type="button"
-                  className="ade-mp-access-btn"
-                  onClick={() => setAccessMenuOpen(v => !v)}
-                  title="Change command execution access level"
-                >
-                  <AccessIcon className="size-3.5 opacity-75" />
-                  <span>{currentAccess.label}</span>
-                  <ChevronUp className="size-3 opacity-60" />
-                </button>
-              </div>
-            ) : null}
-          </div>
+          <ModelPickerFooter
+            hint={activeTab === "favorites" ? "Pinned & quick-pick models" : activeProviderMeta?.name ?? ""}
+            approvalPolicy={approvalPolicy}
+            accessMenuOpen={accessMenuOpen}
+            onToggleAccessMenu={() => setAccessMenuOpen(v => !v)}
+            onChangeApprovalPolicy={onChangeApprovalPolicy}
+          />
         </div>
       ) : null}
     </div>
