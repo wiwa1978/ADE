@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import type { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { createModels } from "@earendil-works/pi-ai/models";
 import type { Harness } from "@earendil-works/pi-durable";
+import type { Project as SharedProject } from "../../packages/protocol/index.ts";
 import type { TimelineEntryLike } from "../timeline.ts";
 
 const execFileAsync = promisify(execFile);
@@ -35,16 +36,11 @@ export type ProjectRow = {
 	archivedAt: number | null;
 };
 
-export type SerializedProject = {
-	id: string;
-	name: string;
-	githubUrl: string | null;
-	repository: string | null;
+export type SerializedProject = SharedProject & {
 	blueprintId: string;
 	modelProfile: string;
 	euOnlyMode: boolean;
 	cloudActFree: boolean;
-	stageOverrides?: Record<string, { provider: string; model: string }>;
 	archivedAt: number | null;
 	createdAt: number;
 	updatedAt: number;

@@ -411,3 +411,241 @@ export type TokenSavingsReport = {
   estimatedTokensSaved: number;
   estimatedUsdSaved: number;
 };
+
+// ---------------------------------------------------------------------------
+// Shared Runtime HTTP API Contract Types (imported by both runtime/ and UI)
+// ---------------------------------------------------------------------------
+
+export type Project = {
+  id: string;
+  name: string;
+  githubUrl: string | null;
+  repository: string | null;
+  blueprintId?: string;
+  modelProfile?: string;
+  euOnlyMode?: boolean;
+  cloudActFree?: boolean;
+  stageOverrides?: Record<string, { provider: string; model: string }>;
+  archivedAt?: number | null;
+  createdAt?: number;
+  updatedAt?: number;
+};
+
+export type ProjectInput = {
+  id: string;
+  name: string;
+  githubUrl: string;
+  repository: string;
+  blueprintId?: string;
+  modelProfile?: string;
+  euOnlyMode?: boolean;
+  cloudActFree?: boolean;
+  stageOverrides?: Record<string, { provider: string; model: string }>;
+};
+
+export type GitHubConnection = {
+  login: string | null;
+};
+
+export type GitHubRepository = {
+  fullName: string;
+  private: boolean;
+};
+
+export type GitHubRepositoryPage = {
+  repositories: GitHubRepository[];
+  nextPage: number | null;
+};
+
+export type GitHubIssue = {
+  url: string;
+  repository: string;
+  number: number;
+  title: string;
+  state: "open" | "closed";
+  body: string;
+  truncated: boolean;
+};
+
+export type GitHubIssueSummary = Pick<GitHubIssue, "url" | "repository" | "number" | "title" | "state">;
+
+export type ConversationMessage = {
+  id: string;
+  role: "user" | "assistant" | "error";
+  content: string;
+  status: "pending" | "completed" | "failed" | "blocked";
+  createdAt: number;
+};
+
+export type ConversationWorkspace = {
+  kind: "none" | "checkout" | "worktree" | "existing";
+  path: string | null;
+  repository: string;
+  branch: string | null;
+  status: "provisioning" | "ready" | "attention" | "archived";
+  message: string | null;
+  removed?: boolean;
+};
+
+export type Conversation = {
+  id: string;
+  mode: "coding" | "personal";
+  label: string;
+  environmentId?: string;
+  chatThread?: boolean;
+  projectId?: string | null;
+  githubIssue?: GitHubIssueSummary;
+  status: "working" | "idle";
+  archivedAt?: number | null;
+  workspace?: ConversationWorkspace;
+  messages: ConversationMessage[];
+};
+
+export type CopilotSignIn = {
+  status: "idle" | "waiting" | "complete" | "failed";
+  code?: string;
+  url?: string;
+  message?: string;
+};
+
+export type ModelCredentialProvider = "openai" | "anthropic" | "radius" | "compatible";
+
+export type ModelCredential = {
+  provider: ModelCredentialProvider;
+  source: "saved" | "environment" | "none";
+};
+
+export type EnvironmentSummary = {
+  id: string;
+  name: string;
+  kind: "local" | "ssh";
+  status: "connected" | "disconnected" | "error";
+  active: boolean;
+  sshHost?: string;
+  sshPort?: number;
+  remotePort?: number;
+};
+
+export type EnvironmentDirectory = {
+  activeId: string;
+  environments: EnvironmentSummary[];
+};
+
+export type ProviderCatalogEntry = {
+  id: string;
+  name: string;
+  kind?: "cli" | "api";
+  configured: boolean;
+  enabled?: boolean;
+  defaultModel: string;
+  setupMessage: string;
+  models: { id: string; name: string }[];
+};
+
+export type RuntimeHealth = {
+  online: boolean;
+  harness: string;
+  provider: string;
+  configured: boolean;
+  defaultModel: string;
+  models: { id: string; name: string }[];
+  providers: { id: string; name: string }[];
+  copilotSignedIn: boolean;
+  copilotSignIn?: CopilotSignIn;
+  message: string;
+};
+
+export type ProviderTool = {
+  id: string;
+  name: string;
+  command: string | null;
+  kind: "cli" | "api";
+  install: string | null;
+  installed: boolean;
+  available: boolean;
+  modelCount: number | null;
+  enabled: boolean;
+  models?: { id: string; name: string }[];
+};
+
+export type ApprovalPolicy = "ask" | "auto-safe" | "auto-all";
+
+export type PendingApproval = {
+  id: string;
+  sessionId: string;
+  taskId: string;
+  signalKey: string;
+  toolName: string;
+  summary: string;
+  command?: string;
+  arguments: Record<string, unknown>;
+  suggestedPrefix?: string;
+  createdAt: number;
+};
+
+export type ApprovalRule = {
+  id: string;
+  toolName: string;
+  prefix: string;
+  createdAt: number;
+};
+
+export type ManagedProcessSummary = {
+  id: string;
+  sessionId: string;
+  command: string;
+  cwd: string;
+  background: boolean;
+  status: "running" | "exited" | "killed";
+  exitCode: number | null;
+  startedAt: number;
+  endedAt: number | null;
+  outputTail: string;
+};
+
+export type WorkspaceEntry = {
+  name: string;
+  path: string;
+  kind: "file" | "directory";
+  size?: number;
+};
+
+export type GitFileChange = {
+  path: string;
+  status: "modified" | "added" | "deleted" | "renamed" | "untracked";
+  staged: boolean;
+  unstaged: boolean;
+  additions: number;
+  deletions: number;
+};
+
+export type WorkspaceGitSummary = {
+  isGitRepo: boolean;
+  branch: string | null;
+  ahead: number;
+  behind: number;
+  additions: number;
+  deletions: number;
+  files: GitFileChange[];
+};
+
+export type ArtifactKind = "plan" | "markdown" | "html" | "walkthrough" | "diff";
+export type ArtifactStatus = "draft" | "awaiting_approval" | "approved" | "changes_requested";
+
+export type SessionArtifact = {
+  id: string;
+  sessionId: string;
+  title: string;
+  kind: ArtifactKind;
+  content: string;
+  status: ArtifactStatus;
+  feedback: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type SessionTaskItem = {
+  id: string;
+  title: string;
+  status: "pending" | "in_progress" | "done" | "blocked";
+};

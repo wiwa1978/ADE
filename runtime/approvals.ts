@@ -3,24 +3,12 @@ import type { DatabaseSync } from "node:sqlite";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { defineExtension, defineSignal, hook, ToolTask, type Harness } from "@earendil-works/pi-durable";
 import { bool, obj, opt, str } from "@earendil-works/pi-schema";
+import type { ApprovalPolicy, PendingApproval } from "../packages/protocol/index.ts";
 import type { RuntimeEventBus } from "./events.ts";
 import { runHostMigrations } from "./db/migrations.ts";
 import { badRequest, notFound } from "./http-error.ts";
 
-export type ApprovalPolicy = "ask" | "auto-safe" | "auto-all";
-
-export type PendingApproval = {
-	id: string;
-	sessionId: string;
-	taskId: string;
-	signalKey: string;
-	toolName: string;
-	summary: string;
-	command?: string;
-	arguments: Record<string, unknown>;
-	suggestedPrefix?: string;
-	createdAt: number;
-};
+export type { ApprovalPolicy, PendingApproval };
 
 export const ApprovalSignal = defineSignal({
 	name: "ade.approval.decision",

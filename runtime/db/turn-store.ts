@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import type {
+	Conversation,
+	ConversationMessage,
+	ConversationWorkspace,
+} from "../../packages/protocol/index.ts";
 import { dbAll, dbGet } from "./schema.ts";
 import { MODES, type ChatThreadRow, type CodingTaskRow, type SessionMode, type TurnRow } from "./types.ts";
 
@@ -110,21 +115,21 @@ export class TurnStore {
 		}
 	}
 
-	listSessions(tasks: CodingTaskRow[], chats: ChatThreadRow[], isActiveOrRecovering: (id: string) => boolean) {
+	listSessions(tasks: CodingTaskRow[], chats: ChatThreadRow[], isActiveOrRecovering: (id: string) => boolean): Conversation[] {
 		type SessionDef = { id: string; mode: SessionMode; label: string; task: CodingTaskRow | null; chat: ChatThreadRow | null };
 		const definitions: SessionDef[] = [
 			...(Object.entries(MODES) as [SessionMode, (typeof MODES)[SessionMode]][]).map(([mode, definition]) => ({ id: mode, mode, label: definition.label, task: null, chat: null })),
 			...chats.map(chat => ({ id: chat.id, mode: chat.mode, label: chat.title, task: null, chat })),
 			...tasks.map(task => ({ id: task.id, mode: "coding" as const, label: task.title, task, chat: null })),
 		];
-		return definitions.map(({ id, mode, label, task, chat }) => {
+		return definitions.map(({ id, mode, label, task, chat }): Conversation => {
 			const turns = chat
 				? dbAll<TurnRow>(this.#db, "SELECT * FROM turns WHERE chatId=? ORDER BY createdAt, id", id)
 				: task
 					? dbAll<TurnRow>(this.#db, "SELECT * FROM turns WHERE taskId=? ORDER BY createdAt, id", id)
 					: dbAll<TurnRow>(this.#db, "SELECT * FROM turns WHERE mode=? AND taskId IS NULL AND chatId IS NULL ORDER BY createdAt, id", mode);
-			const messages = turns.flatMap((turn) => {
-				const result = [{
+			const messages: ConversationMessage[] = turns.flatMap((turn) => {
+				const result: ConversationMessage[] = [{
 					id: `${turn.id}:user`,
 					role: "user",
 					content: turn.content,
@@ -148,6 +153,17 @@ export class TurnStore {
 				return result;
 			});
 			const busy = isActiveOrRecovering(id) || turns.some((turn) => turn.status === "pending");
+			const workspace: ConversationWorkspace | undefined = task
+				? {
+					kind: task.kind as ConversationWorkspace["kind"],
+					path: task.worktreeRemoved ? null : task.workspace,
+					repository: task.repository,
+					branch: task.branch,
+					status: (task.worktreeRemoved ? "archived" : task.status) as ConversationWorkspace["status"],
+					message: task.message,
+					removed: Boolean(task.worktreeRemoved),
+				}
+				: undefined;
 			return {
 				id,
 				mode,
@@ -156,8 +172,18 @@ export class TurnStore {
 				...(task ? { projectId: task.projectId } : {}),
 				status: busy ? "working" : "idle",
 				archivedAt: (task ?? chat)?.archivedAt ?? null,
-				...(task ? { workspace: { kind: task.kind, path: task.worktreeRemoved ? null : task.workspace, repository: task.repository, branch: task.branch, status: task.worktreeRemoved ? "archived" : task.status, message: task.message, removed: Boolean(task.worktreeRemoved) } } : {}),
-				...(task?.issueUrl ? { githubIssue: { url: task.issueUrl, repository: task.issueRepository, number: task.issueNumber, title: task.issueTitle, state: task.issueState } } : {}),
+				...(workspace ? { workspace } : {}),
+				...(task?.issueUrl
+					? {
+						githubIssue: {
+							url: task.issueUrl,
+							repository: task.issueRepository ?? "",
+							number: task.issueNumber ?? 0,
+							title: task.issueTitle ?? "",
+							state: (task.issueState === "closed" ? "closed" : "open"),
+						},
+					}
+					: {}),
 				messages,
 			};
 		});

@@ -2,30 +2,17 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { arr, bool, obj, opt, str } from "@earendil-works/pi-schema";
+import type {
+	ArtifactKind,
+	ArtifactStatus,
+	SessionArtifact,
+	SessionTaskItem,
+} from "../packages/protocol/index.ts";
 import type { RuntimeEventBus } from "./events.ts";
 import { runHostMigrations } from "./db/migrations.ts";
 import { notFound } from "./http-error.ts";
 
-export type ArtifactKind = "plan" | "markdown" | "html" | "walkthrough" | "diff";
-export type ArtifactStatus = "draft" | "awaiting_approval" | "approved" | "changes_requested";
-
-export type SessionArtifact = {
-	id: string;
-	sessionId: string;
-	title: string;
-	kind: ArtifactKind;
-	content: string;
-	status: ArtifactStatus;
-	feedback: string | null;
-	createdAt: number;
-	updatedAt: number;
-};
-
-export type SessionTaskItem = {
-	id: string;
-	title: string;
-	status: "pending" | "in_progress" | "done" | "blocked";
-};
+export type { ArtifactKind, ArtifactStatus, SessionArtifact, SessionTaskItem };
 
 export class ArtifactManager {
 	#db: DatabaseSync;

@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { ProviderCatalogEntry, RuntimeHealth } from "../../packages/protocol/index.ts";
 import { copilotId } from "../copilot-auth.ts";
 import { badRequest, conflict, notFound } from "../http-error.ts";
 import { createRuntimeModels, safeErrorMessage } from "../models.ts";
@@ -50,9 +51,9 @@ export class ModelConfigService {
 	 * Providers the Pi Durable harness can run. Installed CLI agents (claude, codex, …) are reported by
 	 * providerTools() for information only; they are not selectable until a CLI harness exists.
 	 */
-	async modelCatalog() {
+	async modelCatalog(): Promise<{ providers: ProviderCatalogEntry[]; defaultProvider?: string }> {
 		const runtimeProviders = this.#runtimeModels?.providers ?? [];
-		const results = [];
+		const results: ProviderCatalogEntry[] = [];
 		for (const p of runtimeProviders) {
 			let config: Pick<ModelConfigResult, "configured" | "availableModels" | "defaultModel" | "setupMessage">;
 			try {
@@ -88,7 +89,7 @@ export class ModelConfigService {
 		return { providers: results, defaultProvider: defaultProvider ?? results[0]?.id };
 	}
 
-	async health(provider?: string) {
+	async health(provider?: string): Promise<RuntimeHealth> {
 		const config = await this.getConfig(provider);
 		return {
 			online: true,
@@ -98,7 +99,7 @@ export class ModelConfigService {
 			defaultModel: config.defaultModel,
 			models: config.availableModels,
 			message: config.setupMessage,
-			providers: this.#runtimeModels?.providers ?? [{ id: config.provider, name: config.provider }],
+			providers: [...(this.#runtimeModels?.providers ?? [{ id: config.provider, name: config.provider }])],
 			copilotSignedIn: config.signedIn ?? false,
 			copilotSignIn: config.provider === copilotId ? this.#runtimeModels?.signIn.status() : undefined,
 		};

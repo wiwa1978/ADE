@@ -1,5 +1,9 @@
-// Re-export shared ADE Software Factory protocol & seam contracts
+// Re-export shared ADE protocol & HTTP API contract types from packages/protocol
 export type {
+  ApprovalPolicy,
+  ApprovalRule,
+  ArtifactKind,
+  ArtifactStatus,
   BlueprintRunState,
   BlueprintRunStatus,
   BlueprintStage,
@@ -7,111 +11,52 @@ export type {
   CaptainEvent,
   CaptainEventType,
   ContextIsolation,
+  Conversation,
+  ConversationMessage,
+  ConversationWorkspace,
+  CopilotSignIn,
   DeploymentFlavor,
+  EnvironmentDirectory,
+  EnvironmentSummary,
   EscalationCard,
   EscalationKind,
   EuCompliancePolicy,
   FactoryBlueprint,
+  GitFileChange,
+  GitHubConnection,
+  GitHubIssue,
+  GitHubIssueSummary,
+  GitHubRepository,
+  GitHubRepositoryPage,
+  ManagedProcessSummary,
+  ModelCredential,
+  ModelCredentialProvider,
   ModelProfileId,
   ModelRef,
   ModelRole,
   ModelRoutingConfig,
+  PendingApproval,
+  Project,
+  ProjectInput,
+  ProviderCatalogEntry,
+  ProviderTool,
   RepoMicroSkill,
   ResolvedModel,
+  RuntimeHealth,
   SandboxHandle,
   SandboxProviderKind,
+  SessionArtifact,
+  SessionTaskItem,
   StageRunState,
   StageStatus,
   StageVerdict,
   TokenSavingsReport,
+  WorkspaceEntry,
+  WorkspaceGitSummary,
 } from "./packages/protocol/index.ts"
+import type { GitHubIssue } from "./packages/protocol/index.ts"
 
 export type Screen = "projects" | "project" | "work" | "factory" | "settings" | "worktrees"
-
-export type CopilotSignIn = { status: "idle" | "waiting" | "complete" | "failed"; code?: string; url?: string; message?: string }
-export type ModelCredentialProvider = "openai" | "anthropic" | "radius" | "compatible"
-export type ModelCredential = { provider: ModelCredentialProvider; source: "saved" | "environment" | "none" }
-
-export type EnvironmentSummary = {
-  id: string
-  name: string
-  kind: "local" | "ssh"
-  status: "connected" | "disconnected" | "error"
-  active: boolean
-  sshHost?: string
-  sshPort?: number
-  remotePort?: number
-}
-export type EnvironmentDirectory = { activeId: string; environments: EnvironmentSummary[] }
-
-export type ProviderCatalogEntry = {
-  id: string
-  name: string
-  kind?: "cli" | "api"
-  configured: boolean
-  enabled?: boolean
-  defaultModel: string
-  setupMessage: string
-  models: { id: string; name: string }[]
-}
-
-export type RuntimeHealth = {
-  online: boolean
-  harness: string
-  provider: string
-  configured: boolean
-  defaultModel: string
-  models: { id: string; name: string }[]
-  providers: { id: string; name: string }[]
-  copilotSignedIn: boolean
-  copilotSignIn?: CopilotSignIn
-  message: string
-}
-
-export type ProviderTool = {
-  id: string
-  name: string
-  command: string | null
-  kind: "cli" | "api"
-  install: string | null
-  installed: boolean
-  available: boolean
-  modelCount: number | null
-  enabled: boolean
-  models?: { id: string; name: string }[]
-}
-
-export type ConversationMessage = {
-  id: string
-  role: "user" | "assistant" | "error"
-  content: string
-  status: "pending" | "completed" | "failed" | "blocked"
-  createdAt: number
-}
-
-export type GitHubIssue = {
-  url: string
-  repository: string
-  number: number
-  title: string
-  state: "open" | "closed"
-  body: string
-  truncated: boolean
-}
-
-export type Conversation = {
-  id: string
-  mode: "coding" | "personal"
-  label: string
-  environmentId?: string
-  chatThread?: boolean
-  projectId?: string | null
-  githubIssue?: Pick<GitHubIssue, "url" | "repository" | "number" | "title" | "state">
-  status: "working" | "idle"
-  archivedAt?: number | null
-  workspace?: { kind: "none" | "checkout" | "worktree"; path: string | null; repository: string; branch: string | null; status: "provisioning" | "ready" | "attention" | "archived"; message: string | null; removed?: boolean }
-  messages: ConversationMessage[]
-}
 
 export type TaskStart = {
   id: string
@@ -124,7 +69,7 @@ export type TaskStart = {
   initialMessage?: { id: string; content: string; provider: string; model: string; reasoning: string }
 }
 
-// --- Rich ADE Streaming, Subagent, Approval, Workspace, Browser, Artifact, Skills & MCP Types ---
+// --- Rich ADE Streaming, Subagent, Browser, Skills & MCP UI Types ---
 
 export type TimelineToolCall = {
   callId: string
@@ -174,67 +119,6 @@ export type SubagentInfo = {
   messages: { id: string; role: "user" | "assistant"; content: string }[]
 }
 
-export type ApprovalPolicy = "ask" | "auto-safe" | "auto-all"
-
-export type PendingApproval = {
-  id: string
-  sessionId: string
-  taskId: string
-  signalKey: string
-  toolName: string
-  summary: string
-  command?: string
-  arguments: Record<string, unknown>
-  suggestedPrefix?: string
-  createdAt: number
-}
-
-export type ApprovalRule = {
-  id: string
-  toolName: string
-  prefix: string
-  createdAt: number
-}
-
-export type ManagedProcessSummary = {
-  id: string
-  sessionId: string
-  command: string
-  cwd: string
-  background: boolean
-  status: "running" | "exited" | "killed"
-  exitCode: number | null
-  startedAt: number
-  endedAt: number | null
-  outputTail: string
-}
-
-export type WorkspaceEntry = {
-  name: string
-  path: string
-  kind: "file" | "directory"
-  size?: number
-}
-
-export type GitFileChange = {
-  path: string
-  status: "modified" | "added" | "deleted" | "renamed" | "untracked"
-  staged: boolean
-  unstaged: boolean
-  additions: number
-  deletions: number
-}
-
-export type WorkspaceGitSummary = {
-  isGitRepo: boolean
-  branch: string | null
-  ahead: number
-  behind: number
-  additions: number
-  deletions: number
-  files: GitFileChange[]
-}
-
 export type BrowserViewport = { width: number; height: number; preset: "desktop" | "tablet" | "mobile" }
 
 export type BrowserState = {
@@ -250,24 +134,6 @@ export type BrowserState = {
   viewport: BrowserViewport
   lastFrame: string | null
   error: string | null
-}
-
-export type SessionArtifact = {
-  id: string
-  sessionId: string
-  title: string
-  kind: "plan" | "markdown" | "html" | "walkthrough" | "diff"
-  content: string
-  status: "draft" | "awaiting_approval" | "approved" | "changes_requested"
-  feedback: string | null
-  createdAt: number
-  updatedAt: number
-}
-
-export type SessionTaskItem = {
-  id: string
-  title: string
-  status: "pending" | "in_progress" | "done" | "blocked"
 }
 
 export type SkillsAndRulesCatalog = {
@@ -310,7 +176,6 @@ export type WorkspaceTab = {
   kind: WorkspaceTabKind
   title: string
   closable?: boolean
-  // payload identifiers depending on kind
   subagentId?: string
   filePath?: string
   artifactId?: string

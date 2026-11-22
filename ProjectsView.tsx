@@ -3,33 +3,15 @@ import { ArrowLeft, ArrowUpRight, FolderGit2, GitBranch, PanelRight, Plus } from
 import { request } from "./api"
 import type { FeatureAgent } from "./FeatureAgents"
 import { BUILTIN_BLUEPRINTS } from "./packages/blueprints/index.ts"
+import type {
+  GitHubConnection,
+  GitHubRepository,
+  GitHubRepositoryPage,
+  Project,
+  ProjectInput,
+} from "./packages/protocol/index.ts"
 
-export type Project = {
-  id: string
-  name: string
-  githubUrl: string | null
-  repository: string | null
-  blueprintId?: string
-  modelProfile?: string
-  euOnlyMode?: boolean
-  cloudActFree?: boolean
-  stageOverrides?: Record<string, { provider: string; model: string }>
-  archivedAt?: number | null
-}
-export type ProjectInput = {
-  id: string
-  name: string
-  githubUrl: string
-  repository: string
-  blueprintId?: string
-  modelProfile?: string
-  euOnlyMode?: boolean
-  cloudActFree?: boolean
-  stageOverrides?: Record<string, { provider: string; model: string }>
-}
-export type GitHubConnection = { login: string | null }
-export type GitHubRepository = { fullName: string; private: boolean }
-export type GitHubRepositoryPage = { repositories: GitHubRepository[]; nextPage: number | null }
+export type { GitHubConnection, GitHubRepository, GitHubRepositoryPage, Project, ProjectInput }
 type Feature = { id: string; label: string; status: string; workspace?: { kind: string; branch: string | null; status: string } }
 export type ProjectActivity = { agents: (FeatureAgent & { sessionId: string; sessionName: string })[]; errors: { sessionId: string; sessionName: string; message: string }[]; observedAt: number }
 

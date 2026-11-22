@@ -2,37 +2,14 @@ import { execFile } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { extname, join, relative } from "node:path";
 import { promisify } from "node:util";
+import type { GitFileChange, WorkspaceEntry, WorkspaceGitSummary } from "../packages/protocol/index.ts";
 import { workspacePath } from "./coding-tools.ts";
 import { isErrorCode, logger } from "./log.ts";
 import { badRequest, internalError, payloadTooLarge } from "./http-error.ts";
 
+export type { GitFileChange, WorkspaceEntry, WorkspaceGitSummary };
+
 const execFileAsync = promisify(execFile);
-
-export type WorkspaceEntry = {
-	name: string;
-	path: string;
-	kind: "file" | "directory";
-	size?: number;
-};
-
-export type GitFileChange = {
-	path: string;
-	status: "modified" | "added" | "deleted" | "renamed" | "untracked";
-	staged: boolean;
-	unstaged: boolean;
-	additions: number;
-	deletions: number;
-};
-
-export type WorkspaceGitSummary = {
-	isGitRepo: boolean;
-	branch: string | null;
-	ahead: number;
-	behind: number;
-	additions: number;
-	deletions: number;
-	files: GitFileChange[];
-};
 
 const SKIP_EXPLORER = new Set([".git", "node_modules"]);
 
