@@ -1,4 +1,4 @@
-import { createServer, request as httpRequest } from "node:http";
+import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -34,7 +34,7 @@ import {
 import { getBlueprint, listBlueprints } from "../packages/blueprints/index.ts";
 import { listModelProfiles } from "../packages/captain-core/index.ts";
 
-function json(response, status, value) {
+function json(response: ServerResponse, status: number, value: unknown) {
 	response.writeHead(status, {
 		"content-type": "application/json; charset=utf-8",
 		"cache-control": "no-store",
@@ -43,16 +43,17 @@ function json(response, status, value) {
 	response.end(JSON.stringify(value));
 }
 
-async function readBody(request, maxBytes = 16_384) {
+async function readBody(request: IncomingMessage, maxBytes = 16_384): Promise<any> {
 	if (!request.headers["content-type"]?.startsWith("application/json")) {
 		throw Object.assign(new Error("JSON content type required"), { statusCode: 415 });
 	}
 	let size = 0;
-	const chunks = [];
+	const chunks: Buffer[] = [];
 	for await (const chunk of request) {
-		size += chunk.length;
+		const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+		size += buf.length;
 		if (size > maxBytes) throw Object.assign(new Error("Request too large"), { statusCode: 413 });
-		chunks.push(chunk);
+		chunks.push(buf);
 	}
 	try {
 		return JSON.parse(Buffer.concat(chunks).toString("utf8"));
@@ -61,7 +62,7 @@ async function readBody(request, maxBytes = 16_384) {
 	}
 }
 
-function isLoopbackHost(header, expectedPort) {
+function isLoopbackHost(header: string | undefined, expectedPort: number | undefined): boolean {
 	if (typeof header !== "string") return false;
 	try {
 		const parsed = new URL(`http://${header}`);
@@ -72,12 +73,16 @@ function isLoopbackHost(header, expectedPort) {
 	}
 }
 
-async function proxyRemoteRequest(request, response, target) {
-	let body;
+async function proxyRemoteRequest(
+	request: IncomingMessage,
+	response: ServerResponse,
+	target: { localPort: number; remotePort: number },
+): Promise<void> {
+	let body: string | undefined;
 	if (request.headers["content-length"] || request.headers["transfer-encoding"]) body = JSON.stringify(await readBody(request));
-	const url = new URL(request.url, `http://${request.headers.host}`);
-	return new Promise((resolve, reject) => {
-		const headers = {
+	const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
+	return new Promise<void>((resolve, reject) => {
+		const headers: Record<string, string | number> = {
 			host: `127.0.0.1:${target.remotePort}`,
 			accept: request.headers.accept ?? "application/json",
 			...(request.headers.origin ? { origin: request.headers.origin } : {}),
@@ -95,7 +100,7 @@ async function proxyRemoteRequest(request, response, target) {
 				...(upstreamResponse.headers["content-length"] ? { "content-length": upstreamResponse.headers["content-length"] } : {}),
 			});
 			upstreamResponse.pipe(response);
-			upstreamResponse.once("end", resolve);
+			upstreamResponse.once("end", () => resolve());
 		});
 		upstream.once("error", error => reject(Object.assign(new Error("The selected SSH environment could not be reached."), { statusCode: 502, cause: error })));
 		if (body) upstream.write(body);
@@ -108,7 +113,15 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 	`http://localhost:${process.env.ADE_UI_PORT ?? 1420}`,
 	"http://tauri.localhost",
 	"https://tauri.localhost",
-] }) {
+] }: {
+	host: LocalAgentHost;
+	worktreeManager: WorktreeManager;
+	environments?: EnvironmentManager;
+	terminals?: TerminalManager;
+	githubRepositories?: ReturnType<typeof createGitHubRepositories>;
+	sessionGit?: ReturnType<typeof createSessionGit>;
+	origins?: readonly (string | undefined)[];
+}) {
 	let githubConnectionRevision = 0;
 	/** Close terminals in an archived session's workspace and optionally remove its ADE worktree (keeping the branch). */
 	async function cleanUpArchivedWorkspace(session: { id: string; workspace: string | null; repository: string | null; kind: string | null }, removeWorktreeRequested: boolean) {
@@ -138,7 +151,7 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			if (request.headers.origin && !origins.includes(request.headers.origin)) {
 				return json(response, 403, { error: "Request origin is not allowed." });
 			}
-			const url = new URL(request.url, `http://${request.headers.host}`);
+			const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
 			const path = url.pathname;
 			if (environments && request.method === "GET" && path === "/api/environments") return json(response, 200, environments.list());
 			if (environments && request.method === "POST" && path === "/api/environments") {
@@ -385,7 +398,7 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 				const input = await readBody(request);
 				const archived = input?.archived !== false;
 				const result = await host.setProjectArchived(archiveProject[1], archived);
-				const cleanups = [];
+				const cleanups: Awaited<ReturnType<typeof cleanUpArchivedWorkspace>>[] = [];
 				for (const session of result.sessions) cleanups.push(await cleanUpArchivedWorkspace(session, input?.removeWorktrees === true));
 				return json(response, 200, { project: result.project, sessions: result.sessions.map((session, index) => ({ ...session, ...cleanups[index] })) });
 			}
@@ -856,12 +869,12 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 	return server;
 }
 
-function acquireLock(stateDirectory) {
+function acquireLock(stateDirectory: string) {
 	const lock = join(stateDirectory, "host.lock");
 	if (existsSync(lock)) {
-		let owner;
+		let owner: { pid: number };
 		try {
-			owner = JSON.parse(readFileSync(lock, "utf8"));
+			owner = JSON.parse(readFileSync(lock, "utf8")) as { pid: number };
 		} catch {
 			throw new Error(`Cannot read ADE runtime lock at ${lock}; inspect it before removing it.`);
 		}
@@ -869,7 +882,7 @@ function acquireLock(stateDirectory) {
 		try {
 			process.kill(owner.pid, 0);
 		} catch (error) {
-			if (error.code === "ESRCH") alive = false;
+			if ((error as NodeJS.ErrnoException)?.code === "ESRCH") alive = false;
 			else throw error;
 		}
 		if (alive) throw new Error(`ADE runtime state is already owned by process ${owner.pid}`);
@@ -881,7 +894,7 @@ function acquireLock(stateDirectory) {
 	return () => {
 		if (existsSync(lock)) {
 			try {
-				if (JSON.parse(readFileSync(lock, "utf8")).pid === process.pid) unlinkSync(lock);
+				if ((JSON.parse(readFileSync(lock, "utf8")) as { pid: number }).pid === process.pid) unlinkSync(lock);
 			} catch {
 				throw new Error(`Cannot verify ownership of ADE runtime lock at ${lock}`);
 			}
@@ -890,14 +903,14 @@ function acquireLock(stateDirectory) {
 }
 
 export async function startRuntime({ stateDirectory = process.env.ADE_STATE_DIR ?? join(homedir(), ".ade", "state"),
-	port = Number(process.env.ADE_RUNTIME_PORT ?? 4319), host: suppliedHost }: { stateDirectory?: string; port?: number; host?: any } = {}) {
+	port = Number(process.env.ADE_RUNTIME_PORT ?? 4319), host: suppliedHost }: { stateDirectory?: string; port?: number; host?: LocalAgentHost } = {}) {
 	const directory = resolve(stateDirectory);
 	mkdirSync(directory, { recursive: true });
 	const releaseLock = acquireLock(directory);
-	let host;
-	let worktreeManager;
-	let environments;
-	let terminals;
+	let host: LocalAgentHost | undefined;
+	let worktreeManager: WorktreeManager | undefined;
+	let environments: EnvironmentManager | undefined;
+	let terminals: TerminalManager | undefined;
 	try {
 		host = suppliedHost ?? new LocalAgentHost({ stateDirectory: directory });
 		worktreeManager = new WorktreeManager(directory);
@@ -911,22 +924,26 @@ export async function startRuntime({ stateDirectory = process.env.ADE_STATE_DIR 
 		});
 		const recovery = host.recover(worktreeManager);
 		const address = server.address() as AddressInfo;
+		const activeHost = host;
+		const activeTerminals = terminals;
+		const activeEnvironments = environments;
+		const activeWorktrees = worktreeManager;
 		return {
-			host,
+			host: activeHost,
 			server,
 			url: `http://127.0.0.1:${address.port}`,
 			async close() {
-				terminals.closeAll();
+				activeTerminals.closeAll();
 				const closed = new Promise<void>((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
 				// Long-lived event streams (SSE) and keep-alive sockets would otherwise block shutdown forever.
 				server.closeAllConnections();
 				await closed;
 				try {
 					await recovery;
-					await host.close();
+					await activeHost.close();
 				} finally {
-					try { environments.close(); } finally {
-						try { worktreeManager.close(); } finally { releaseLock(); }
+					try { activeEnvironments.close(); } finally {
+						try { activeWorktrees.close(); } finally { releaseLock(); }
 					}
 				}
 			},
@@ -948,7 +965,7 @@ export async function startRuntime({ stateDirectory = process.env.ADE_STATE_DIR 
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-	let runtime;
+	let runtime: Awaited<ReturnType<typeof startRuntime>> | undefined;
 	let stopping = false;
 	const shutdown = async () => {
 		if (stopping) return;

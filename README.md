@@ -189,8 +189,8 @@ npm run dev
 Compatible non-loopback endpoints must use HTTPS and require a key, either saved
 in **Settings → Models** or supplied as `ADE_COMPATIBLE_KEY`. Saved API keys take
 precedence over launch environment keys; removing one falls back to any
-environment key. Saved keys are encrypted for the current OS user: with DPAPI on
-Windows, and with a key held in the macOS Keychain or, on Linux, in libsecret
+environment key. Saved keys are protected for the current OS user: encrypted with
+DPAPI on Windows, and stored in the macOS Keychain or, on Linux, in libsecret
 (`secret-tool`). They are never returned to the UI after saving and are not
 stored in browser preferences or ADE's turn database. Saving a key does not verify it with the provider.
 Real provider calls send conversation content to that provider and may incur charges.

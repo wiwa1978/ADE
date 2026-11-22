@@ -233,10 +233,10 @@ export function createShellTools(opts: {
 				const current = opts.processes.getOutput(proc.id);
 				return {
 					output: [{
-						type: "text",
+						type: "text" as const,
 						text: `Background process started (id: ${proc.id}, status: ${current.summary.status}).\n${current.output.slice(-2000) || "(no output yet)"}`,
 					}],
-					details: { processId: proc.id, status: current.summary.status, background: true },
+					details: { processId: proc.id, status: current.summary.status, background: true, exitCode: null },
 				};
 			}
 			const timeoutMs = Math.min(Math.max(args.timeoutMs ?? 60_000, 1000), 300_000);
@@ -256,17 +256,17 @@ export function createShellTools(opts: {
 			if (timedOut) {
 				return {
 					output: [{
-						type: "text",
+						type: "text" as const,
 						text: `Command is still running after ${timeoutMs}ms and was moved to background (processId: ${proc.id}). Use manage_process to inspect or stop it.\n\nRecent output:\n${result.output.slice(-4000)}`,
 					}],
-					details: { processId: proc.id, status: "running", background: true },
+					details: { processId: proc.id, status: "running", background: true, exitCode: null },
 				};
 			}
 			const text = result.output.trim() || "(no output)";
 			return {
 				isError: result.exitCode !== 0,
-				output: [{ type: "text", text: `Exit code: ${result.exitCode}\n\n${text.slice(-16_000)}` }],
-				details: { processId: proc.id, exitCode: result.exitCode, status: "exited" },
+				output: [{ type: "text" as const, text: `Exit code: ${result.exitCode}\n\n${text.slice(-16_000)}` }],
+				details: { processId: proc.id, exitCode: result.exitCode, status: "exited", background: false },
 			};
 		},
 	});

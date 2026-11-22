@@ -11,7 +11,7 @@ import {
   getModelProfile,
   resolveStageModel,
 } from "../captain-core/index.ts";
-import { verifyGitHubWebhookSignature } from "./index.ts";
+import { createRemoteCaptainServer, verifyBearerToken, verifyGitHubWebhookSignature } from "./index.ts";
 import { createCloudflareDoCaptainHost, type DurableObjectStateLike } from "./cloudflare-adapter.ts";
 import { BoatSandbox, RemoteHttpSandbox } from "../sandbox-remote/index.ts";
 import { LocalRelayHub } from "../relay/index.ts";
@@ -25,6 +25,55 @@ test("verifyGitHubWebhookSignature validates HMAC-SHA256 and rejects tampered pa
   assert.equal(verifyGitHubWebhookSignature(body, validSig, secret), true);
   assert.equal(verifyGitHubWebhookSignature(body, "sha256=deadbeef", secret), false);
   assert.equal(verifyGitHubWebhookSignature(Buffer.from("{}"), validSig, secret), false);
+});
+
+test("verifyBearerToken and RemoteCaptainServer enforce constant-time bearer auth", async () => {
+  const secret = "ade_tok_1234567890abcdef";
+  // Missing / malformed
+  assert.equal(verifyBearerToken(undefined, secret), false);
+  assert.equal(verifyBearerToken("", secret), false);
+  assert.equal(verifyBearerToken(`Basic ${secret}`, secret), false);
+  // Same length, wrong token
+  assert.equal(verifyBearerToken("Bearer ade_tok_1234567890abcde0", secret), false);
+  // Wrong length (shorter and longer)
+  assert.equal(verifyBearerToken("Bearer short", secret), false);
+  assert.equal(verifyBearerToken(`Bearer ${secret}_extra`, secret), false);
+  // Exact match
+  assert.equal(verifyBearerToken(`Bearer ${secret}`, secret), true);
+
+  // Also verify live RemoteCaptainServer request handler enforcement in-process
+  const remote = createRemoteCaptainServer({ dbPath: ":memory:", authToken: secret });
+  const invoke = (authorization?: string) =>
+    new Promise<{ status: number; body: string }>((resolve) => {
+      let status = 200;
+      let body = "";
+      const fakeReq = {
+        method: "GET",
+        url: "/api/factory/capabilities",
+        headers: authorization ? { authorization } : {},
+      };
+      const fakeRes = {
+        writeHead(code: number) {
+          status = code;
+          return this;
+        },
+        end(chunk?: string) {
+          if (chunk) body += chunk;
+          resolve({ status, body });
+          return this;
+        },
+      };
+      remote.server.emit("request", fakeReq as never, fakeRes as never);
+    });
+  try {
+    assert.equal((await invoke(undefined)).status, 401);
+    assert.equal((await invoke("Bearer ade_tok_1234567890abcde0")).status, 401);
+    assert.equal((await invoke("Bearer short")).status, 401);
+    assert.equal((await invoke(`Bearer ${secret}_extra`)).status, 401);
+    assert.equal((await invoke(`Bearer ${secret}`)).status, 200);
+  } finally {
+    await remote.close();
+  }
 });
 
 test("Cloudflare DO CaptainHost runs CaptainCore over DO storage, alarms, and hibernating WebSockets", async () => {

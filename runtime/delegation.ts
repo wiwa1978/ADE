@@ -1,7 +1,7 @@
-import { configure, defineExtension, defineTool } from "@earendil-works/pi-durable";
+import { configure, defineExtension, defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { obj, str } from "@earendil-works/pi-schema";
 
-export function createDelegationTools(readTools) {
+export function createDelegationTools(readTools: readonly ToolRegistration[]) {
 	return defineExtension({
 		name: "ade-delegation",
 		tools: [defineTool({
@@ -33,7 +33,7 @@ export function createDelegationTools(readTools) {
 				if (settled.status !== "done") {
 					return { isError: true, output: [{ type: "text", text: `Subagent did not complete: ${settled.reason}` }] };
 				}
-				const entry = await api.commit(tx => tx.entry(settled.answer), context);
+				const entry = settled.answer ? await api.commit(tx => tx.entry(settled.answer!), context) : undefined;
 				const text = entry?.model?.filter(message => message.role === "assistant")
 					.flatMap(message => message.content.filter(part => part.type === "text").map(part => part.text)).join("\n");
 				if (!text?.trim()) throw new Error("The subagent completed without a text report.");

@@ -4,7 +4,16 @@ import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { obj, str } from "@earendil-works/pi-schema";
 import { createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
 
-export function workspacePath(root, requested, { mustExist = false } = {}) {
+export type WorkspaceIdentity = {
+	dev: string;
+	ino: string;
+};
+
+export function workspacePath(
+	root: string,
+	requested: unknown,
+	{ mustExist = false }: { mustExist?: boolean } = {},
+): string {
 	if (typeof requested !== "string" || !requested || requested.includes("\0")) throw new Error("Provide a workspace-relative path.");
 	const canonicalRoot = realpathSync(root);
 	const target = resolve(canonicalRoot, requested);
@@ -18,7 +27,7 @@ export function workspacePath(root, requested, { mustExist = false } = {}) {
 		try {
 			if (lstatSync(current).isSymbolicLink()) throw new Error("Symbolic links and junctions are not available through workspace tools.");
 		} catch (error) {
-			if (error.code !== "ENOENT") throw error;
+			if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
 			if (mustExist) throw new Error("The requested workspace path does not exist.");
 			break;
 		}
@@ -26,16 +35,16 @@ export function workspacePath(root, requested, { mustExist = false } = {}) {
 	return target;
 }
 
-export function createWorkspaceTools(root, identity) {
+export function createWorkspaceTools(root: string, identity: WorkspaceIdentity) {
 	const verifyWorkspace = () => {
 		const info = statSync(root, { bigint: true });
 		if (String(info.dev) !== identity.dev || String(info.ino) !== identity.ino) {
 			throw new Error("The task workspace has changed or been replaced.");
 		}
 	};
-	const guarded = (tool, mustExist) => ({
+	const guarded = <T extends { execute: (args: any, api: any, context: any) => any }>(tool: T, mustExist: boolean): T => ({
 		...tool,
-		async execute(args, api, context) {
+		async execute(args: { path: string; [key: string]: unknown }, api: Parameters<T["execute"]>[1], context: Parameters<T["execute"]>[2]) {
 			verifyWorkspace();
 			const path = workspacePath(root, args.path, { mustExist });
 			return tool.execute({ ...args, path }, api, context);

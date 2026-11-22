@@ -24,7 +24,7 @@ const config = {
 	configured: true,
 	setupMessage: "",
 	models,
-	resolveModel: (id) => models.getModel(faux.provider.id, id),
+	resolveModel: (id: string) => models.getModel(faux.provider.id, id),
 };
 const host = new LocalAgentHost({ stateDirectory, modelConfigFactory: () => config });
 if (taskId) {

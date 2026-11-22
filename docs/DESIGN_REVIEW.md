@@ -109,7 +109,7 @@ Users can't tell whether a stream is a session. Pick one word per idea (see 3.2)
 
 ### 3.0 Status on branch `worktree-design-and-features`
 Done and checked in the running app (2026-11-22):
-- **Credentials on macOS and Linux.** Saved keys use a master key in the macOS Keychain or libsecret; Windows keeps DPAPI. The 5 credential tests now run on every platform.
+- **Credentials on macOS and Linux.** Covered by Q-01 on `main` (macOS Keychain, Linux libsecret, Windows DPAPI). This branch's own version was dropped when merging.
 - **First run.**
   - The model picker only offers providers the harness can run. Installed CLI agents are listed in Settings as information only.
   - The default provider is the first one that is set up.

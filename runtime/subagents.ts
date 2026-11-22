@@ -91,7 +91,7 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 				? createShellTools({ sessionId: opts.sessionId, workspace: op.target, identity, processes: opts.processes })
 				: null;
 			return {
-				tools: [...wtFiles.tools, ...wtSearch.tools, ...(wtShell?.tools ?? [])],
+				tools: [...(wtFiles.tools ?? []), ...(wtSearch.tools ?? []), ...(wtShell?.tools ?? [])],
 				workspacePath: op.target,
 				branch,
 			};
@@ -144,7 +144,7 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 			if (settled.status !== "done") {
 				return { isError: true, output: [{ type: "text", text: `Subagent did not complete: ${settled.reason}` }] };
 			}
-			const entry = await api.commit(tx => tx.entry(settled.answer), ctx);
+			const entry = settled.answer ? await api.commit(tx => tx.entry(settled.answer!), ctx) : undefined;
 			const text = entry?.model?.filter((m: any) => m.role === "assistant")
 				.map((m: any) => extractPlainText(m.content)).join("\n");
 			if (!text?.trim()) throw new Error("The subagent completed without a text report.");
@@ -227,7 +227,7 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 				if (settled.status !== "done") {
 					return { status: "failed", report: `Subagent "${name}" ended without a report: ${settled.reason}` };
 				}
-				const entry = await api.commit(tx => tx.entry(settled.answer), context);
+				const entry = settled.answer ? await api.commit(tx => tx.entry(settled.answer!), context) : undefined;
 				const text = entry?.model?.filter((m: any) => m.role === "assistant")
 					.map((m: any) => extractPlainText(m.content)).join("\n").trim() ?? "";
 				return { status: "completed", report: text || "(completed without text output)" };
@@ -269,16 +269,16 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 		async execute(args, api, ctx) {
 			const child = await api.conversation(toConvId(args.subagentId), ctx);
 			if (!child) throw new Error(`Subagent ${args.subagentId} not found.`);
-			const whenBusy = args.mode === "steer" ? "steer" : "follow-up";
+			const whenBusy = args.mode === "steer" ? "steer" : "followUp";
 			const submission = await child.submit({
 				type: "input",
 				content: args.message,
 				whenBusy,
-			} as any, ctx);
+			}, ctx);
 			const promise = (async () => {
 				const settled = await submission.wait(context);
 				if (settled.status !== "done") return { status: "failed", report: `Ended: ${settled.reason}` };
-				const entry = await api.commit(tx => tx.entry(settled.answer), context);
+				const entry = settled.answer ? await api.commit(tx => tx.entry(settled.answer!), context) : undefined;
 				const text = entry?.model?.filter((m: any) => m.role === "assistant")
 					.map((m: any) => extractPlainText(m.content)).join("\n").trim() ?? "";
 				return { status: "completed", report: text || "(no text)" };

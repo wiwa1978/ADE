@@ -78,7 +78,7 @@ function extractToolCalls(content: unknown): { callId: string; name: string; arg
 export function projectTimeline(opts: {
 	sessionId: string;
 	conversationId: string;
-	entries: any[];
+	entries: readonly any[];
 	live?: any;
 	usage?: any;
 }): ConversationTimelineSnapshot {

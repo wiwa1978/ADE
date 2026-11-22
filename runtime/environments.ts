@@ -1,4 +1,4 @@
-import { spawn as spawnProcess } from "node:child_process";
+import { spawn as spawnProcess, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { createServer, type AddressInfo } from "node:net";
@@ -7,14 +7,28 @@ import { randomUUID } from "node:crypto";
 
 const DEFAULT_REMOTE_PORT = 4319;
 const DEFAULT_SSH_PORT = 22;
-const LOCAL_ENVIRONMENT = { id: "local", name: "This computer", kind: "local", status: "connected", active: true };
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const LOCAL_ENVIRONMENT = { id: "local", name: "This computer", kind: "local" as const, status: "connected" as const, active: true };
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
-function inputError(message, statusCode = 400) {
+type SavedSshEnvironment = {
+	id: string;
+	name: string;
+	sshHost: string;
+	sshPort: number;
+	remotePort: number;
+};
+
+type ActiveTunnel = {
+	child: ChildProcess;
+	localPort: number;
+	exited: boolean;
+};
+
+function inputError(message: string, statusCode = 400) {
 	return Object.assign(new Error(message), { statusCode });
 }
 
-function parseSshHost(value) {
+function parseSshHost(value: unknown): string {
 	if (typeof value !== "string") throw inputError("Enter an SSH host or configured SSH alias.");
 	const host = value.trim();
 	if (!host || host.length > 255 || host.startsWith("-") || /[\s\0/\\]/.test(host)) {
@@ -27,48 +41,52 @@ function parseSshHost(value) {
 	return host;
 }
 
-function validatePort(value, label, fallback) {
+function validatePort(value: unknown, label: string, fallback: number): number {
 	const port = value === undefined || value === "" ? fallback : Number(value);
 	if (!Number.isInteger(port) || port < 1 || port > 65535) throw inputError(`${label} must be a port between 1 and 65535.`);
 	return port;
 }
 
-function validName(value) {
+function validName(value: unknown): value is string {
 	return typeof value === "string" && value.length > 0 && value.length <= 64 &&
-		![...value].some(character => character.codePointAt(0) < 32 || character.codePointAt(0) === 127);
+		![...value].some(character => {
+			const cp = character.codePointAt(0) ?? 0;
+			return cp < 32 || cp === 127;
+		});
 }
 
-function validateEnvironment(value) {
-	if (!value || typeof value !== "object" || typeof value.id !== "string" ||
-		!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.id) ||
-		!validName(value.name) || typeof value.sshHost !== "string") {
+function validateEnvironment(value: unknown): SavedSshEnvironment {
+	const rec = value as Partial<SavedSshEnvironment> | null;
+	if (!rec || typeof rec !== "object" || typeof rec.id !== "string" ||
+		!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(rec.id) ||
+		!validName(rec.name) || typeof rec.sshHost !== "string") {
 		throw new Error("The saved environment list is invalid. Inspect environments.json before changing it.");
 	}
 	return {
-		id: value.id,
-		name: value.name,
-		sshHost: parseSshHost(value.sshHost),
-		sshPort: validatePort(value.sshPort, "SSH port", DEFAULT_SSH_PORT),
-		remotePort: validatePort(value.remotePort, "ADE runtime port", DEFAULT_REMOTE_PORT),
+		id: rec.id,
+		name: rec.name,
+		sshHost: parseSshHost(rec.sshHost),
+		sshPort: validatePort(rec.sshPort, "SSH port", DEFAULT_SSH_PORT),
+		remotePort: validatePort(rec.remotePort, "ADE runtime port", DEFAULT_REMOTE_PORT),
 	};
 }
 
-function remoteHealth(localPort, remotePort) {
-	return new Promise((resolve, reject) => {
+function remoteHealth(localPort: number, remotePort: number): Promise<boolean> {
+	return new Promise<boolean>((resolve, reject) => {
 		const request = httpRequest({
 			hostname: "127.0.0.1", port: localPort, path: "/api/health", method: "GET",
 			headers: { host: `127.0.0.1:${remotePort}` }, timeout: 750,
 		}, response => {
-			const chunks = [];
+			const chunks: Buffer[] = [];
 			let size = 0;
-			response.on("data", chunk => {
+			response.on("data", (chunk: Buffer) => {
 				size += chunk.length;
 				if (size > 64_000) request.destroy(new Error("Health response too large."));
 				else chunks.push(chunk);
 			});
 			response.once("aborted", () => reject(new Error("SSH health response was interrupted.")));
-		response.once("error", reject);
-		response.once("end", () => {
+			response.once("error", reject);
+			response.once("end", () => {
 				try {
 					resolve(response.statusCode === 200 && JSON.parse(Buffer.concat(chunks).toString("utf8")).online === true);
 				} catch {
@@ -82,7 +100,7 @@ function remoteHealth(localPort, remotePort) {
 	});
 }
 
-async function allocatePort() {
+async function allocatePort(): Promise<number> {
 	const server = createServer();
 	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
@@ -94,16 +112,20 @@ async function allocatePort() {
 }
 
 export class EnvironmentManager {
-	#file;
-	#environments;
+	#file: string;
+	#environments: SavedSshEnvironment[];
 	#activeId = "local";
-	#tunnel;
-	#sshPath;
-	#spawn;
-	#connectTimeoutMs;
-	#statuses = new Map();
+	#tunnel: ActiveTunnel | undefined;
+	#sshPath: string;
+	#spawn: typeof spawnProcess;
+	#connectTimeoutMs: number;
+	#statuses = new Map<string, "connected" | "disconnected" | "error">();
 
-	constructor(directory, { sshPath = "ssh", spawn = spawnProcess, connectTimeoutMs = 8_000 } = {}) {
+	constructor(directory: string, { sshPath = "ssh", spawn = spawnProcess, connectTimeoutMs = 8_000 }: {
+		sshPath?: string;
+		spawn?: typeof spawnProcess;
+		connectTimeoutMs?: number;
+	} = {}) {
 		this.#file = join(directory, "environments.json");
 		this.#sshPath = sshPath;
 		this.#spawn = spawn;
@@ -112,11 +134,11 @@ export class EnvironmentManager {
 		this.#environments = this.#load();
 	}
 
-	#load() {
+	#load(): SavedSshEnvironment[] {
 		if (!existsSync(this.#file)) return [];
-		let data;
+		let data: { version?: unknown; environments?: unknown };
 		try {
-			data = JSON.parse(readFileSync(this.#file, "utf8"));
+			data = JSON.parse(readFileSync(this.#file, "utf8")) as { version?: unknown; environments?: unknown };
 		} catch {
 			throw new Error(`Cannot read saved environments at ${this.#file}; inspect it before removing or replacing it.`);
 		}
@@ -124,8 +146,8 @@ export class EnvironmentManager {
 			throw new Error(`Saved environments at ${this.#file} have an unsupported format.`);
 		}
 		const environments = data.environments.map(validateEnvironment);
-		const ids = new Set();
-		const names = new Set();
+		const ids = new Set<string>();
+		const names = new Set<string>();
 		for (const environment of environments) {
 			if (ids.has(environment.id) || names.has(environment.name.toLowerCase())) {
 				throw new Error(`Saved environments at ${this.#file} contain duplicate entries.`);
@@ -150,18 +172,18 @@ export class EnvironmentManager {
 				...this.#environments.map(environment => ({
 					id: environment.id,
 					name: environment.name,
-					kind: "ssh",
+					kind: "ssh" as const,
 					sshHost: environment.sshHost,
 					sshPort: environment.sshPort,
 					remotePort: environment.remotePort,
-					status: this.#statuses.get(environment.id) ?? (this.#activeId === environment.id && this.#tunnel ? "connected" : "disconnected"),
+					status: this.#statuses.get(environment.id) ?? (this.#activeId === environment.id && this.#tunnel ? "connected" as const : "disconnected" as const),
 					active: this.#activeId === environment.id,
 				})),
 			],
 		};
 	}
 
-	add(input) {
+	add(input: { name?: unknown; sshHost?: unknown; sshPort?: unknown; remotePort?: unknown } | null | undefined) {
 		const name = typeof input?.name === "string" ? input.name.trim() : "";
 		if (!validName(name)) {
 			throw inputError("Give this environment a name of 1–64 printable characters.");
@@ -172,14 +194,14 @@ export class EnvironmentManager {
 		if (this.#environments.some(item => item.name.toLowerCase() === name.toLowerCase())) {
 			throw inputError("An environment with that name already exists.", 409);
 		}
-		const environment = { id: randomUUID(), name, sshHost, sshPort, remotePort };
+		const environment: SavedSshEnvironment = { id: randomUUID(), name, sshHost, sshPort, remotePort };
 		this.#environments.push(environment);
 		this.#statuses.set(environment.id, "disconnected");
 		this.#save();
-		return { ...environment, kind: "ssh", status: "disconnected", active: false };
+		return { ...environment, kind: "ssh" as const, status: "disconnected" as const, active: false };
 	}
 
-	async #openTunnel(environment) {
+	async #openTunnel(environment: SavedSshEnvironment): Promise<ActiveTunnel> {
 		const localPort = await allocatePort();
 		const args = [
 			"-N", "-T", "-L", `127.0.0.1:${localPort}:127.0.0.1:${environment.remotePort}`,
@@ -192,13 +214,13 @@ export class EnvironmentManager {
 		];
 		if (environment.sshPort !== DEFAULT_SSH_PORT) args.push("-p", String(environment.sshPort));
 		args.push(environment.sshHost);
-		let child;
+		let child: ChildProcess;
 		try {
 			child = this.#spawn(this.#sshPath, args, { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
 		} catch {
 			throw inputError("Could not start OpenSSH. Install or enable the system SSH client, then try again.", 503);
 		}
-		const tunnel = { child, localPort, exited: false };
+		const tunnel: ActiveTunnel = { child, localPort, exited: false };
 		child.once("error", () => {
 			tunnel.exited = true;
 			if (this.#activeId === environment.id && this.#tunnel === tunnel) this.#statuses.set(environment.id, "error");
@@ -227,11 +249,11 @@ export class EnvironmentManager {
 		}
 	}
 
-	async connect(id) {
+	async connect(id: string) {
 		if (id === "local") return this.activate("local");
 		const environment = this.#environments.find(item => item.id === id);
 		if (!environment) throw inputError("Environment not found.", 404);
-		let candidate;
+		let candidate: ActiveTunnel;
 		try {
 			candidate = await this.#openTunnel(environment);
 		} catch (error) {
@@ -248,7 +270,7 @@ export class EnvironmentManager {
 		return this.list();
 	}
 
-	async activate(id) {
+	async activate(id: string) {
 		if (id !== "local") {
 			if (!this.#environments.some(item => item.id === id)) throw inputError("Environment not found.", 404);
 			if (id !== this.#activeId || !this.#tunnel || this.#tunnel.exited) {
@@ -266,7 +288,7 @@ export class EnvironmentManager {
 		return this.list();
 	}
 
-	async remove(id) {
+	async remove(id: string) {
 		if (id === "local") throw inputError("The local environment cannot be removed.", 400);
 		const index = this.#environments.findIndex(item => item.id === id);
 		if (index < 0) throw inputError("Environment not found.", 404);

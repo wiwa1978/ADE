@@ -32,7 +32,7 @@ export const providerToolCatalog = Object.freeze([
 	{ id: "devin", name: "Devin CLI", command: "devin", kind: "cli", install: "Install Devin CLI" },
 ]);
 
-async function defaultProbe(command) {
+async function defaultProbe(command: string): Promise<boolean> {
 	try {
 		if (process.platform === "win32") {
 			await execFileAsync("where.exe", [command], { windowsHide: true, timeout: 5000 });
@@ -45,13 +45,13 @@ async function defaultProbe(command) {
 	}
 }
 
-export async function scanProviderTools(probe = defaultProbe) {
+export async function scanProviderTools(probe: (command: string) => Promise<boolean> = defaultProbe) {
 	return Promise.all(providerToolCatalog.map(async provider => ({
 		...provider,
 		...await (async () => {
 			const installed = await probe(provider.command);
 			return { installed, available: installed };
 		})(),
-		modelCount: "models" in provider ? provider.models.length || null : null,
+		modelCount: "models" in provider && provider.models ? provider.models.length || null : null,
 	})));
 }

@@ -1,10 +1,32 @@
-function parseRepository(value) {
+export type LinkedGitHubIssue = {
+	url: string;
+	repository: string;
+	number: number;
+	title: string;
+	state: "open" | "closed";
+	body: string;
+	truncated: boolean;
+};
+
+type ProjectRepoRef = {
+	githubUrl?: string | null;
+} | null | undefined;
+
+function parseRepository(value: string | null | undefined) {
 	const match = /^(?:https:\/\/github\.com\/)?([a-z0-9-]+)\/([a-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(value ?? "");
 	if (!match || [".", ".."].includes(match[2])) return null;
 	return { owner: match[1], name: match[2] };
 }
 
-export async function lookupGitHubIssue({ project, url, fetcher = fetch }) {
+export async function lookupGitHubIssue({
+	project,
+	url,
+	fetcher = fetch,
+}: {
+	project: ProjectRepoRef;
+	url: unknown;
+	fetcher?: typeof fetch;
+}): Promise<LinkedGitHubIssue> {
 	if (!project) throw Object.assign(new Error("Choose a project linked to a GitHub repository."), { statusCode: 400 });
 	const repository = parseRepository(project.githubUrl);
 	if (!repository) throw Object.assign(new Error("Link a GitHub repository in project settings first."), { statusCode: 400 });
@@ -67,29 +89,30 @@ export async function lookupGitHubIssue({ project, url, fetcher = fetch }) {
 	};
 }
 
-export function validateLinkedIssue(issue, project) {
+export function validateLinkedIssue(issue: unknown, project: ProjectRepoRef): LinkedGitHubIssue | null {
 	if (issue == null) return null;
-	if (!issue || typeof issue !== "object" || typeof issue.url !== "string" ||
-		typeof issue.repository !== "string" || !Number.isSafeInteger(issue.number) || issue.number < 1 ||
-		typeof issue.title !== "string" || !issue.title.trim() || issue.title.length > 300 ||
-		typeof issue.body !== "string" || issue.body.length > 5000 ||
-		!["open", "closed"].includes(issue.state) || typeof issue.truncated !== "boolean") {
+	const rec = issue as Partial<LinkedGitHubIssue>;
+	if (!rec || typeof rec !== "object" || typeof rec.url !== "string" ||
+		typeof rec.repository !== "string" || typeof rec.number !== "number" || !Number.isSafeInteger(rec.number) || rec.number < 1 ||
+		typeof rec.title !== "string" || !rec.title.trim() || rec.title.length > 300 ||
+		typeof rec.body !== "string" || rec.body.length > 5000 ||
+		(rec.state !== "open" && rec.state !== "closed") || typeof rec.truncated !== "boolean") {
 		throw Object.assign(new Error("The linked GitHub issue details are invalid. Load the issue again."), { statusCode: 400 });
 	}
 	const repository = parseRepository(project?.githubUrl);
-	const match = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/issues\/([1-9]\d*)$/.exec(issue.url);
+	const match = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/issues\/([1-9]\d*)$/.exec(rec.url);
 	if (!repository || !match || match[1].toLowerCase() !== repository.owner.toLowerCase() ||
-		match[2].toLowerCase() !== repository.name.toLowerCase() || Number(match[3]) !== issue.number ||
-		issue.repository.toLowerCase() !== `${repository.owner}/${repository.name}`.toLowerCase()) {
+		match[2].toLowerCase() !== repository.name.toLowerCase() || Number(match[3]) !== rec.number ||
+		rec.repository.toLowerCase() !== `${repository.owner}/${repository.name}`.toLowerCase()) {
 		throw Object.assign(new Error("The linked issue must belong to this project's GitHub repository."), { statusCode: 400 });
 	}
 	return {
-		url: issue.url,
-		repository: issue.repository,
-		number: issue.number,
-		title: issue.title.trim(),
-		state: issue.state,
-		body: issue.body,
-		truncated: issue.truncated,
+		url: rec.url,
+		repository: rec.repository,
+		number: rec.number,
+		title: rec.title.trim(),
+		state: rec.state,
+		body: rec.body,
+		truncated: rec.truncated,
 	};
 }

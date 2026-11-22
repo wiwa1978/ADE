@@ -5,10 +5,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { copilotId, createCopilotSignIn, createCopilotStore, credentialFilePath } from "./copilot-auth.ts";
-
-// Use the test key-file backend on macOS/Linux so tests never touch the real Keychain or libsecret.
-if (process.platform !== "win32") process.env.ADE_CREDENTIAL_BACKEND = "test-key-file";
+import { copilotId, createCopilotSignIn, createCopilotStore, isSecretStoreAvailable } from "./copilot-auth.ts";
 import { LocalAgentHost } from "./host.ts";
 import { createModelConfig, createRuntimeModels, safeErrorMessage } from "./models.ts";
 import { createRuntimeServer } from "./server.ts";
@@ -102,7 +99,9 @@ test("Copilot sign-in publishes only the device challenge, supports cancellation
 	assert.equal(signedOut, copilotId);
 });
 
-test("Copilot credentials survive reopen encrypted and constrain the picker to account models", async () => {
+const skipWithoutSecretStore = !isSecretStoreAvailable();
+
+test("Copilot credentials survive reopen encrypted and constrain the picker to account models", { skip: skipWithoutSecretStore }, async () => {
 	const dir = await mkdtemp(join(tmpdir(), "ade-copilot-auth-"));
 	const credential = {
 		type: "oauth", access: "fixture-access", refresh: "fixture-refresh",
@@ -110,7 +109,7 @@ test("Copilot credentials survive reopen encrypted and constrain the picker to a
 	};
 	try {
 		await createCopilotStore(dir).modify(copilotId, async () => credential);
-		assert.doesNotMatch(await readFile(credentialFilePath(dir, "copilot-auth"), "utf8"), /fixture-access|fixture-refresh/);
+		assert.doesNotMatch(await readFile(join(dir, "copilot-auth.dpapi"), "utf8"), /fixture-access|fixture-refresh/);
 		assert.deepEqual(await createCopilotStore(dir).read(copilotId), credential);
 		const runtime = createRuntimeModels({}, dir);
 		const config = await runtime.config(copilotId);
@@ -123,7 +122,7 @@ test("Copilot credentials survive reopen encrypted and constrain the picker to a
 	}
 });
 
-test("saved API keys are protected, take precedence, survive restart, and can be removed", async () => {
+test("saved API keys are protected, take precedence, survive restart, and can be removed", { skip: skipWithoutSecretStore }, async () => {
 	const dir = await mkdtemp(join(tmpdir(), "ade-api-keys-"));
 	const environment = {
 		OPENAI_API_KEY: "fixture-environment-key",
@@ -135,8 +134,8 @@ test("saved API keys are protected, take precedence, survive restart, and can be
 		assert.equal((await runtime.credentialStatus()).find(item => item.provider === "openai").source, "environment");
 		await runtime.changeCredential("save", "openai", "fixture-saved-key");
 		await runtime.changeCredential("save", "compatible", "fixture-compatible-key");
-		assert.doesNotMatch(await readFile(credentialFilePath(dir, "provider-openai-auth"), "utf8"), /fixture-saved-key/);
-		assert.doesNotMatch(await readFile(credentialFilePath(dir, "provider-compatible-auth"), "utf8"), /fixture-compatible-key/);
+		assert.doesNotMatch(await readFile(join(dir, "provider-openai-auth.dpapi"), "utf8"), /fixture-saved-key/);
+		assert.doesNotMatch(await readFile(join(dir, "provider-compatible-auth.dpapi"), "utf8"), /fixture-compatible-key/);
 
 		const reopened = createRuntimeModels(environment, dir);
 		assert.equal((await reopened.credentialStatus()).find(item => item.provider === "openai").source, "saved");
@@ -161,7 +160,7 @@ test("saved API keys are protected, take precedence, survive restart, and can be
 	}
 });
 
-test("changing a saved Radius key refreshes the account's model catalog", async (t) => {
+test("changing a saved Radius key refreshes the account's model catalog", { skip: skipWithoutSecretStore }, async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "ade-radius-keys-"));
 	const fetch = t.mock.method(globalThis, "fetch", async (_url, options) => {
 		const id = options.headers.authorization === "Bearer fixture-first-key" ? "first-model" : "second-model";
@@ -183,7 +182,7 @@ test("changing a saved Radius key refreshes the account's model catalog", async 
 	}
 });
 
-test("the Settings credential API protects writes and returns only status across host restarts", async () => {
+test("the Settings credential API protects writes and returns only status across host restarts", { skip: skipWithoutSecretStore }, async () => {
 	const dir = await mkdtemp(join(tmpdir(), "ade-credential-api-"));
 	let host;
 	let server;
@@ -229,7 +228,7 @@ test("the Settings credential API protects writes and returns only status across
 	}
 });
 
-test("Pi Durable sends with a saved compatible-provider key after restart", async () => {
+test("Pi Durable sends with a saved compatible-provider key after restart", { skip: skipWithoutSecretStore }, async () => {
 	const dir = await mkdtemp(join(tmpdir(), "ade-credential-turn-"));
 	const requests = [];
 	let requestStarted;
@@ -273,6 +272,7 @@ test("Pi Durable sends with a saved compatible-provider key after restart", asyn
 		const session = await turn;
 		assert.ok(session.messages.some(message => message.role === "assistant" && message.content === "Fixture response"));
 		assert.deepEqual(requests, [{ path: "/v1/chat/completions", authorization: "Bearer fixture-request-key" }]);
+		await host.modelCredentials({ action: "remove", provider: "compatible" });
 	} finally {
 		releaseRequest();
 		if (host) await host.close();
