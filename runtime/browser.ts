@@ -91,17 +91,28 @@ function getFreePort(): Promise<number> {
 	});
 }
 
+type CdpTarget = { type?: string; webSocketDebuggerUrl?: string };
+type CdpNavHistory = { currentIndex: number; entries: Array<{ id: number; url?: string; title?: string }> };
+type CdpEvalResult<T = unknown> = { result?: { value?: T; description?: string }; exceptionDetails?: { text?: string } };
+type CdpScreenshotResult = { data: string };
+
 class CdpConnection {
 	#ws: WebSocket;
 	#nextId = 1;
-	#pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
-	#eventListeners = new Set<(method: string, params: any) => void>();
+	#pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+	#eventListeners = new Set<(method: string, params: Record<string, unknown>) => void>();
 
 	constructor(ws: WebSocket) {
 		this.#ws = ws;
 		ws.addEventListener("message", (event) => {
 			try {
-				const msg = JSON.parse(String(event.data));
+				const msg = JSON.parse(String(event.data)) as {
+					id?: number;
+					method?: string;
+					params?: Record<string, unknown>;
+					result?: unknown;
+					error?: { message?: string };
+				};
 				if (msg.id && this.#pending.has(msg.id)) {
 					const entry = this.#pending.get(msg.id)!;
 					this.#pending.delete(msg.id);
@@ -110,7 +121,7 @@ class CdpConnection {
 				} else if (msg.method) {
 					for (const listener of this.#eventListeners) {
 						try {
-							listener(msg.method, msg.params);
+							listener(msg.method, msg.params ?? {});
 						} catch {
 							// ignore
 						}
@@ -128,19 +139,19 @@ class CdpConnection {
 		});
 	}
 
-	onEvent(listener: (method: string, params: any) => void): () => void {
+	onEvent(listener: (method: string, params: Record<string, unknown>) => void): () => void {
 		this.#eventListeners.add(listener);
 		return () => this.#eventListeners.delete(listener);
 	}
 
-	send(method: string, params: Record<string, unknown> = {}): Promise<any> {
+	send<T = Record<string, unknown>>(method: string, params: Record<string, unknown> = {}): Promise<T> {
 		const id = this.#nextId++;
-		return new Promise((resolve, reject) => {
+		return new Promise<T>((resolve, reject) => {
 			if (this.#ws.readyState !== WebSocket.OPEN) {
 				reject(new Error("Browser CDP socket is not open."));
 				return;
 			}
-			this.#pending.set(id, { resolve, reject });
+			this.#pending.set(id, { resolve: (v) => resolve(v as T), reject });
 			this.#ws.send(JSON.stringify({ id, method, params }));
 		});
 	}
@@ -243,9 +254,9 @@ export class BrowserManager {
 			try {
 				const res = await fetch(`http://127.0.0.1:${port}/json/list`);
 				if (res.ok) {
-					const targets = await res.json() as any[];
+					const targets = (await res.json()) as CdpTarget[];
 					const page = targets.find(t => t.type === "page" && t.webSocketDebuggerUrl);
-					if (page) {
+					if (page?.webSocketDebuggerUrl) {
 						wsUrl = page.webSocketDebuggerUrl;
 						break;
 					}
@@ -288,7 +299,7 @@ export class BrowserManager {
 				this.#state.loading = false;
 				void this.#refreshMeta();
 			} else if (method === "Page.screencastFrame") {
-				const dataUri = `data:image/jpeg;base64,${params.data}`;
+				const dataUri = `data:image/jpeg;base64,${String(params.data ?? "")}`;
 				this.#state.lastFrame = dataUri;
 				this.#events.emit("browser.frame", { frame: dataUri, metadata: params.metadata });
 				void cdp.send("Page.screencastFrameAck", { sessionId: params.sessionId }).catch(() => {});
@@ -318,7 +329,7 @@ export class BrowserManager {
 	async #refreshMeta(): Promise<void> {
 		if (!this.#cdp) return;
 		try {
-			const nav = await this.#cdp.send("Page.getNavigationHistory");
+			const nav = await this.#cdp.send<CdpNavHistory>("Page.getNavigationHistory");
 			const entry = nav?.entries?.[nav.currentIndex];
 			if (entry) {
 				this.#state.url = entry.url || this.#state.url;
@@ -347,7 +358,7 @@ export class BrowserManager {
 
 	async goBack(): Promise<BrowserState> {
 		await this.ensureStarted();
-		const nav = await this.#cdp!.send("Page.getNavigationHistory");
+		const nav = await this.#cdp!.send<CdpNavHistory>("Page.getNavigationHistory");
 		if (nav.currentIndex > 0) {
 			await this.#cdp!.send("Page.navigateToHistoryEntry", { entryId: nav.entries[nav.currentIndex - 1].id });
 			await new Promise(r => setTimeout(r, 500));
@@ -359,7 +370,7 @@ export class BrowserManager {
 
 	async goForward(): Promise<BrowserState> {
 		await this.ensureStarted();
-		const nav = await this.#cdp!.send("Page.getNavigationHistory");
+		const nav = await this.#cdp!.send<CdpNavHistory>("Page.getNavigationHistory");
 		if (nav.currentIndex < nav.entries.length - 1) {
 			await this.#cdp!.send("Page.navigateToHistoryEntry", { entryId: nav.entries[nav.currentIndex + 1].id });
 			await new Promise(r => setTimeout(r, 500));
@@ -444,7 +455,7 @@ export class BrowserManager {
 	async clickSelectorOrPoint(opts: { selector?: string; x?: number; y?: number }): Promise<string> {
 		await this.ensureStarted();
 		if (opts.selector) {
-			const res = await this.#cdp!.send("Runtime.evaluate", {
+			const res = await this.#cdp!.send<CdpEvalResult<{ found: boolean; x?: number; y?: number; tag?: string }>>("Runtime.evaluate", {
 				expression: `(() => {
 					const el = document.querySelector(${JSON.stringify(opts.selector)});
 					if (!el) return { found: false };
@@ -455,13 +466,13 @@ export class BrowserManager {
 				returnByValue: true,
 			});
 			const val = res?.result?.value;
-			if (!val?.found) throw new Error(`Element not found for selector: ${opts.selector}`);
+			if (!val?.found || typeof val.x !== "number" || typeof val.y !== "number") throw new Error(`Element not found for selector: ${opts.selector}`);
 			await this.dispatchMouse({ type: "mousePressed", x: val.x, y: val.y });
 			await this.dispatchMouse({ type: "mouseReleased", x: val.x, y: val.y });
 			await new Promise(r => setTimeout(r, 350));
 			await this.#refreshMeta();
 			await this.screenshot();
-			return `Clicked ${val.tag} (${opts.selector}) at (${Math.round(val.x)}, ${Math.round(val.y)})`;
+			return `Clicked ${val.tag ?? "element"} (${opts.selector}) at (${Math.round(val.x)}, ${Math.round(val.y)})`;
 		}
 		if (typeof opts.x === "number" && typeof opts.y === "number") {
 			await this.dispatchMouse({ type: "mousePressed", x: opts.x, y: opts.y });
@@ -489,7 +500,7 @@ export class BrowserManager {
 
 	async snapshot(): Promise<{ url: string; title: string; text: string; interactive: { tag: string; text: string; selector: string; href?: string }[] }> {
 		await this.ensureStarted();
-		const res = await this.#cdp!.send("Runtime.evaluate", {
+		const res = await this.#cdp!.send<CdpEvalResult<{ url: string; title: string; text: string; interactive: { tag: string; text: string; selector: string; href?: string }[] }>>("Runtime.evaluate", {
 			expression: `(() => {
 				const text = (document.body?.innerText || '').replace(/\\n{3,}/g, '\\n\\n').slice(0, 6000);
 				const nodes = [...document.querySelectorAll('a,button,input,textarea,select,[role="button"],[role="link"]')].slice(0, 80);
@@ -514,7 +525,7 @@ export class BrowserManager {
 
 	async evaluate(expression: string): Promise<string> {
 		await this.ensureStarted();
-		const res = await this.#cdp!.send("Runtime.evaluate", {
+		const res = await this.#cdp!.send<CdpEvalResult>("Runtime.evaluate", {
 			expression,
 			awaitPromise: true,
 			returnByValue: true,
@@ -528,7 +539,7 @@ export class BrowserManager {
 
 	async screenshot(): Promise<string> {
 		await this.ensureStarted();
-		const res = await this.#cdp!.send("Page.captureScreenshot", { format: "jpeg", quality: 80 });
+		const res = await this.#cdp!.send<CdpScreenshotResult>("Page.captureScreenshot", { format: "jpeg", quality: 80 });
 		const dataUri = `data:image/jpeg;base64,${res.data}`;
 		this.#state.lastFrame = dataUri;
 		this.#events.emit("browser.frame", { frame: dataUri });

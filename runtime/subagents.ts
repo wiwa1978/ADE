@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
-import { configure, defineExtension, defineTool } from "@earendil-works/pi-durable";
+import { configure, defineExtension, defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { arr, bool, obj, opt, str } from "@earendil-works/pi-schema";
 import { createWorkspaceTools } from "./coding-tools.ts";
 import { createSearchTools } from "./search-tools.ts";
@@ -22,31 +22,34 @@ export type SubagentRecordMetadata = {
 	createdAt: number;
 };
 
+type ModelToolEntry = ToolRegistration;
+type ConversationIdParam = Parameters<typeof configure>[1];
+
 type SubagentToolsOptions = {
 	sessionId: string;
 	workspace: string | null;
 	workspaceIdentity: { dev: string; ino: string } | null;
 	repository: string | null;
-	readTools: readonly any[];
-	workspaceTools: readonly any[];
-	searchTools: readonly any[];
-	shellTools: readonly any[];
+	readTools: readonly ModelToolEntry[];
+	workspaceTools: readonly ModelToolEntry[];
+	searchTools: readonly ModelToolEntry[];
+	shellTools: readonly ModelToolEntry[];
 	worktreeManager?: WorktreeManager;
 	processes?: ProcessManager;
 	events?: RuntimeEventBus;
 	onSubagentCreated?: (conversationId: string | number) => void;
 };
 
-function toConvId(raw: string): any {
-	return /^\d+$/.test(raw) ? Number(raw) : raw;
+function toConvId(raw: string): ConversationIdParam {
+	return (/^\d+$/.test(raw) ? Number(raw) : raw) as ConversationIdParam;
 }
 
 function extractPlainText(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
 	return content
-		.filter((part: any) => part?.type === "text" && typeof part.text === "string")
-		.map((part: any) => part.text)
+		.filter((part): part is { type: "text"; text: string } => Boolean(part && typeof part === "object" && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string"))
+		.map((part) => part.text)
 		.join("\n");
 }
 
@@ -63,7 +66,7 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 		return `You are "${role}", a focused subagent working for the session lead in ADE. ${capabilityText} Complete your assigned task thoroughly and return a clear, concise report of findings or changes made.`;
 	};
 
-	const selectModelTools = async (mode: SubagentMode, subId: string): Promise<{ tools: any[]; workspacePath: string | null; branch: string | null }> => {
+	const selectModelTools = async (mode: SubagentMode, subId: string): Promise<{ tools: ModelToolEntry[]; workspacePath: string | null; branch: string | null }> => {
 		if (mode === "readonly" || !opts.workspace || !opts.workspaceIdentity) {
 			return {
 				tools: [...opts.readTools, ...opts.searchTools],
@@ -145,8 +148,8 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 				return { isError: true, output: [{ type: "text", text: `Subagent did not complete: ${settled.reason}` }] };
 			}
 			const entry = settled.answer ? await api.commit(tx => tx.entry(settled.answer!), ctx) : undefined;
-			const text = entry?.model?.filter((m: any) => m.role === "assistant")
-				.map((m: any) => extractPlainText(m.content)).join("\n");
+			const text = entry?.model?.filter((m) => m.role === "assistant")
+				.map((m) => extractPlainText(m.content)).join("\n");
 			if (!text?.trim()) throw new Error("The subagent completed without a text report.");
 			return { output: [{ type: "text", text }], details: { conversationId: id, name: args.name.trim(), mode: "readonly" } };
 		},
@@ -228,8 +231,8 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 					return { status: "failed", report: `Subagent "${name}" ended without a report: ${settled.reason}` };
 				}
 				const entry = settled.answer ? await api.commit(tx => tx.entry(settled.answer!), context) : undefined;
-				const text = entry?.model?.filter((m: any) => m.role === "assistant")
-					.map((m: any) => extractPlainText(m.content)).join("\n").trim() ?? "";
+				const text = entry?.model?.filter((m) => m.role === "assistant")
+					.map((m) => extractPlainText(m.content)).join("\n").trim() ?? "";
 				return { status: "completed", report: text || "(completed without text output)" };
 			};
 
@@ -279,8 +282,8 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 				const settled = await submission.wait(context);
 				if (settled.status !== "done") return { status: "failed", report: `Ended: ${settled.reason}` };
 				const entry = settled.answer ? await api.commit(tx => tx.entry(settled.answer!), context) : undefined;
-				const text = entry?.model?.filter((m: any) => m.role === "assistant")
-					.map((m: any) => extractPlainText(m.content)).join("\n").trim() ?? "";
+				const text = entry?.model?.filter((m) => m.role === "assistant")
+					.map((m) => extractPlainText(m.content)).join("\n").trim() ?? "";
 				return { status: "completed", report: text || "(no text)" };
 			})();
 			backgroundPromises.set(String(args.subagentId), promise);
@@ -310,7 +313,7 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 				}
 				const convId = toConvId(subId);
 				const entries = await api.commit(tx => tx.scanEntries({ conversationId: convId, order: "descending" }, 40), ctx);
-				const lastAssistant = entries.items.find((e: any) => e?.model?.[0]?.role === "assistant");
+				const lastAssistant = entries.items.find((e) => e?.model?.[0]?.role === "assistant");
 				const text = lastAssistant ? extractPlainText(lastAssistant.model?.[0]?.content).trim() : "";
 				reports.push(`### Subagent ${subId}\n${text || "(no report yet)"}`);
 			}
@@ -329,7 +332,7 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 			for (const record of page.items) {
 				if (record.id === api.conversationId) continue;
 				const entries = await api.commit(tx => tx.scanEntries({ conversationId: record.id, order: "ascending" }, 20), ctx);
-				const meta = entries.items.find((e: any) => e.kind === "ade.assignment")?.data as SubagentRecordMetadata | undefined;
+				const meta = entries.items.find((e) => e.kind === "ade.assignment")?.data as SubagentRecordMetadata | undefined;
 				if (!meta) continue;
 				rows.push(`- ${String(record.id)} | ${meta.name} (${meta.role ?? "Subagent"}, ${meta.mode}${meta.branch ? `, branch:${meta.branch}` : ""}) | task: ${meta.task.slice(0, 120)}`);
 			}

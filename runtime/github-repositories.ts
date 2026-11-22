@@ -13,8 +13,8 @@ async function runGh(args: string[]): Promise<string> {
 			env: { ...process.env, GH_PROMPT_DISABLED: "1", GH_PAGER: "cat" },
 		});
 		return stdout;
-	} catch (error: any) {
-		if (error.code === "ENOENT") {
+	} catch (error) {
+		if ((error as { code?: unknown })?.code === "ENOENT") {
 			throw Object.assign(
 				new Error("GitHub CLI was not found. Install gh, then sign in with gh auth login --hostname github.com --web."),
 				{ statusCode: 503 },
@@ -188,15 +188,17 @@ export function createGitHubRepositories(run = runGh) {
 					if (!Array.isArray(raw)) return { issues: [] };
 					return {
 						issues: raw
-							.filter((item: any) => !item.pull_request)
-							.map((item: any) => ({
+							.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !("pull_request" in entry && (entry as Record<string, unknown>).pull_request)))
+							.map((item) => ({
 								repository: slug,
 								number: Number(item.number),
 								title: String(item.title ?? ""),
 								body: String(item.body ?? ""),
 								state: String(item.state ?? "open").toLowerCase() === "closed" ? "closed" : "open",
 								url: String(item.html_url ?? ""),
-								labels: Array.isArray(item.labels) ? item.labels.map((l: any) => String(l?.name ?? "")).filter(Boolean) : [],
+								labels: Array.isArray(item.labels)
+									? item.labels.map((l) => String((l as { name?: unknown } | null)?.name ?? "")).filter(Boolean)
+									: [],
 								updatedAt: String(item.updated_at ?? ""),
 							})),
 					};
@@ -222,16 +224,21 @@ export function createGitHubRepositories(run = runGh) {
 			}
 			if (!Array.isArray(parsed)) return { issues: [] };
 			return {
-				issues: parsed.map((item: any) => ({
-					repository: slug,
-					number: Number(item.number),
-					title: String(item.title ?? ""),
-					body: String(item.body ?? ""),
-					state: String(item.state ?? "OPEN").toLowerCase() === "closed" ? "closed" : "open",
-					url: String(item.url ?? ""),
-					labels: Array.isArray(item.labels) ? item.labels.map((l: any) => String(l?.name ?? "")).filter(Boolean) : [],
-					updatedAt: String(item.updatedAt ?? ""),
-				})),
+				issues: parsed.map((entry) => {
+					const item = (entry && typeof entry === "object" ? entry : {}) as Record<string, unknown>;
+					return {
+						repository: slug,
+						number: Number(item.number),
+						title: String(item.title ?? ""),
+						body: String(item.body ?? ""),
+						state: String(item.state ?? "OPEN").toLowerCase() === "closed" ? "closed" : "open",
+						url: String(item.url ?? ""),
+						labels: Array.isArray(item.labels)
+							? item.labels.map((l) => String((l as { name?: unknown } | null)?.name ?? "")).filter(Boolean)
+							: [],
+						updatedAt: String(item.updatedAt ?? ""),
+					};
+				}),
 			};
 		},
 		async search({ login, query = "", page = 1 }: { login?: string; query?: string; page?: number } = {}) {

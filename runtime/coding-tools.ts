@@ -1,7 +1,9 @@
 import { lstatSync, realpathSync, readdirSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { defineExtension, defineTool } from "@earendil-works/pi-durable";
-import { obj, str } from "@earendil-works/pi-schema";
+import { defineExtension, defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
+import { obj, str, type Schema } from "@earendil-works/pi-schema";
+
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 import { createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
 
 export type WorkspaceIdentity = {
@@ -42,9 +44,12 @@ export function createWorkspaceTools(root: string, identity: WorkspaceIdentity) 
 			throw new Error("The task workspace has changed or been replaced.");
 		}
 	};
-	const guarded = <T extends { execute: (args: any, api: any, context: any) => any }>(tool: T, mustExist: boolean): T => ({
+	const guarded = <TArgs extends { path: string }, TDetails extends JsonValue, TState extends JsonValue>(
+		tool: ToolRegistration<Schema<TArgs>, TDetails, TState>,
+		mustExist: boolean,
+	): ToolRegistration<Schema<TArgs>, TDetails, TState> => ({
 		...tool,
-		async execute(args: { path: string; [key: string]: unknown }, api: Parameters<T["execute"]>[1], context: Parameters<T["execute"]>[2]) {
+		execute(args, api, context) {
 			verifyWorkspace();
 			const path = workspacePath(root, args.path, { mustExist });
 			return tool.execute({ ...args, path }, api, context);

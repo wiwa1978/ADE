@@ -81,8 +81,8 @@ export async function runWorkspaceGrep(root: string, opts: {
 		});
 		if (!formatted.length) return "No matches found.";
 		return formatted.join("\n") + (lines.length > maxResults ? `\n[Truncated: showing ${maxResults} of ${lines.length} matches]` : "");
-	} catch (error: any) {
-		if (error?.code === 1) return "No matches found.";
+	} catch (error) {
+		if ((error as { code?: unknown })?.code === 1) return "No matches found.";
 		// Fall through to pure Node search if rg is not installed
 	}
 
@@ -92,8 +92,8 @@ export async function runWorkspaceGrep(root: string, opts: {
 		matcher = opts.isRegex
 			? new RegExp(opts.query, flags)
 			: new RegExp(opts.query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), flags);
-	} catch (err: any) {
-		throw new Error(`Invalid search pattern: ${err?.message ?? err}`);
+	} catch (err) {
+		throw new Error(`Invalid search pattern: ${err instanceof Error ? err.message : String(err)}`);
 	}
 
 	const files = statSync(searchRoot).isFile() ? [searchRoot] : walkFiles(searchRoot, 2500);

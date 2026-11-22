@@ -32,11 +32,34 @@ export type McpServerStatus = McpServerConfig & {
 	tools: McpDiscoveredTool[];
 };
 
+type JsonRpcResponse = {
+	id?: number;
+	result?: unknown;
+	error?: { message?: string };
+};
+
+type McpServerRow = {
+	id: string;
+	name: string;
+	transport: "stdio" | "http";
+	configJson: string;
+	enabled: number;
+	createdAt: number;
+};
+
+type StoredMcpConfig = {
+	command?: string;
+	args?: string[];
+	env?: Record<string, string>;
+	url?: string;
+	headers?: Record<string, string>;
+};
+
 class StdioMcpClient {
 	#child: ChildProcess;
 	#nextId = 1;
 	#buffer = "";
-	#pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+	#pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 
 	constructor(command: string, args: string[], env?: Record<string, string>) {
 		this.#child = spawn(command, args, {
@@ -51,7 +74,7 @@ class StdioMcpClient {
 				const trimmed = line.trim();
 				if (!trimmed) continue;
 				try {
-					const msg = JSON.parse(trimmed);
+					const msg = JSON.parse(trimmed) as JsonRpcResponse;
 					if (msg.id !== undefined && this.#pending.has(msg.id)) {
 						const p = this.#pending.get(msg.id)!;
 						this.#pending.delete(msg.id);
@@ -69,9 +92,9 @@ class StdioMcpClient {
 		});
 	}
 
-	async request(method: string, params: Record<string, unknown> = {}): Promise<any> {
+	async request<T = Record<string, unknown>>(method: string, params: Record<string, unknown> = {}): Promise<T> {
 		const id = this.#nextId++;
-		return new Promise((resolve, reject) => {
+		return new Promise<T>((resolve, reject) => {
 			if (!this.#child.stdin?.writable) {
 				reject(new Error("MCP server stdin is closed."));
 				return;
@@ -80,7 +103,7 @@ class StdioMcpClient {
 				if (this.#pending.delete(id)) reject(new Error(`MCP request "${method}" timed out.`));
 			}, 20_000);
 			this.#pending.set(id, {
-				resolve: (v) => { clearTimeout(timer); resolve(v); },
+				resolve: (v) => { clearTimeout(timer); resolve(v as T); },
 				reject: (e) => { clearTimeout(timer); reject(e); },
 			});
 			this.#child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
@@ -112,7 +135,7 @@ class HttpMcpClient {
 		this.#headers = headers;
 	}
 
-	async request(method: string, params: Record<string, unknown> = {}): Promise<any> {
+	async request<T = Record<string, unknown>>(method: string, params: Record<string, unknown> = {}): Promise<T> {
 		const id = this.#nextId++;
 		const res = await fetch(this.#url, {
 			method: "POST",
@@ -133,13 +156,13 @@ class HttpMcpClient {
 			const text = await res.text();
 			const dataLine = text.split("\n").find(l => l.startsWith("data:"));
 			if (!dataLine) throw new Error("Empty SSE response from MCP server.");
-			const msg = JSON.parse(dataLine.slice(5).trim());
+			const msg = JSON.parse(dataLine.slice(5).trim()) as JsonRpcResponse;
 			if (msg.error) throw new Error(msg.error.message || "MCP error");
-			return msg.result;
+			return msg.result as T;
 		}
-		const msg = await res.json() as any;
+		const msg = (await res.json()) as JsonRpcResponse;
 		if (msg.error) throw new Error(msg.error.message || "MCP error");
-		return msg.result;
+		return msg.result as T;
 	}
 
 	notify(_method: string, _params: Record<string, unknown> = {}): void {
@@ -183,10 +206,11 @@ export class McpManager {
 		const path = join(homedir(), ".ade", "mcp.json");
 		if (!existsSync(path)) return;
 		try {
-			const parsed = JSON.parse(readFileSync(path, "utf8"));
+			const parsed = JSON.parse(readFileSync(path, "utf8")) as { mcpServers?: unknown; servers?: unknown };
 			const servers = parsed?.mcpServers ?? parsed?.servers;
 			if (!servers || typeof servers !== "object") return;
-			for (const [name, def] of Object.entries<any>(servers)) {
+			for (const [name, rawDef] of Object.entries(servers as Record<string, unknown>)) {
+				const def = (rawDef && typeof rawDef === "object" ? rawDef : {}) as StoredMcpConfig;
 				const exists = this.#db.prepare("SELECT 1 FROM mcp_servers WHERE name=?").get(name);
 				if (exists) continue;
 				const transport = def.url ? "http" : "stdio";
@@ -205,10 +229,10 @@ export class McpManager {
 	}
 
 	list(): McpServerStatus[] {
-		const rows = this.#db.prepare("SELECT * FROM mcp_servers ORDER BY createdAt ASC").all() as any[];
+		const rows = this.#db.prepare("SELECT * FROM mcp_servers ORDER BY createdAt ASC").all() as unknown as McpServerRow[];
 		return rows.map(row => {
-			let cfg: any = {};
-			try { cfg = JSON.parse(row.configJson); } catch { /* ignore */ }
+			let cfg: StoredMcpConfig = {};
+			try { cfg = JSON.parse(row.configJson) as StoredMcpConfig; } catch { /* ignore */ }
 			const rt = this.#runtime.get(row.id);
 			return {
 				id: row.id,
@@ -281,9 +305,9 @@ export class McpManager {
 				clientInfo: { name: "ade", version: "0.1.0" },
 			});
 			client.notify("notifications/initialized", {});
-			const toolsRes = await client.request("tools/list", {});
+			const toolsRes = await client.request<{ tools?: Array<{ name?: unknown; description?: unknown; inputSchema?: Record<string, unknown> }> }>("tools/list", {});
 			state.tools = Array.isArray(toolsRes?.tools)
-				? toolsRes.tools.map((t: any) => ({
+				? toolsRes.tools.map((t) => ({
 					name: String(t.name),
 					description: String(t.description ?? ""),
 					inputSchema: t.inputSchema,
@@ -291,10 +315,10 @@ export class McpManager {
 				: [];
 			state.status = "connected";
 			state.error = null;
-		} catch (error: any) {
+		} catch (error) {
 			client.close();
 			state.status = "error";
-			state.error = error?.message || "Failed to connect to MCP server.";
+			state.error = error instanceof Error ? error.message : "Failed to connect to MCP server.";
 		}
 		this.#events.emit("mcp.update", { servers: this.list() });
 		return this.list().find(s => s.id === id)!;
@@ -310,30 +334,33 @@ export class McpManager {
 	}
 
 	createExtension() {
-		const tools: any[] = [];
+		const createTool = (serverName: string, rt: ConnectedServer, tool: McpDiscoveredTool) => {
+			const safeServer = serverName.toLowerCase().replace(/[^a-z0-9_]/g, "_").slice(0, 24);
+			const safeTool = tool.name.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 40);
+			return defineTool({
+				name: `mcp_${safeServer}_${safeTool}`,
+				description: `[MCP:${serverName}] ${tool.description || tool.name}`,
+				parameters: map(unknown()),
+				replay: "unsafe",
+				async execute(args) {
+					const res = await rt.client.request<{ content?: Array<{ type?: string; text?: string }>; isError?: boolean }>("tools/call", { name: tool.name, arguments: args ?? {} });
+					const content = Array.isArray(res?.content)
+						? res.content.map((c) => (c.type === "text" ? String(c.text ?? "") : JSON.stringify(c))).join("\n")
+						: JSON.stringify(res);
+					return {
+						isError: Boolean(res?.isError),
+						output: [{ type: "text", text: content || "(empty MCP response)" }],
+					};
+				},
+			});
+		};
+		const tools: ReturnType<typeof createTool>[] = [];
 		for (const server of this.list()) {
 			if (!server.enabled || server.status !== "connected") continue;
 			const rt = this.#runtime.get(server.id);
 			if (!rt) continue;
-			const safeServer = server.name.toLowerCase().replace(/[^a-z0-9_]/g, "_").slice(0, 24);
 			for (const tool of rt.tools) {
-				const safeTool = tool.name.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 40);
-				tools.push(defineTool({
-					name: `mcp_${safeServer}_${safeTool}`,
-					description: `[MCP:${server.name}] ${tool.description || tool.name}`,
-					parameters: map(unknown()),
-					replay: "unsafe",
-					async execute(args) {
-						const res = await rt.client.request("tools/call", { name: tool.name, arguments: args ?? {} });
-						const content = Array.isArray(res?.content)
-							? res.content.map((c: any) => (c.type === "text" ? c.text : JSON.stringify(c))).join("\n")
-							: JSON.stringify(res);
-						return {
-							isError: Boolean(res?.isError),
-							output: [{ type: "text", text: content || "(empty MCP response)" }],
-						};
-					},
-				}));
+				tools.push(createTool(server.name, rt, tool));
 			}
 		}
 		if (!tools.length) return null;

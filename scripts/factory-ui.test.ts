@@ -5,22 +5,25 @@ import { join } from "node:path"
 import { after, afterEach, before, beforeEach, test } from "node:test"
 import React, { act } from "react"
 import { Window } from "happy-dom"
-import { createServer } from "vite"
+import { createServer, type ViteDevServer } from "vite"
+import type { Root } from "react-dom/client"
 import { BUILTIN_BLUEPRINTS } from "../packages/blueprints/index.ts"
 import { BUILTIN_MODEL_PROFILES } from "../packages/captain-core/index.ts"
 
-let browser: any
-let server: any
-let createRoot: any
-let FactoryView: any
-let container: any
-let root: any
+let browser: Window
+let server: ViteDevServer
+let createRoot: typeof import("react-dom/client").createRoot
+let FactoryView: React.ComponentType<Record<string, unknown>>
+let container: HTMLDivElement
+let root: Root
 let cacheDirectory: string
 
 before(async () => {
   browser = new Window({ url: "http://127.0.0.1:1420/" })
-  globalThis.window = browser
-  globalThis.document = browser.document
+  const globals = globalThis as unknown as Record<string, unknown>
+  const win = browser as unknown as Record<string, unknown>
+  globals.window = browser
+  globals.document = browser.document
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: browser.navigator })
   for (const name of [
     "DocumentFragment",
@@ -36,10 +39,10 @@ before(async () => {
     "CustomEvent",
     "KeyboardEvent",
   ]) {
-    ;(globalThis as any)[name] = browser[name]
+    globals[name] = win[name]
   }
-  globalThis.matchMedia = browser.matchMedia.bind(browser)
-  ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
+  globals.matchMedia = browser.matchMedia.bind(browser)
+  globals.IS_REACT_ACT_ENVIRONMENT = true
   ;({ createRoot } = await import("react-dom/client"))
   cacheDirectory = mkdtempSync(join(tmpdir(), "ade-factory-ui-test-"))
   server = await createServer({
@@ -48,7 +51,7 @@ before(async () => {
     appType: "custom",
     optimizeDeps: { noDiscovery: true },
   })
-  ;({ FactoryView } = await server.ssrLoadModule("/src/factory/FactoryView.tsx"))
+  ;({ FactoryView } = (await server.ssrLoadModule("/src/factory/FactoryView.tsx")) as { FactoryView: React.ComponentType<Record<string, unknown>> })
 })
 
 after(async () => {
@@ -249,7 +252,7 @@ test("FactoryView renders project-level metadata, live Kanban board, Run Workspa
   const card = container.querySelector(".sf-kanban-card")
   assert.ok(card, "Expected Kanban card")
   await act(async () => {
-    card.click()
+    ;(card as HTMLElement).click()
   })
   assert.match(container.textContent, /Goldfish Auditor/)
   assert.match(container.textContent, /Approve & Continue/)

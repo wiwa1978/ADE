@@ -59,8 +59,9 @@ export async function pickNativeFolder(): Promise<string | null> {
 				{ timeout: 120_000, encoding: "utf8" },
 			);
 			return stdout.trim().replace(/\/$/, "") || null;
-		} catch (err: any) {
-			if (String(err?.stderr ?? err?.message ?? "").includes("-128")) return null; // User cancelled
+		} catch (err) {
+			const e = err as { stderr?: unknown; message?: unknown };
+			if (String(e?.stderr ?? e?.message ?? "").includes("-128")) return null; // User cancelled
 			throw Object.assign(new Error("Could not open macOS folder picker. Use the folder browser instead."), { statusCode: 500 });
 		}
 	}
@@ -171,9 +172,10 @@ export async function cloneProjectRepository(params: {
 			maxBuffer: 4 * 1024 * 1024,
 			windowsHide: true,
 		});
-	} catch (err: any) {
+	} catch (err) {
+		const e = err as { stderr?: unknown; message?: unknown };
 		throw Object.assign(
-			new Error(`Git clone failed: ${String(err?.stderr || err?.message || "Check URL and credentials.").trim()}`),
+			new Error(`Git clone failed: ${String(e?.stderr || e?.message || "Check URL and credentials.").trim()}`),
 			{ statusCode: 502 },
 		);
 	}

@@ -31,9 +31,9 @@ export function DiffPanel({
     try {
       const res = await request<{ files: BranchFile[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/branch-diff`)
       setBranchFiles(res.files)
-    } catch (err: any) {
+    } catch (err) {
       setBranchFiles([])
-      setError(err?.message || "Could not load the branch diff.")
+      setError(err instanceof Error ? err.message : "Could not load the branch diff.")
     }
   }, [sessionId])
 
@@ -74,8 +74,8 @@ export function DiffPanel({
         body: JSON.stringify({ sessionId, paths }),
       })
       onRefresh()
-    } catch (err: any) {
-      setError(err?.message || "Failed to stage")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to stage")
     } finally {
       setBusy(false)
     }
@@ -91,8 +91,8 @@ export function DiffPanel({
         body: JSON.stringify({ sessionId, paths }),
       })
       onRefresh()
-    } catch (err: any) {
-      setError(err?.message || "Failed to unstage")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to unstage")
     } finally {
       setBusy(false)
     }
@@ -109,8 +109,8 @@ export function DiffPanel({
         body: JSON.stringify({ sessionId, path }),
       })
       onRefresh()
-    } catch (err: any) {
-      setError(err?.message || "Failed to discard changes")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to discard changes")
     } finally {
       setBusy(false)
     }
@@ -138,8 +138,8 @@ export function DiffPanel({
       setCommitMessage("")
       setNotice(`Committed ${res.commit.hash}`)
       onRefresh()
-    } catch (err: any) {
-      setError(err?.message || "Commit failed.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Commit failed.")
     } finally {
       setBusy(false)
     }

@@ -117,8 +117,8 @@ export function BrowserPanel({
         body: JSON.stringify({ url: normalized }),
       })
       onStateChange(next)
-    } catch (err: any) {
-      setError(err?.message || "Failed to navigate built-in Chrome.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to navigate built-in Chrome.")
     } finally {
       setBusy(false)
     }
@@ -145,14 +145,14 @@ export function BrowserPanel({
         body: JSON.stringify(body),
       })
       if (next && typeof next.url === "string") onStateChange(next)
-    } catch (err: any) {
-      setError(err?.message || "Browser action failed.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Browser action failed.")
     } finally {
       setBusy(false)
     }
   }
 
-  const mapCoords = (e: React.MouseEvent<HTMLImageElement>) => {
+  const mapCoords = (e: Pick<React.MouseEvent<HTMLImageElement>, "clientX" | "clientY">) => {
     const img = canvasImgRef.current
     if (!img) return null
     const rect = img.getBoundingClientRect()
@@ -182,7 +182,7 @@ export function BrowserPanel({
   }
 
   const handleViewportWheel = async (e: React.WheelEvent<HTMLImageElement>) => {
-    const pos = mapCoords(e as any)
+    const pos = mapCoords(e)
     if (!pos) return
     try {
       await request("/api/browser/input", {

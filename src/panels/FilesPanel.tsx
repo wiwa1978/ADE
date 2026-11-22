@@ -27,8 +27,8 @@ function DirectoryBranch({
       )
       setEntries(res.entries)
       setError("")
-    } catch (err: any) {
-      setError(err?.message || "Could not load directory")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load directory")
     }
   }, [sessionId, path])
 

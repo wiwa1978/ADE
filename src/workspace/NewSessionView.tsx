@@ -141,8 +141,8 @@ export function NewSessionView({
       setLinkedIssue(issue)
       if (!prompt.trim()) setPrompt(`Work on #${issue.number}: ${issue.title}`)
       setIssueOpen(false)
-    } catch (err: any) {
-      setIssueError(err?.message || "Could not load issue.")
+    } catch (err) {
+      setIssueError(err instanceof Error ? err.message : "Could not load issue.")
     } finally {
       setLookingUp(false)
     }

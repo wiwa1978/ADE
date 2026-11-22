@@ -23,14 +23,15 @@ const defaultRunner: CommandRunner = async (command, args, cwd) => {
 			env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1", GH_PAGER: "cat", GIT_PAGER: "cat" },
 		});
 		return stdout;
-	} catch (error: any) {
-		if (error?.code === "ENOENT") {
+	} catch (error) {
+		const err = error as { code?: unknown; stderr?: unknown; message?: unknown };
+		if (err?.code === "ENOENT") {
 			throw httpError(503, command === "gh"
 				? "GitHub CLI was not found. Install gh, then sign in with gh auth login --hostname github.com --web."
 				: "Git was not found on this host.");
 		}
-		const detail = String(error?.stderr || error?.message || "").trim().split("\n").filter(Boolean).slice(-3).join(" ");
-		throw Object.assign(new Error(detail || `${command} ${args[0]} failed.`), { statusCode: 502, stderr: String(error?.stderr ?? "") });
+		const detail = String(err?.stderr || err?.message || "").trim().split("\n").filter(Boolean).slice(-3).join(" ");
+		throw Object.assign(new Error(detail || `${command} ${args[0]} failed.`), { statusCode: 502, stderr: String(err?.stderr ?? "") });
 	}
 };
 
@@ -69,15 +70,43 @@ export type PullRequestInfo = {
 
 const PR_FIELDS = "number,url,title,state,isDraft,reviewDecision,mergeable,baseRefName,headRefName,additions,deletions,changedFiles,statusCheckRollup";
 
-function summarizeChecks(rollup: any[]): { checks: PullRequestCheck[]; checksSummary: PullRequestInfo["checksSummary"] } {
-	const checks: PullRequestCheck[] = (Array.isArray(rollup) ? rollup : []).map(item => {
+type RawCheckRollupItem = {
+	conclusion?: unknown;
+	state?: unknown;
+	status?: unknown;
+	name?: unknown;
+	context?: unknown;
+	detailsUrl?: unknown;
+	targetUrl?: unknown;
+};
+
+type RawPullRequest = {
+	number?: unknown;
+	url?: unknown;
+	title?: unknown;
+	state?: unknown;
+	isDraft?: unknown;
+	reviewDecision?: unknown;
+	mergeable?: unknown;
+	baseRefName?: unknown;
+	headRefName?: unknown;
+	additions?: unknown;
+	deletions?: unknown;
+	changedFiles?: unknown;
+	statusCheckRollup?: unknown;
+};
+
+function summarizeChecks(rollup: unknown): { checks: PullRequestCheck[]; checksSummary: PullRequestInfo["checksSummary"] } {
+	const checks: PullRequestCheck[] = (Array.isArray(rollup) ? rollup : []).map((entry) => {
+		const item = (entry && typeof entry === "object" ? entry : {}) as RawCheckRollupItem;
 		// CheckRun has status/conclusion; StatusContext has state.
-		const raw = String(item?.conclusion || item?.state || item?.status || "").toUpperCase();
+		const raw = String(item.conclusion || item.state || item.status || "").toUpperCase();
 		const status: PullRequestCheck["status"] = ["SUCCESS"].includes(raw) ? "success"
 			: ["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"].includes(raw) ? "failure"
 				: ["NEUTRAL", "SKIPPED", "STALE"].includes(raw) ? "neutral"
 					: "pending";
-		return { name: String(item?.name || item?.context || "check"), status, url: item?.detailsUrl || item?.targetUrl || null };
+		const url = typeof item.detailsUrl === "string" ? item.detailsUrl : typeof item.targetUrl === "string" ? item.targetUrl : null;
+		return { name: String(item.name || item.context || "check"), status, url };
 	});
 	const checksSummary = !checks.length ? "none"
 		: checks.some(c => c.status === "failure") ? "failure"
@@ -86,15 +115,16 @@ function summarizeChecks(rollup: any[]): { checks: PullRequestCheck[]; checksSum
 	return { checks, checksSummary };
 }
 
-function toPullRequest(raw: any): PullRequestInfo {
+function toPullRequest(input: unknown): PullRequestInfo {
+	const raw = (input && typeof input === "object" ? input : {}) as RawPullRequest;
 	return {
 		number: Number(raw.number),
 		url: String(raw.url ?? ""),
 		title: String(raw.title ?? ""),
 		state: raw.state === "MERGED" || raw.state === "CLOSED" ? raw.state : "OPEN",
 		isDraft: Boolean(raw.isDraft),
-		reviewDecision: raw.reviewDecision || null,
-		mergeable: raw.mergeable || null,
+		reviewDecision: typeof raw.reviewDecision === "string" && raw.reviewDecision ? raw.reviewDecision : null,
+		mergeable: typeof raw.mergeable === "string" && raw.mergeable ? raw.mergeable : null,
 		baseRefName: String(raw.baseRefName ?? ""),
 		headRefName: String(raw.headRefName ?? ""),
 		additions: Number(raw.additions ?? 0),
@@ -222,8 +252,9 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 			if (!branch) return null;
 			try {
 				return toPullRequest(JSON.parse(await gh(cwd, "pr", "view", branch, "--json", PR_FIELDS)));
-			} catch (error: any) {
-				if (/no pull requests found|could not find/i.test(String(error?.stderr ?? error?.message ?? ""))) return null;
+			} catch (error) {
+				const err = error as { stderr?: unknown; message?: unknown };
+				if (/no pull requests found|could not find/i.test(String(err?.stderr ?? err?.message ?? ""))) return null;
 				throw error;
 			}
 		},

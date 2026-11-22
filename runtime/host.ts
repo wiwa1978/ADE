@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -24,7 +24,7 @@ import { BrowserManager, createBrowserTools } from "./browser.ts";
 import { ArtifactManager } from "./artifacts.ts";
 import { buildSkillsAndRulesPrompt, createSkillsExtension, discoverSkillsAndRules } from "./skills.ts";
 import { McpManager } from "./mcp.ts";
-import { projectTimeline, type ConversationTimelineSnapshot } from "./timeline.ts";
+import { projectTimeline, type ConversationTimelineSnapshot, type LiveStateLike, type TimelineEntryLike, type UsageLike } from "./timeline.ts";
 import { CaptainCore } from "../packages/captain-core/index.ts";
 import { createNodeSqliteCaptainHost } from "../packages/host-node/index.ts";
 import { LocalFactoryRunner } from "./factory-runner.ts";
@@ -125,8 +125,19 @@ type OpenSession = {
 };
 
 type WatchHandle = {
-	stop(): Promise<void>;
+	stop(ctx?: typeof context): Promise<unknown> | void;
 };
+
+type ConversationIdParam = Parameters<Harness["conversation"]>[0];
+
+type WatchViewLike = {
+	entries?: readonly TimelineEntryLike[];
+	docs?: Record<string, unknown>;
+};
+
+function toConversationId(raw: string | number): ConversationIdParam {
+	return (typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : raw) as ConversationIdParam;
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -316,12 +327,20 @@ export class LocalAgentHost {
 		}
 	}
 
-	#serializeProject(row: any) {
+	#get<T>(sql: string, ...args: SQLInputValue[]): T | undefined {
+		return this.#db.prepare(sql).get(...args) as T | undefined;
+	}
+
+	#all<T>(sql: string, ...args: SQLInputValue[]): T[] {
+		return this.#db.prepare(sql).all(...args) as unknown as T[];
+	}
+
+	#serializeProject(row: ProjectRow | undefined) {
 		if (!row) return null;
 		let stageOverrides: Record<string, { provider: string; model: string }> | undefined;
 		if (typeof row.stageOverridesJson === "string" && row.stageOverridesJson.trim()) {
 			try {
-				stageOverrides = JSON.parse(row.stageOverridesJson);
+				stageOverrides = JSON.parse(row.stageOverridesJson) as Record<string, { provider: string; model: string }>;
 			} catch {
 				// ignore malformed json
 			}
@@ -343,7 +362,9 @@ export class LocalAgentHost {
 	}
 
 	projects() {
-		return this.#db.prepare("SELECT * FROM projects ORDER BY createdAt,id").all().map(row => this.#serializeProject(row));
+		return this.#all<ProjectRow>("SELECT * FROM projects ORDER BY createdAt,id")
+			.map(row => this.#serializeProject(row))
+			.filter((project): project is NonNullable<typeof project> => project !== null);
 	}
 
 	githubConnection(): { login: string | null } {
@@ -435,8 +456,8 @@ export class LocalAgentHost {
 	 */
 	async setSessionArchived(id: string, archived: boolean): Promise<{ id: string; archivedAt: number | null; workspace: string | null; repository: string | null; kind: string | null }> {
 		if (Object.hasOwn(modes, id)) throw Object.assign(new Error("Built-in chats cannot be archived."), { statusCode: 400 });
-		const task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(id) as any;
-		const chat = task ? null : this.#db.prepare("SELECT * FROM chat_threads WHERE id=?").get(id);
+		const task = this.#get<CodingTaskRow>("SELECT * FROM coding_tasks WHERE id=?", id);
+		const chat = task ? null : this.#get<ChatThreadRow>("SELECT * FROM chat_threads WHERE id=?", id);
 		if (!task && !chat) throw Object.assign(new Error("Session not found."), { statusCode: 404 });
 		if (archived && (this.#active.has(id) || this.#recovering.has(id))) await this.abortSession(id).catch(() => ({ ok: false }));
 		const archivedAt = archived ? Date.now() : null;
@@ -452,40 +473,44 @@ export class LocalAgentHost {
 
 	/** Details needed to recreate a removed worktree, or null when the session's worktree is still present. */
 	removedWorktree(id: string): { path: string; repository: string; branch: string } | null {
-		const task = this.#db.prepare("SELECT workspace, repository, branch, worktreeRemoved, kind FROM coding_tasks WHERE id=?").get(id) as any;
+		const task = this.#get<Pick<CodingTaskRow, "workspace" | "repository" | "branch" | "worktreeRemoved" | "kind">>(
+			"SELECT workspace, repository, branch, worktreeRemoved, kind FROM coding_tasks WHERE id=?",
+			id,
+		);
 		if (!task?.worktreeRemoved || task.kind !== "worktree" || !task.workspace || !task.branch) return null;
 		return { path: task.workspace, repository: task.repository, branch: task.branch };
 	}
 
 	/** Record that a removed worktree was recreated on disk, refreshing its identity checks. */
 	markWorktreeRestored(id: string) {
-		const task = this.#db.prepare("SELECT workspace FROM coding_tasks WHERE id=?").get(id) as any;
+		const task = this.#get<Pick<CodingTaskRow, "workspace">>("SELECT workspace FROM coding_tasks WHERE id=?", id);
+		if (!task?.workspace) throw Object.assign(new Error("Session workspace not found."), { statusCode: 404 });
 		const info = statSync(task.workspace, { bigint: true });
 		this.#db.prepare("UPDATE coding_tasks SET worktreeRemoved=0, workspaceDev=?, workspaceIno=? WHERE id=?").run(String(info.dev), String(info.ino), id);
 	}
 
 	/** Archive or restore a project. Archiving a project also archives its sessions; restoring leaves them archived. */
 	async setProjectArchived(id: string, archived: boolean) {
-		const project = this.#db.prepare("SELECT * FROM projects WHERE id=?").get(id);
+		const project = this.#get<ProjectRow>("SELECT * FROM projects WHERE id=?", id);
 		if (!project) throw Object.assign(new Error("Project not found."), { statusCode: 404 });
 		const sessions = [];
 		if (archived) {
-			const tasks = this.#db.prepare("SELECT id FROM coding_tasks WHERE projectId=? AND archivedAt IS NULL").all(id) as any[];
+			const tasks = this.#all<{ id: string }>("SELECT id FROM coding_tasks WHERE projectId=? AND archivedAt IS NULL", id);
 			for (const task of tasks) sessions.push(await this.setSessionArchived(task.id, true));
 		}
 		this.#db.prepare("UPDATE projects SET archivedAt=? WHERE id=?").run(archived ? Date.now() : null, id);
-		return { project: this.#serializeProject(this.#db.prepare("SELECT * FROM projects WHERE id=?").get(id)), sessions };
+		return { project: this.#serializeProject(this.#get<ProjectRow>("SELECT * FROM projects WHERE id=?", id)), sessions };
 	}
 
 	forkSession(sourceId: string) {
 		const newId = randomUUID();
 		const now = Date.now();
-		const chat = this.#db.prepare("SELECT * FROM chat_threads WHERE id=?").get(sourceId) as any;
+		const chat = this.#get<ChatThreadRow>("SELECT * FROM chat_threads WHERE id=?", sourceId);
 		if (chat) {
 			const forkTitle = `${chat.title} (fork)`.slice(0, 200);
 			this.#db.prepare("INSERT INTO chat_threads (id,mode,title,manuallyNamed,createdAt) VALUES (?,?,?,?,?)")
 				.run(newId, chat.mode, forkTitle, 1, now);
-			const rows = this.#db.prepare("SELECT * FROM turns WHERE chatId=? ORDER BY createdAt ASC").all(sourceId) as any[];
+			const rows = this.#all<TurnRow>("SELECT * FROM turns WHERE chatId=? ORDER BY createdAt ASC", sourceId);
 			const insertTurn = this.#db.prepare(
 				"INSERT INTO turns (id,mode,content,provider,model,reasoning,status,answer,error,createdAt,updatedAt,chatId) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
 			);
@@ -494,13 +519,13 @@ export class LocalAgentHost {
 			}
 			return this.sessions().find(item => item.id === newId);
 		}
-		const task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(sourceId) as any;
+		const task = this.#get<CodingTaskRow>("SELECT * FROM coding_tasks WHERE id=?", sourceId);
 		if (task) {
 			const forkTitle = `${task.title} (fork)`.slice(0, 200);
 			this.#db.prepare(
 				"INSERT INTO coding_tasks (id,title,repository,kind,base,branch,workspace,status,message,createdAt,projectId,initialTitle) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
 			).run(newId, forkTitle, task.repository, task.kind, task.base, task.branch, task.workspace, task.status, task.message, now, task.projectId ?? null, forkTitle);
-			const rows = this.#db.prepare("SELECT * FROM turns WHERE taskId=? ORDER BY createdAt ASC").all(sourceId) as any[];
+			const rows = this.#all<TurnRow>("SELECT * FROM turns WHERE taskId=? ORDER BY createdAt ASC", sourceId);
 			const insertTurn = this.#db.prepare(
 				"INSERT INTO turns (id,mode,content,provider,model,reasoning,status,answer,error,createdAt,updatedAt,taskId) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
 			);
@@ -513,7 +538,7 @@ export class LocalAgentHost {
 			const forkTitle = sourceId === "coding" ? "Coding lead (fork)" : "Personal agent (fork)";
 			this.#db.prepare("INSERT INTO chat_threads (id,mode,title,manuallyNamed,createdAt) VALUES (?,?,?,?,?)")
 				.run(newId, sourceId, forkTitle, 1, now);
-			const rows = this.#db.prepare("SELECT * FROM turns WHERE mode=? AND taskId IS NULL AND chatId IS NULL ORDER BY createdAt ASC").all(sourceId) as any[];
+			const rows = this.#all<TurnRow>("SELECT * FROM turns WHERE mode=? AND taskId IS NULL AND chatId IS NULL ORDER BY createdAt ASC", sourceId);
 			const insertTurn = this.#db.prepare(
 				"INSERT INTO turns (id,mode,content,provider,model,reasoning,status,answer,error,createdAt,updatedAt,chatId) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
 			);
@@ -526,12 +551,12 @@ export class LocalAgentHost {
 	}
 
 	moveSession(sourceId: string, opts: { mode?: "coding" | "personal"; projectId?: string | null }) {
-		const task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(sourceId) as any;
+		const task = this.#get<CodingTaskRow>("SELECT * FROM coding_tasks WHERE id=?", sourceId);
 		if (task) {
 			if (opts.projectId !== undefined) {
 				const targetProjectId = opts.projectId ? String(opts.projectId) : null;
 				if (targetProjectId) {
-					const proj = this.#db.prepare("SELECT id, repository FROM projects WHERE id=?").get(targetProjectId) as any;
+					const proj = this.#get<Pick<ProjectRow, "id" | "repository">>("SELECT id, repository FROM projects WHERE id=?", targetProjectId);
 					if (!proj) throw Object.assign(new Error("Target project not found."), { statusCode: 404 });
 					this.#db.prepare("UPDATE coding_tasks SET projectId=?, repository=CASE WHEN repository='' THEN ? ELSE repository END WHERE id=?")
 						.run(targetProjectId, proj.repository ?? "", sourceId);
@@ -541,10 +566,10 @@ export class LocalAgentHost {
 			}
 			return this.sessions().find(item => item.id === sourceId);
 		}
-		const chat = this.#db.prepare("SELECT * FROM chat_threads WHERE id=?").get(sourceId) as any;
+		const chat = this.#get<ChatThreadRow>("SELECT * FROM chat_threads WHERE id=?", sourceId);
 		if (chat) {
 			if (opts.projectId) {
-				const proj = this.#db.prepare("SELECT id, repository FROM projects WHERE id=?").get(opts.projectId) as any;
+				const proj = this.#get<Pick<ProjectRow, "id" | "repository">>("SELECT id, repository FROM projects WHERE id=?", opts.projectId);
 				if (!proj) throw Object.assign(new Error("Target project not found."), { statusCode: 404 });
 				this.#db.prepare(
 					"INSERT INTO coding_tasks (id,title,repository,kind,base,branch,workspace,status,message,createdAt,projectId,initialTitle) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -642,7 +667,7 @@ export class LocalAgentHost {
 				stageOverridesJson ?? null,
 			);
 		}
-		return this.#serializeProject(this.#db.prepare("SELECT * FROM projects WHERE id=?").get(projectId));
+		return this.#serializeProject(this.#get<ProjectRow>("SELECT * FROM projects WHERE id=?", projectId));
 	}
 
 	deleteProject(id: string) {
@@ -658,14 +683,17 @@ export class LocalAgentHost {
 	}
 
 	getWorkspacePath(sessionId: string): string | null {
-		const task = this.#db.prepare("SELECT workspace, status, kind, worktreeRemoved FROM coding_tasks WHERE id=?").get(sessionId) as any;
+		const task = this.#get<Pick<CodingTaskRow, "workspace" | "status" | "kind" | "worktreeRemoved">>(
+			"SELECT workspace, status, kind, worktreeRemoved FROM coding_tasks WHERE id=?",
+			sessionId,
+		);
 		if (!task || task.kind === "none" || task.status !== "ready" || !task.workspace || task.worktreeRemoved) return null;
 		return task.workspace;
 	}
 
 	/** The commit a session's branch started from (recorded at creation), or null for checkout/none sessions. */
 	getWorkspaceBase(sessionId: string): string | null {
-		const task = this.#db.prepare("SELECT base, kind FROM coding_tasks WHERE id=?").get(sessionId) as any;
+		const task = this.#get<Pick<CodingTaskRow, "base" | "kind">>("SELECT base, kind FROM coding_tasks WHERE id=?", sessionId);
 		return task?.kind === "worktree" && task.base && task.base !== "HEAD" ? task.base : null;
 	}
 
@@ -680,31 +708,31 @@ export class LocalAgentHost {
 		return null;
 	}
 
-	async #watchConversation(sessionId: string, harness: any, conversationId: string | number, isSubagent: boolean): Promise<void> {
+	async #watchConversation(sessionId: string, harness: Harness, conversationId: string | number, isSubagent: boolean): Promise<void> {
 		const convKey = String(conversationId);
 		const watchKey = `${sessionId}:${convKey}`;
 		if (this.#watches.has(watchKey)) return;
 		try {
-			const conv = await harness.conversation(conversationId, context);
+			const conv = await harness.conversation(toConversationId(conversationId), context);
 			if (!conv) return;
 			const watch = await conv.watch(context, { min: 100, max: 200 });
 			this.#watches.set(watchKey, watch);
-			const emitView = (view: any) => {
+			const emitView = (view: WatchViewLike | undefined) => {
 				const snapshot = projectTimeline({
 					sessionId,
 					conversationId: convKey,
 					entries: view?.entries ?? [],
-					live: view?.docs?.["pi.live"],
-					usage: view?.docs?.["pi.usage"],
+					live: view?.docs?.["pi.live"] as LiveStateLike | undefined,
+					usage: view?.docs?.["pi.usage"] as UsageLike | undefined,
 				});
 				this.events.emit("timeline.update", { ...snapshot, isSubagent }, sessionId);
 				if (isSubagent) {
 					this.events.emit("subagents.update", { sessionId, subagentId: convKey, busy: snapshot.busy }, sessionId);
 				}
 			};
-			emitView(watch.value);
-			watch.start((call: any) => {
-				if (call.kind === "value") emitView(call.value);
+			emitView(watch.value as unknown as WatchViewLike | undefined);
+			watch.start(async (call) => {
+				if (call.kind === "value") emitView(call.value as unknown as WatchViewLike | undefined);
 			});
 		} catch {
 			// non-fatal watch error
@@ -714,7 +742,7 @@ export class LocalAgentHost {
 	async getTimeline(sessionId: string, conversationId?: string): Promise<ConversationTimelineSnapshot> {
 		const open = this.#sessions.get(sessionId);
 		const dbPath = this.#sessionDbPath(sessionId);
-		const targetId: any = conversationId !== undefined ? (/^\d+$/.test(conversationId) ? Number(conversationId) : conversationId) : ROOT_CONVERSATION_ID;
+		const targetId: ConversationIdParam = conversationId !== undefined ? toConversationId(conversationId) : ROOT_CONVERSATION_ID;
 		if (!open && (!dbPath || !existsSync(dbPath))) {
 			return { sessionId, conversationId: String(targetId), busy: false, items: [], liveTools: [], runFailure: null, usage: null };
 		}
@@ -730,9 +758,9 @@ export class LocalAgentHost {
 				return { sessionId, conversationId: String(targetId), busy: false, items: [], liveTools: [], runFailure: null, usage: null };
 			}
 			const { items: entries } = await conv.entries({ order: "ascending" }, 400, undefined, context);
-			const live = await harness.snapshot(LiveDoc, targetId, context);
-			const usage = await harness.snapshot(UsageDoc, targetId, context);
-			return projectTimeline({ sessionId, conversationId: String(targetId), entries, live, usage });
+			const live = (await harness.snapshot(LiveDoc, targetId, context)) as LiveStateLike | undefined;
+			const usage = (await harness.snapshot(UsageDoc, targetId, context)) as UsageLike | undefined;
+			return projectTimeline({ sessionId, conversationId: String(targetId), entries: entries as unknown as TimelineEntryLike[], live, usage });
 		} finally {
 			if (ownReader) await harness.close(context);
 		}
@@ -771,7 +799,7 @@ export class LocalAgentHost {
 		if (!trimmed) throw Object.assign(new Error("Provide a message for the subagent."), { statusCode: 400 });
 		const open = this.#sessions.get(sessionId);
 		if (!open) throw Object.assign(new Error("Session is not currently open."), { statusCode: 409 });
-		const convId: any = /^\d+$/.test(subagentId) ? Number(subagentId) : subagentId;
+		const convId = toConversationId(subagentId);
 		const conv = await open.harness.conversation(convId, context);
 		if (!conv) throw Object.assign(new Error("Subagent not found."), { statusCode: 404 });
 		await this.#watchConversation(sessionId, open.harness, convId, true);
@@ -784,7 +812,7 @@ export class LocalAgentHost {
 	async stopSubagent(sessionId: string, subagentId: string): Promise<{ ok: boolean }> {
 		const open = this.#sessions.get(sessionId);
 		if (!open) return { ok: true };
-		const convId: any = /^\d+$/.test(subagentId) ? Number(subagentId) : subagentId;
+		const convId = toConversationId(subagentId);
 		const conv = await open.harness.conversation(convId, context);
 		if (!conv) throw Object.assign(new Error("Subagent not found."), { statusCode: 404 });
 		await conv.abort(context);
@@ -835,7 +863,7 @@ export class LocalAgentHost {
 					const pending = live.submissions.some(item => item.conversationId === record.id);
 					const liveDoc = await harness.snapshot(LiveDoc, record.id, context);
 					const { items: rawEntries } = await conversation.entries({ order: "ascending" }, 200, undefined, context);
-					const timeline = projectTimeline({ sessionId: taskId, conversationId: String(record.id), entries: rawEntries, live: liveDoc });
+					const timeline = projectTimeline({ sessionId: taskId, conversationId: String(record.id), entries: rawEntries as unknown as TimelineEntryLike[], live: liveDoc as LiveStateLike | undefined });
 					const hasAssistantReply = transcript.messages.some((m) => m.role === "assistant" && plainText(m.content).trim());
 					const status = ownReader && (tasks.length || pending) ? "unknown"
 						: tasks.some(item => item.state.kind === "blocked") ? "blocked"
@@ -907,7 +935,7 @@ export class LocalAgentHost {
 		const runtimeProviders = this.#runtimeModels?.providers ?? [];
 		const results = [];
 		for (const p of runtimeProviders) {
-			let config: any;
+			let config: Pick<ModelConfigResult, "configured" | "availableModels" | "defaultModel" | "setupMessage">;
 			try {
 				config = await this.#modelConfig(p.id);
 			} catch (error) {

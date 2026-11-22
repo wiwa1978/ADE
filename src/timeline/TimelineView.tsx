@@ -49,7 +49,7 @@ function ToolCallCard({
   const isSleeping = tool.status === "sleeping"
   const [open, setOpen] = useState(isRunning || isSleeping || tool.isError)
 
-  const details = (tool.details && typeof tool.details === "object" ? tool.details : {}) as Record<string, any>
+  const details = (tool.details && typeof tool.details === "object" ? tool.details : {}) as Record<string, unknown>
   const isSubagentTool = tool.name === "spawn_subagent" || tool.name === "delegate"
   const isBrowserTool = tool.name.startsWith("browser_")
   const isFileTool = ["read", "write", "edit", "list_files"].includes(tool.name)
@@ -160,7 +160,7 @@ function ToolCallCard({
             <button type="button" className="ade-chip-btn" onClick={() => onOpenBrowser(urlText)}>Open browser</button>
           ) : null}
           {isArtifactTool && onOpenArtifact ? (
-            <button type="button" className="ade-chip-btn" onClick={() => onOpenArtifact(details.artifactId)}>View artifact</button>
+            <button type="button" className="ade-chip-btn" onClick={() => onOpenArtifact(typeof details.artifactId === "string" ? details.artifactId : undefined)}>View artifact</button>
           ) : null}
           {statusBadge}
         </div>

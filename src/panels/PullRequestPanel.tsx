@@ -79,8 +79,8 @@ export function PullRequestPanel({
     try {
       const [branch, pull] = await Promise.all([
         request<BranchStatus>(`/api/sessions/${encodeURIComponent(sessionId)}/branch`),
-        request<{ pullRequest: PullRequestInfo | null }>(`/api/sessions/${encodeURIComponent(sessionId)}/pr`).catch((err: any) => {
-          setError(err?.message || "Could not read the pull request from GitHub.")
+        request<{ pullRequest: PullRequestInfo | null }>(`/api/sessions/${encodeURIComponent(sessionId)}/pr`).catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : "Could not read the pull request from GitHub.")
           return { pullRequest: null }
         }),
       ])
@@ -88,8 +88,8 @@ export function PullRequestPanel({
       setPr(pull.pullRequest)
       onPullRequestChange?.(pull.pullRequest)
       setBase(current => current || branch.baseBranch || "")
-    } catch (err: any) {
-      setError(err?.message || "Could not read the branch status.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read the branch status.")
       setPr(null)
     }
   }, [sessionId, onPullRequestChange])
@@ -119,8 +119,8 @@ export function PullRequestPanel({
         onPullRequestChange?.(result.pullRequest ?? null)
       }
       await load()
-    } catch (err: any) {
-      setError(err?.message || "The GitHub action failed.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The GitHub action failed.")
     } finally {
       setBusy(null)
     }

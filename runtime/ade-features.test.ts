@@ -21,7 +21,7 @@ import {
 import { discoverSkillsAndRules } from "./skills.ts";
 import { validateExternalUrl } from "./browser.ts";
 
-function createFixture(responses: any[]) {
+function createFixture(responses: Parameters<ReturnType<typeof fauxProvider>["setResponses"]>[0]) {
 	const faux = fauxProvider();
 	faux.setResponses(responses);
 	const models = createModels();
@@ -64,9 +64,9 @@ test("approval gates pause risky shell commands and resume on approval + always-
 		const taskId = randomUUID();
 		await host.createCodingTask({ id: taskId, title: "Shell approval", repository: repoDir, kind: "checkout" }, manager);
 
-		const approvalPromise = new Promise<any>((resolve) => {
+		const approvalPromise = new Promise<{ id: string; toolName: string }>((resolve) => {
 			host!.events.subscribe((event) => {
-				if (event.type === "approval.requested") resolve(event.payload);
+				if (event.type === "approval.requested") resolve(event.payload as { id: string; toolName: string });
 			});
 		});
 

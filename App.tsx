@@ -199,8 +199,8 @@ export default function App() {
       const data = await request<{ projects: Project[] }>("/api/projects")
       setProjects(data.projects ?? [])
       setProjectsError("")
-    } catch (err: any) {
-      setProjectsError(err?.message || "Could not load projects.")
+    } catch (err) {
+      setProjectsError(err instanceof Error ? err.message : "Could not load projects.")
     }
   }, [])
 
@@ -246,9 +246,9 @@ export default function App() {
       const data = await request<RuntimeHealth>(`/api/health${qs}`)
       setRuntime(data)
       setRuntimeError("")
-    } catch (err: any) {
+    } catch (err) {
       setRuntime(null)
-      setRuntimeError(err?.message || "Waiting for the ADE local runtime.")
+      setRuntimeError(err instanceof Error ? err.message : "Waiting for the ADE local runtime.")
     }
   }, [settings.provider])
 
@@ -465,8 +465,8 @@ export default function App() {
       })
       await loadSessions()
       void stream.refreshTimeline(activeSession.id)
-    } catch (err: any) {
-      setRuntimeError(err?.message || "Could not send message.")
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "Could not send message.")
     } finally {
       setSending(false)
     }
@@ -480,8 +480,8 @@ export default function App() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ content: text, mode }),
       })
-    } catch (err: any) {
-      setRuntimeError(err?.message || "Could not steer session.")
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "Could not steer session.")
     }
   }
 
@@ -505,8 +505,8 @@ export default function App() {
         headers: { "content-type": "application/json" },
         body: "{}",
       })
-    } catch (err: any) {
-      setRuntimeError(err?.message || "Could not compact session.")
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "Could not compact session.")
     }
   }
 
@@ -558,9 +558,9 @@ export default function App() {
       if (input.projectId && !expandedProjects.includes(input.projectId)) {
         setExpandedProjects(prev => [...prev, input.projectId!])
       }
-    } catch (err: any) {
+    } catch (err) {
       clearPendingStart(taskId)
-      setLaunchError(err?.message || "Could not create session.")
+      setLaunchError(err instanceof Error ? err.message : "Could not create session.")
     } finally {
       setCreatingSession(false)
     }
@@ -589,8 +589,8 @@ export default function App() {
       setActiveSessionId(res.session.id)
       setNewSessionOpen(false)
       setScreen("work")
-    } catch (err: any) {
-      setRuntimeError(err?.message || "Could not create chat.")
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "Could not create chat.")
     }
   }
 
@@ -686,8 +686,8 @@ export default function App() {
         setSelectedProjectId(null)
         setScreen("work")
       }
-    } catch (err: any) {
-      setRuntimeError(err?.message || "Could not change the archive state.")
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "Could not change the archive state.")
     } finally {
       await Promise.all([loadSessions(), loadProjects()])
     }
@@ -737,8 +737,8 @@ export default function App() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ app, path: path || undefined }),
       })
-    } catch (err: any) {
-      setRuntimeError(err?.message || `Could not open in ${app}.`)
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : `Could not open in ${app}.`)
     }
   }, [])
 
@@ -755,8 +755,8 @@ export default function App() {
         setNewSessionOpen(false)
         setScreen("work")
       }
-    } catch (err: any) {
-      setRuntimeError(err?.message || "Could not fork chat.")
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "Could not fork chat.")
     }
   }, [loadSessions])
 
@@ -771,8 +771,8 @@ export default function App() {
       if (opts.projectId) {
         setExpandedProjects(prev => (prev.includes(opts.projectId!) ? prev : [...prev, opts.projectId!]))
       }
-    } catch (err: any) {
-      setRuntimeError(err?.message || "Could not move chat.")
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "Could not move chat.")
     }
   }, [loadSessions])
 
@@ -786,8 +786,8 @@ export default function App() {
       if (activeSessionId === sess.id) {
         setActiveSessionId("coding")
       }
-    } catch (err: any) {
-      setRuntimeError(err?.message || "Could not delete session.")
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "Could not delete session.")
     }
   }, [activeSessionId, loadSessions])
 
@@ -799,8 +799,8 @@ export default function App() {
         setSelectedProjectId(null)
         if (screen === "project") setScreen("projects")
       }
-    } catch (err: any) {
-      setProjectsError(err?.message || "Could not delete project.")
+    } catch (err) {
+      setProjectsError(err instanceof Error ? err.message : "Could not delete project.")
     }
   }, [screen, selectedProjectId])
 
@@ -851,8 +851,8 @@ export default function App() {
         await loadFactoryRuns()
         openStreamPane(project.id, `factory:${res.run.run.runId}`)
       }
-    } catch (err: any) {
-      setRuntimeError(err?.message || "Could not start Software Factory run.")
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "Could not start Software Factory run.")
     }
   }, [loadFactoryRuns, openStreamPane])
 

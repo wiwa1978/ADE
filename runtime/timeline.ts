@@ -47,54 +47,108 @@ export type ConversationTimelineSnapshot = {
 	usage?: { inputTokens: number; outputTokens: number; totalCost?: number } | null;
 };
 
+type ContentPartLike = {
+	type?: string;
+	text?: unknown;
+	thinking?: unknown;
+	id?: unknown;
+	name?: unknown;
+	arguments?: unknown;
+};
+
+type ModelMessageLike = {
+	role?: string;
+	content?: unknown;
+	toolCallId?: unknown;
+	isError?: unknown;
+	details?: unknown;
+};
+
+export type TimelineEntryLike = {
+	id?: unknown;
+	kind?: string;
+	createdAt?: unknown;
+	data?: unknown;
+	model?: readonly ModelMessageLike[];
+};
+
+export type LiveToolSlotLike = {
+	callId: unknown;
+	name: unknown;
+	status?: TimelineToolCall["status"];
+	output?: unknown;
+	details?: unknown;
+};
+
+export type LiveStateLike = {
+	busy?: boolean;
+	run?: unknown;
+	tools?: readonly LiveToolSlotLike[];
+	generation?: { message?: { content?: unknown } } | null;
+	runFailure?: { reason?: unknown; detail?: unknown } | null;
+};
+
+export type UsageLike = {
+	input?: unknown;
+	inputTokens?: unknown;
+	output?: unknown;
+	outputTokens?: unknown;
+	cost?: { total?: unknown } | null;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value && typeof value === "object");
+}
+
 function extractText(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
 	return content
-		.filter((part: any) => part?.type === "text" && typeof part.text === "string")
-		.map((part: any) => part.text)
+		.filter((part): part is ContentPartLike & { text: string } => isRecord(part) && part.type === "text" && typeof part.text === "string")
+		.map((part) => part.text)
 		.join("\n");
 }
 
 function extractThinking(content: unknown): string {
 	if (!Array.isArray(content)) return "";
 	return content
-		.filter((part: any) => part?.type === "thinking" && typeof part.thinking === "string")
-		.map((part: any) => part.thinking)
+		.filter((part): part is ContentPartLike & { thinking: string } => isRecord(part) && part.type === "thinking" && typeof part.thinking === "string")
+		.map((part) => part.thinking)
 		.join("\n");
 }
 
 function extractToolCalls(content: unknown): { callId: string; name: string; arguments: Record<string, unknown> }[] {
 	if (!Array.isArray(content)) return [];
 	return content
-		.filter((part: any) => part?.type === "toolCall")
-		.map((part: any) => ({
+		.filter((part): part is ContentPartLike => isRecord(part) && part.type === "toolCall")
+		.map((part) => ({
 			callId: String(part.id ?? ""),
 			name: String(part.name ?? "tool"),
-			arguments: (part.arguments && typeof part.arguments === "object" ? part.arguments : {}) as Record<string, unknown>,
+			arguments: isRecord(part.arguments) ? part.arguments : {},
 		}));
 }
 
 export function projectTimeline(opts: {
 	sessionId: string;
 	conversationId: string;
-	entries: readonly any[];
-	live?: any;
-	usage?: any;
+	entries: readonly TimelineEntryLike[];
+	live?: LiveStateLike | null;
+	usage?: UsageLike | null;
 }): ConversationTimelineSnapshot {
 	const toolResults = new Map<string, { output: string; isError: boolean; details?: unknown }>();
 	for (const entry of opts.entries) {
 		const msg = entry?.model?.[0];
+		const entryData = isRecord(entry?.data) ? entry.data : undefined;
 		if (msg?.role === "toolResult" && msg.toolCallId) {
 			toolResults.set(String(msg.toolCallId), {
 				output: extractText(msg.content),
 				isError: Boolean(msg.isError),
-				details: msg.details ?? entry?.data?.details,
+				details: msg.details ?? entryData?.details,
 			});
 		}
 	}
 
-	const liveSlotMap = new Map<string, any>();
+	const liveSlotMap = new Map<string, LiveToolSlotLike>();
 	const liveTools: TimelineToolCall[] = [];
 	if (Array.isArray(opts.live?.tools)) {
 		for (const slot of opts.live.tools) {
@@ -115,10 +169,11 @@ export function projectTimeline(opts: {
 	for (const entry of opts.entries) {
 		const createdAt = Number(entry?.createdAt ?? Date.now());
 		if (entry?.kind === "pi.compaction") {
+			const entryData = isRecord(entry.data) ? entry.data : undefined;
 			items.push({
 				id: String(entry.id),
 				kind: "compaction",
-				summary: String(entry?.data?.summary ?? "Conversation compacted."),
+				summary: String(entryData?.summary ?? "Conversation compacted."),
 				createdAt,
 			});
 			continue;

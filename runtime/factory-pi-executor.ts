@@ -10,6 +10,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import type { Models } from "@earendil-works/pi-ai/models";
 import type { BlueprintStage, StageVerdict } from "../packages/protocol/index.ts";
 import { createWorkspaceTools } from "./coding-tools.ts";
 import { createSearchTools } from "./search-tools.ts";
@@ -25,7 +26,7 @@ export type HostModelResolver = (preferredProvider?: string) => Promise<{
 	availableModels: { id: string; name: string }[];
 	configured: boolean;
 	setupMessage?: string;
-	models: any;
+	models: Models;
 	resolveModel: (modelId: string) => unknown;
 }>;
 
@@ -278,7 +279,7 @@ export function createPiFactoryStageExecutor(deps: {
 				? `factory-${detail.run.runId}-captain.sqlite`
 				: `factory-${detail.run.runId}-worker-${stageId}-${attempt}.sqlite`;
 
-		let harnessRef: any = null;
+		let harnessRef: Harness | null = null;
 		if (canMutate) {
 			registry.install(deps.approvals.createExtension(`factory:${detail.run.runId}`, () => harnessRef));
 		}
@@ -340,7 +341,7 @@ export function createPiFactoryStageExecutor(deps: {
 			const transcript = await root.context(context);
 			const lastAssistant = [...transcript.messages]
 				.reverse()
-				.find((m: any) => m.role === "assistant");
+				.find((m) => m.role === "assistant");
 			const output = plainText(lastAssistant?.content).trim() || `Stage "${stage.name}" finished.`;
 
 			// Read actual token usage from Pi Durable UsageDoc when available
@@ -348,11 +349,18 @@ export function createPiFactoryStageExecutor(deps: {
 			let outputTokens = 0;
 			let usd = 0;
 			try {
-				const usage = await harness.snapshot(UsageDoc, ROOT_CONVERSATION_ID, context);
+				const usage = (await harness.snapshot(UsageDoc, ROOT_CONVERSATION_ID, context)) as {
+					inputTokens?: unknown;
+					input?: unknown;
+					outputTokens?: unknown;
+					output?: unknown;
+					totalCost?: unknown;
+					cost?: unknown;
+				} | null;
 				if (usage) {
-					inputTokens = Number((usage as any).inputTokens ?? (usage as any).input ?? 0) || 0;
-					outputTokens = Number((usage as any).outputTokens ?? (usage as any).output ?? 0) || 0;
-					usd = Number((usage as any).totalCost ?? (usage as any).cost ?? 0) || 0;
+					inputTokens = Number(usage.inputTokens ?? usage.input ?? 0) || 0;
+					outputTokens = Number(usage.outputTokens ?? usage.output ?? 0) || 0;
+					usd = Number(usage.totalCost ?? usage.cost ?? 0) || 0;
 				}
 			} catch {
 				// UsageDoc optional on faux providers

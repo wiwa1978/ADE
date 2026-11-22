@@ -34,8 +34,8 @@ export function FileViewerPanel({
       setOriginal(res.content)
       setLanguage(res.language)
       setBinary(res.binary)
-    } catch (err: any) {
-      setError(err?.message || "Could not open file.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not open file.")
     } finally {
       setLoading(false)
     }
@@ -60,8 +60,8 @@ export function FileViewerPanel({
       setSavedToast(true)
       setTimeout(() => setSavedToast(false), 1800)
       onSaved?.()
-    } catch (err: any) {
-      setError(err?.message || "Failed to save file.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save file.")
     } finally {
       setSaving(false)
     }

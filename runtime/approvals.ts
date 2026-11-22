@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
-import { defineExtension, defineSignal, hook, ToolTask } from "@earendil-works/pi-durable";
+import { defineExtension, defineSignal, hook, ToolTask, type Harness } from "@earendil-works/pi-durable";
 import { bool, obj, opt, str } from "@earendil-works/pi-schema";
 import type { RuntimeEventBus } from "./events.ts";
 
@@ -76,10 +76,15 @@ function isSafeReadOnlyCommand(command: string): boolean {
 	);
 }
 
+type PendingEntry = PendingApproval & {
+	rawTaskId: Parameters<Harness["signal"]>[0];
+	harness: Harness | null;
+};
+
 export class ApprovalManager {
 	#db: DatabaseSync;
 	#events: RuntimeEventBus;
-	#pending = new Map<string, PendingApproval & { harness: any }>();
+	#pending = new Map<string, PendingEntry>();
 	#policy: ApprovalPolicy = "auto-safe";
 	#sessionPolicies = new Map<string, ApprovalPolicy>();
 
@@ -125,7 +130,7 @@ export class ApprovalManager {
 	}
 
 	listRules(): { id: string; toolName: string; prefix: string; createdAt: number }[] {
-		return this.#db.prepare("SELECT id, toolName, prefix, createdAt FROM approval_rules ORDER BY createdAt DESC").all() as any;
+		return this.#db.prepare("SELECT id, toolName, prefix, createdAt FROM approval_rules ORDER BY createdAt DESC").all() as unknown as { id: string; toolName: string; prefix: string; createdAt: number }[];
 	}
 
 	addRule(toolName: string, prefix: string): void {
@@ -148,7 +153,7 @@ export class ApprovalManager {
 	}
 
 	listPending(sessionId?: string): PendingApproval[] {
-		const items = [...this.#pending.values()].map(({ harness: _h, ...rest }) => rest);
+		const items = [...this.#pending.values()].map(({ harness: _h, rawTaskId: _rt, ...rest }) => rest);
 		return sessionId ? items.filter(item => item.sessionId === sessionId) : items;
 	}
 
@@ -168,13 +173,13 @@ export class ApprovalManager {
 		return false;
 	}
 
-	createExtension(sessionId: string, getHarness: () => any) {
+	createExtension(sessionId: string, getHarness: () => Harness | null) {
 		return defineExtension({
 			name: "ade-approvals",
 			hooks: [
 				hook(ToolTask, {
-					beforeTool: async (call: any, api: any, ctx: any) => {
-						const args = (call.arguments ?? {}) as Record<string, unknown>;
+					beforeTool: async (call, api, ctx) => {
+						const args = (call.arguments && typeof call.arguments === "object" ? call.arguments : {}) as Record<string, unknown>;
 						if (!this.shouldRequireApproval(sessionId, call.name, args)) {
 							return undefined;
 						}
@@ -195,10 +200,11 @@ export class ApprovalManager {
 						const summary = command
 							? `Run command: ${command}`
 							: `Run tool ${call.name}`;
-						const entry: PendingApproval & { harness: any } = {
+						const entry: PendingEntry = {
 							id,
 							sessionId,
-							taskId: api.taskId,
+							taskId: String(api.taskId),
+							rawTaskId: api.taskId,
 							signalKey: key,
 							toolName: call.name,
 							summary,
@@ -209,7 +215,7 @@ export class ApprovalManager {
 							harness: getHarness(),
 						};
 						this.#pending.set(id, entry);
-						const { harness: _h, ...publicEntry } = entry;
+						const { harness: _h, rawTaskId: _rt, ...publicEntry } = entry;
 						this.#events.emit("approval.requested", publicEntry, sessionId);
 						const until = await api.memo(`ade.approval.until.${key}`, api.now() + 24 * 60 * 60 * 1000, ctx);
 						return { sleep: { signals: [ApprovalSignal.key(key)], until } };
@@ -228,10 +234,10 @@ export class ApprovalManager {
 			this.addRule(pending.toolName, decision.prefix || pending.suggestedPrefix || "*");
 		}
 		this.#pending.delete(id);
-		const { harness, ...publicEntry } = pending;
+		const { harness, rawTaskId, ...publicEntry } = pending;
 		if (harness) {
 			await harness.signal(
-				pending.taskId,
+				rawTaskId,
 				ApprovalSignal,
 				pending.signalKey,
 				{ allow: Boolean(decision.allow), ...(decision.reason ? { reason: decision.reason } : {}) },

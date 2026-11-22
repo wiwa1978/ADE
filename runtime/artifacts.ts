@@ -53,11 +53,11 @@ export class ArtifactManager {
 	}
 
 	listArtifacts(sessionId: string): SessionArtifact[] {
-		return this.#db.prepare("SELECT * FROM session_artifacts WHERE sessionId=? ORDER BY updatedAt DESC").all(sessionId) as any;
+		return this.#db.prepare("SELECT * FROM session_artifacts WHERE sessionId=? ORDER BY updatedAt DESC").all(sessionId) as unknown as SessionArtifact[];
 	}
 
 	getArtifact(id: string): SessionArtifact | null {
-		return (this.#db.prepare("SELECT * FROM session_artifacts WHERE id=?").get(id) as any) ?? null;
+		return (this.#db.prepare("SELECT * FROM session_artifacts WHERE id=?").get(id) as unknown as SessionArtifact | undefined) ?? null;
 	}
 
 	upsertArtifact(input: {

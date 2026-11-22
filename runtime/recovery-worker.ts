@@ -7,13 +7,13 @@ import { randomUUID } from "node:crypto";
 
 const [stateDirectory, markerPath, taskId] = process.argv.slice(2);
 const faux = fauxProvider();
-const blocked = async () => {
+const blocked = async (): Promise<never> => {
 	writeFileSync(markerPath, "model request started");
-	return new Promise(() => {});
+	return new Promise<never>(() => {});
 };
 faux.setResponses(taskId ? [
 	fauxAssistantMessage(fauxToolCall("delegate", { name: "Reviewer", task: "Inspect this" }), { stopReason: "toolUse" }),
-	blocked as any,
+	blocked,
 ] : [blocked]);
 const models = createModels();
 models.setProvider(faux.provider);

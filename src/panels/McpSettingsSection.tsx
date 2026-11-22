@@ -47,8 +47,8 @@ export function McpAndSecuritySettings({
       setArgsText("")
       setUrl("")
       onRefreshMcp()
-    } catch (err: any) {
-      setError(err?.message || "Could not save MCP server.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save MCP server.")
     } finally {
       setBusyId(null)
     }
@@ -64,8 +64,8 @@ export function McpAndSecuritySettings({
         body: "{}",
       })
       onRefreshMcp()
-    } catch (err: any) {
-      setError(err?.message || "MCP connection action failed.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "MCP connection action failed.")
     } finally {
       setBusyId(null)
     }
