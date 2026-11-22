@@ -91,7 +91,7 @@ export class ChatThreadStore {
 			return newId;
 		}
 		if (sourceId === "coding" || sourceId === "personal") {
-			const forkTitle = sourceId === "coding" ? "Coding lead (fork)" : "Personal agent (fork)";
+			const forkTitle = sourceId === "coding" ? "Coding chat (fork)" : "Personal chat (fork)";
 			this.#db.prepare("INSERT INTO chat_threads (id,mode,title,manuallyNamed,createdAt) VALUES (?,?,?,?,?)")
 				.run(newId, sourceId, forkTitle, 1, now);
 			this.#turns.copyTurnsForRootMode(sourceId, newId);

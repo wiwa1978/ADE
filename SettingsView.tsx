@@ -1,7 +1,6 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react"
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react"
 import {
-  ArrowLeft, Bell, Bot, ChevronRight, GitPullRequest, History, Palette, Server, Settings2,
-  Sparkles, Terminal, type LucideIcon,
+  ArrowLeft, Bell, Bot, GitPullRequest, Palette, Search, Server, Settings2, Sparkles, Terminal, X, type LucideIcon,
 } from "lucide-react"
 import { EnvironmentSettings } from "./EnvironmentSettings"
 import { colorPalettes, paletteVariables, type Theme } from "./appearance-palettes"
@@ -9,7 +8,6 @@ import type { ApprovalPolicy, ApprovalRule, BrowserState, EnvironmentDirectory, 
 import type { Project } from "./ProjectsView"
 import type { Settings } from "./useSettings"
 import { modelCredentialProviders, type useConnections } from "./useConnections"
-import { Input } from "@/components/ui/input"
 import { McpAndSecuritySettings } from "./src/panels/McpSettingsSection"
 import { request } from "./api"
 
@@ -17,18 +15,44 @@ import { request } from "./api"
 export type SettingsCategory =
   | "general" | "appearance" | "models" | "agents" | "github" | "terminal" | "notifications" | "environments"
 
-type SettingsItem = { id: SettingsCategory; label: string; icon: LucideIcon; description: string }
+type SettingsItem = { id: SettingsCategory; label: string; icon: LucideIcon; description: string; keywords: string }
 
-const items: SettingsItem[] = [
-  { id: "general", label: "General", icon: Settings2, description: "Session defaults, archiving, and keyboard shortcuts." },
-  { id: "appearance", label: "Appearance", icon: Palette, description: "Theme, color palette, fonts, and layout." },
-  { id: "models", label: "Models", icon: Sparkles, description: "Model providers, API keys, and the default model for new messages." },
-  { id: "agents", label: "Agents & permissions", icon: Bot, description: "Command approvals, MCP servers, and skills available to agents." },
-  { id: "github", label: "Git & GitHub", icon: GitPullRequest, description: "GitHub account and pull request defaults." },
-  { id: "terminal", label: "Terminal", icon: Terminal, description: "The interactive terminal in coding sessions." },
-  { id: "notifications", label: "Notifications", icon: Bell, description: "Desktop notifications when agents need you." },
-  { id: "environments", label: "Environments", icon: Server, description: "This computer and SSH hosts, runtime diagnostics, and version information." },
+const groups: { label: string; items: SettingsItem[] }[] = [
+  {
+    label: "Workspace",
+    items: [
+      { id: "general", label: "General", icon: Settings2, description: "Session defaults, archiving, and keyboard shortcuts.", keywords: "worktree checkout branch archive startup restore shortcuts keyboard" },
+      { id: "terminal", label: "Terminal", icon: Terminal, description: "The interactive terminal in coding sessions.", keywords: "shell font scrollback auto start" },
+      { id: "notifications", label: "Notifications", icon: Bell, description: "Desktop notifications when agents need you.", keywords: "alert finished approval desktop" },
+    ],
+  },
+  {
+    label: "AI",
+    items: [
+      { id: "models", label: "Models", icon: Sparkles, description: "Model providers, API keys, and the default model for new messages.", keywords: "openai anthropic claude copilot radius ollama compatible api key provider reasoning" },
+      { id: "agents", label: "Agents & permissions", icon: Bot, description: "Command approvals, MCP servers, and skills available to agents.", keywords: "approval policy mcp skills rules permissions browser chrome" },
+    ],
+  },
+  {
+    label: "Source control",
+    items: [
+      { id: "github", label: "Git & GitHub", icon: GitPullRequest, description: "GitHub account and pull request defaults.", keywords: "gh cli pull request draft account" },
+    ],
+  },
+  {
+    label: "Interface",
+    items: [
+      { id: "appearance", label: "Appearance", icon: Palette, description: "Theme, color palette, fonts, and layout.", keywords: "dark light theme palette font size width syntax" },
+    ],
+  },
+  {
+    label: "Hosts",
+    items: [
+      { id: "environments", label: "Environments", icon: Server, description: "This computer and SSH hosts, diagnostics, and version information.", keywords: "ssh remote host diagnostics worktrees about version" },
+    ],
+  },
 ]
+const allItems = groups.flatMap(group => group.items)
 
 const reasoningLevels = [
   { id: "none", label: "None" },
@@ -40,12 +64,11 @@ const reasoningLevels = [
 ]
 
 const shortcuts: [string, string][] = [
-  ["Search projects and sessions", "⌘ K"],
+  ["Search sessions, projects, and commands", "⌘ K"],
   ["Focus the message box", "⌥ L"],
-  ["Send message", "Enter"],
-  ["New line in a message", "Shift Enter"],
-  ["Commit in Changes", "Enter in the commit message"],
-  ["Session menu: pin, rename, fork, archive, delete", "P, R, F, A, D while the menu is open"],
+  ["Send message", "↵"],
+  ["New line in a message", "⇧ ↵"],
+  ["Commit in Changes", "↵"],
 ]
 
 type SettingsViewProps = {
@@ -82,24 +105,39 @@ type SettingsViewProps = {
   autoOpenAddEnvironment?: boolean
 }
 
-function Card({ title, children, description }: { title: string; description?: string; children: ReactNode }) {
-  return <section className="settings-card">
+// --- Building blocks -------------------------------------------------------------------------------
+
+function Section({ title, description, children, plain = false }: { title: string; description?: ReactNode; children: ReactNode; plain?: boolean }) {
+  return <section className="st-section">
     <h2>{title}</h2>
-    {description ? <p className="hint">{description}</p> : null}
-    {children}
+    {description ? <p className="st-section-desc">{description}</p> : null}
+    {plain ? children : <div className="st-card">{children}</div>}
   </section>
 }
 
-function Toggle({ label, description, checked, onChange, disabled }: { label: string; description?: string; checked: boolean; onChange: (value: boolean) => void; disabled?: boolean }) {
-  return <label className="settings-toggle">
-    <span><strong>{label}</strong>{description ? <small>{description}</small> : null}</span>
-    <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled} className={`provider-toggle ${checked ? "on" : ""}`} onClick={() => onChange(!checked)}><span /></button>
-  </label>
+function Row({ title, description, children, htmlFor, stacked = false }: { title: ReactNode; description?: ReactNode; children?: ReactNode; htmlFor?: string; stacked?: boolean }) {
+  return <div className={`st-row ${stacked ? "is-stacked" : ""}`}>
+    <div className="st-row-text">
+      {htmlFor ? <label htmlFor={htmlFor}>{title}</label> : <span className="st-row-title">{title}</span>}
+      {description ? <p>{description}</p> : null}
+    </div>
+    {children ? <div className="st-row-control">{children}</div> : null}
+  </div>
+}
+
+function Switch({ label, checked, onChange, disabled }: { label: string; checked: boolean; onChange: (value: boolean) => void; disabled?: boolean }) {
+  return <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled} className={`st-switch ${checked ? "is-on" : ""}`} onClick={() => onChange(!checked)}><span /></button>
+}
+
+function Status({ tone, children }: { tone: "ok" | "off" | "warn" | "error"; children: ReactNode }) {
+  return <span className={`st-status is-${tone}`}><i aria-hidden="true" />{children}</span>
 }
 
 function notificationPermission(): NotificationPermission | "unsupported" {
   return typeof Notification === "undefined" ? "unsupported" : Notification.permission
 }
+
+// --- View ------------------------------------------------------------------------------------------
 
 export function SettingsView({
   settings, resolved, error, runtimeError, runtime, providerName, selectedModel, selectedProvider, modelCatalog,
@@ -108,8 +146,10 @@ export function SettingsView({
   skillsCatalog, onRefreshMcp, onChangeApprovalPolicy, onDeleteApprovalRule, initialCategory, autoOpenAddEnvironment = false,
 }: SettingsViewProps) {
   const [selectedCategory, setSelectedCategory] = useState<SettingsCategory>(initialCategory ?? "general")
+  const [query, setQuery] = useState("")
   const [prevInitialCategory, setPrevInitialCategory] = useState(initialCategory)
   const [permission, setPermission] = useState(notificationPermission)
+  const [editingKey, setEditingKey] = useState<string | null>(null)
   const [compatible, setCompatible] = useState<{ url: string; model: string; fromEnvironment: boolean } | null>(null)
   const [compatibleDraft, setCompatibleDraft] = useState({ url: "", model: "" })
   const [compatibleBusy, setCompatibleBusy] = useState(false)
@@ -137,8 +177,16 @@ export function SettingsView({
     modelCredentials, modelCredentialStatusError, modelCredentialActionError, modelCredentialBusy, saveModelCredential, changeModelCredential,
     providerTools,
   } = connections
-  const selected = items.find(item => item.id === selectedCategory) ?? items[0]
+  const selected = allItems.find(item => item.id === selectedCategory) ?? allItems[0]
   const disabled = sending || credentialChangesBlocked || authBusy || githubConnectionBusy || Boolean(modelCredentialBusy)
+
+  const visibleGroups = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return groups
+    return groups
+      .map(group => ({ ...group, items: group.items.filter(item => `${item.label} ${item.description} ${item.keywords}`.toLowerCase().includes(q)) }))
+      .filter(group => group.items.length)
+  }, [query])
 
   const saveCompatible = async (event: FormEvent) => {
     event.preventDefault()
@@ -150,7 +198,7 @@ export function SettingsView({
         body: JSON.stringify({ action: "configure-compatible", url: compatibleDraft.url, model: compatibleDraft.model }),
       })
       setCompatible(result.compatible)
-      setCompatibleMessage("Saved.")
+      setCompatibleMessage("Saved")
       onModelsChanged?.()
     } catch (cause) {
       setCompatibleMessage(cause instanceof Error ? cause.message : "Could not save the endpoint.")
@@ -159,249 +207,274 @@ export function SettingsView({
     }
   }
 
+  // --- General ---
   const general = <>
-    <Card title="New sessions" description="Used when you start a session in a project that has a local checkout.">
-      <div className="settings-grid">
-        <label>Default workspace
-          <select value={settings.defaultWorkspaceKind} onChange={event => update({ defaultWorkspaceKind: event.target.value as Settings["defaultWorkspaceKind"] })}>
-            <option value="worktree">Worktree — own branch, isolated (recommended)</option>
-            <option value="checkout">Checkout — work directly in the project folder</option>
-            <option value="none">Chat only — no files</option>
-          </select>
-          <small>Worktree sessions get a readable branch such as <code>ade/fix-login-1a2b3c4d</code>.</small>
-        </label>
-      </div>
-    </Card>
-    <Card title="Archiving">
-      <Toggle
-        label="Remove the worktree when a session is archived"
-        description="Frees disk space. The branch and conversation are kept, and restoring recreates the worktree. Worktrees with uncommitted changes are never removed."
-        checked={settings.archiveRemovesWorktree}
-        onChange={value => update({ archiveRemovesWorktree: value })}
-      />
-    </Card>
-    <Card title="Startup">
-      <Toggle label="Reopen the last project or session" description="After a reload or restart, ADE returns to where you were." checked={settings.restoreLastView} onChange={value => update({ restoreLastView: value })} />
-    </Card>
-    <Card title="Keyboard shortcuts">
-      <div className="settings-facts">{shortcuts.map(([label, keys]) => <><span key={`${label}-l`}>{label}</span><strong key={`${label}-k`}><kbd>{keys}</kbd></strong></>)}</div>
-    </Card>
+    <Section title="New sessions">
+      <Row title="Default workspace" description="Used when a project has a local checkout. Worktree sessions get their own branch, like ade/fix-login-1a2b3c4d.">
+        <select className="st-select" value={settings.defaultWorkspaceKind} onChange={event => update({ defaultWorkspaceKind: event.target.value as Settings["defaultWorkspaceKind"] })}>
+          <option value="worktree">Worktree</option>
+          <option value="checkout">Project folder</option>
+          <option value="none">Chat only</option>
+        </select>
+      </Row>
+    </Section>
+    <Section title="Archiving">
+      <Row title="Remove the worktree when archiving" description="Frees disk space. The branch and conversation are kept; restoring recreates the worktree. Worktrees with uncommitted changes are never removed.">
+        <Switch label="Remove the worktree when archiving" checked={settings.archiveRemovesWorktree} onChange={value => update({ archiveRemovesWorktree: value })} />
+      </Row>
+    </Section>
+    <Section title="Startup">
+      <Row title="Reopen the last view" description="After a reload or restart, return to the project or session you had open.">
+        <Switch label="Reopen the last view" checked={settings.restoreLastView} onChange={value => update({ restoreLastView: value })} />
+      </Row>
+    </Section>
+    <Section title="Keyboard shortcuts">
+      {shortcuts.map(([label, keys]) => <Row key={label} title={label}><kbd className="st-kbd">{keys}</kbd></Row>)}
+    </Section>
   </>
 
+  // --- Appearance ---
+  const numberInput = (label: string, value: number, min: number, max: number, key: keyof Settings, step = 1) => (
+    <span className="st-number"><input aria-label={label} type="number" min={min} max={max} step={step} value={value} onChange={event => update({ [key]: Math.min(max, Math.max(min, Number(event.target.value) || min)) } as Partial<Settings>)} /><small>px</small></span>
+  )
   const appearance = <>
-    <fieldset><legend>Display mode</legend><div className="segmented">
-      {(["light", "system", "dark"] as const).map(value => <button type="button" key={value} className={settings.theme === value ? "active" : ""} aria-pressed={settings.theme === value} onClick={() => update({ theme: value })}>{value[0].toUpperCase() + value.slice(1)}</button>)}
-    </div><p className="hint">{settings.theme === "system" ? `Following your system’s ${resolved} mode.` : `Using ${resolved} mode.`}</p></fieldset>
-    <fieldset><legend>Color theme</legend><p className="hint">Choose a palette; every theme is available in light and dark.</p><div className="palette-grid">
-      {colorPalettes.map(palette => {
-        const variables = paletteVariables(palette.id, resolved)
-        return <button type="button" key={palette.id} className={`palette ${settings.palette === palette.id ? "chosen" : ""}`} onClick={() => update({ palette: palette.id })} aria-pressed={settings.palette === palette.id}>
-          <span className="swatch" style={variables}><i /><i /><i /></span><span><strong>{palette.id === "tokyo" ? (resolved === "dark" ? "Tokyo Night" : "Tokyo Day") : palette.name}</strong><small>{palette.description}</small></span>
-        </button>
-      })}
-    </div></fieldset>
-    <fieldset><legend>Fonts</legend>
-      <div className="appearance-control-list">
-        <label className="appearance-control"><span><strong>Interface font</strong><small>Used across navigation, controls, and labels. Leave empty for the system font.</small></span><Input value={settings.interfaceFont} onChange={event => update({ interfaceFont: event.target.value })} placeholder="system-ui, -apple-system, sans-serif" /></label>
-        <label className="appearance-control"><span><strong>Interface size</strong><small>Used for navigation, controls, and labels.</small></span><span className="appearance-number"><Input aria-label="Interface size" type="number" min={11} max={20} value={settings.interfaceSize} onChange={event => update({ interfaceSize: Math.min(20, Math.max(11, Number(event.target.value) || 11)) })} /><small>px</small></span></label>
-        <label className="appearance-control"><span><strong>Content size</strong><small>Used for chat text and rendered Markdown.</small></span><span className="appearance-number"><Input aria-label="Content size" type="number" min={12} max={22} value={settings.contentSize} onChange={event => update({ contentSize: Math.min(22, Math.max(12, Number(event.target.value) || 12)) })} /><small>px</small></span></label>
-        <label className="appearance-control"><span><strong>Code font</strong><small>Used for code blocks, diffs, and terminal output.</small></span><Input value={settings.codeFont} onChange={event => update({ codeFont: event.target.value })} placeholder="SFMono-Regular, Menlo, Consolas, monospace" /></label>
-        <label className="appearance-control"><span><strong>Code size</strong><small>Used for code, diffs, and terminal output.</small></span><span className="appearance-number"><Input aria-label="Code size" type="number" min={10} max={18} value={settings.codeSize} onChange={event => update({ codeSize: Math.min(18, Math.max(10, Number(event.target.value) || 10)) })} /><small>px</small></span></label>
-      </div>
-    </fieldset>
-    <fieldset><legend>Layout</legend>
-      <label className="appearance-control"><span><strong>Content width</strong><small>Maximum width of chat and Markdown on wide screens.</small></span><span className="appearance-number"><Input aria-label="Content width" type="number" min={640} max={1200} step={10} value={settings.contentWidth} onChange={event => update({ contentWidth: Math.min(1200, Math.max(640, Number(event.target.value) || 640)) })} /><small>px</small></span></label>
-    </fieldset>
-    <fieldset><legend>Syntax</legend>
-      <label className="appearance-control"><span><strong>Highlight theme</strong><small>Colors used for code syntax, independent of the app theme.</small></span><select aria-label="Highlight theme" value={settings.highlightTheme} onChange={event => update({ highlightTheme: event.target.value as "auto" | "github" | "monochrome" })}><option value="auto">Automatic</option><option value="github">GitHub</option><option value="monochrome">Monochrome</option></select></label>
-    </fieldset>
+    <Section title="Theme">
+      <Row title="Mode" description={settings.theme === "system" ? `Following your system (${resolved}).` : undefined}>
+        <div className="st-segmented" role="radiogroup" aria-label="Mode">
+          {(["light", "system", "dark"] as const).map(value => <button type="button" role="radio" key={value} aria-checked={settings.theme === value} className={settings.theme === value ? "is-active" : ""} onClick={() => update({ theme: value })}>{value[0].toUpperCase() + value.slice(1)}</button>)}
+        </div>
+      </Row>
+      <Row title="Color palette" description="Every palette works in light and dark." stacked>
+        <div className="st-palettes">
+          {colorPalettes.map(palette => {
+            const variables = paletteVariables(palette.id, resolved)
+            return <button type="button" key={palette.id} className={`st-palette ${settings.palette === palette.id ? "is-active" : ""}`} onClick={() => update({ palette: palette.id })} aria-pressed={settings.palette === palette.id} title={palette.description}>
+              <span className="st-swatch" style={variables}><i /><i /><i /></span>
+              <span>{palette.id === "tokyo" ? (resolved === "dark" ? "Tokyo Night" : "Tokyo Day") : palette.name}</span>
+            </button>
+          })}
+        </div>
+      </Row>
+    </Section>
+    <Section title="Text">
+      <Row title="Interface font" description="Leave empty for the system font."><input className="st-input" value={settings.interfaceFont} onChange={event => update({ interfaceFont: event.target.value })} placeholder="System default" /></Row>
+      <Row title="Interface size">{numberInput("Interface size", settings.interfaceSize, 11, 20, "interfaceSize")}</Row>
+      <Row title="Chat text size">{numberInput("Chat text size", settings.contentSize, 12, 22, "contentSize")}</Row>
+      <Row title="Code font" description="Code blocks, diffs, and the terminal."><input className="st-input" value={settings.codeFont} onChange={event => update({ codeFont: event.target.value })} placeholder="SF Mono, Menlo" /></Row>
+      <Row title="Code size">{numberInput("Code size", settings.codeSize, 10, 18, "codeSize")}</Row>
+    </Section>
+    <Section title="Layout">
+      <Row title="Conversation width" description="Maximum width of chat on wide screens.">{numberInput("Conversation width", settings.contentWidth, 640, 1200, "contentWidth", 10)}</Row>
+      <Row title="Syntax colors">
+        <select className="st-select" aria-label="Syntax colors" value={settings.highlightTheme} onChange={event => update({ highlightTheme: event.target.value as "auto" | "github" | "monochrome" })}><option value="auto">Automatic</option><option value="github">GitHub</option><option value="monochrome">Monochrome</option></select>
+      </Row>
+    </Section>
   </>
 
+  // --- Models ---
   const configuredProviders = modelCatalog.filter(provider => provider.configured)
   const activeProvider = modelCatalog.find(provider => provider.id === selectedProvider)
   const detectedAgents = (providerTools ?? []).filter(tool => tool.kind === "cli" && tool.installed)
+  const credentialSource = (id: string) => modelCredentials?.find(item => item.provider === id)?.source
+  const credentialDisabled = Boolean(modelCredentialBusy) || credentialChangesBlocked
 
   const models = <>
-    <Card title="Default model" description="Used for new messages. You can also change the model per message in the composer.">
-      <p className={`runtime-notice ${activeProvider?.configured ? "ready" : ""}`} role="status">
-        {!runtime?.online ? runtimeError || "Waiting for the active ADE runtime."
-          : activeProvider?.configured ? `Ready · ${providerName} · ${selectedModel}`
-            : configuredProviders.length ? `${activeProvider?.name ?? selectedProvider} isn’t set up. Pick a provider that is ready, or add its key below.`
-              : "No model provider is set up yet. Add an API key or sign in to GitHub Copilot below."}
-      </p>
-      <div className="settings-grid">
-        <label>Provider
-          <select value={selectedProvider} onChange={event => update({ provider: event.target.value, model: "" })}>
-            {modelCatalog.map(provider => <option key={provider.id} value={provider.id}>{provider.name}{provider.configured ? "" : " — not set up"}</option>)}
-          </select>
-        </label>
-        <label>Model
-          <select value={activeProvider?.configured ? selectedModel : ""} disabled={!activeProvider?.configured} onChange={event => update({ model: event.target.value })}>
-            {!activeProvider?.configured ? <option value="">Set up this provider first</option> : null}
-            {activeProvider?.models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
-          </select>
-        </label>
-        <label>Reasoning
-          <select value={settings.reasoning === "off" ? "none" : settings.reasoning} onChange={event => update({ reasoning: event.target.value })}>
-            {reasoningLevels.map(level => <option key={level.id} value={level.id}>{level.label}</option>)}
-          </select>
-          <small>Support varies by model.</small>
-        </label>
-      </div>
-      <p className="hint">Agents run on the Pi Durable harness, which keeps conversations durable across restarts.</p>
-    </Card>
+    <Section
+      title="Default model"
+      description={!runtime?.online ? "Waiting for the ADE runtime…"
+        : activeProvider?.configured ? <Status tone="ok">Ready · {providerName} · {selectedModel}</Status>
+          : configuredProviders.length ? <Status tone="warn">{activeProvider?.name ?? selectedProvider} isn’t set up — pick a provider that is ready.</Status>
+            : <Status tone="warn">No provider is set up yet. Add one below.</Status>}
+    >
+      <Row title="Provider">
+        <select className="st-select" aria-label="Provider" value={selectedProvider} onChange={event => update({ provider: event.target.value, model: "" })}>
+          {modelCatalog.map(provider => <option key={provider.id} value={provider.id}>{provider.name}{provider.configured ? "" : " (not set up)"}</option>)}
+        </select>
+      </Row>
+      <Row title="Model">
+        <select className="st-select" aria-label="Model" value={activeProvider?.configured ? selectedModel : ""} disabled={!activeProvider?.configured} onChange={event => update({ model: event.target.value })}>
+          {!activeProvider?.configured ? <option value="">—</option> : null}
+          {activeProvider?.models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
+        </select>
+      </Row>
+      <Row title="Reasoning" description="How much the model thinks before answering. Support varies by model.">
+        <select className="st-select" aria-label="Reasoning" value={settings.reasoning === "off" ? "none" : settings.reasoning} onChange={event => update({ reasoning: event.target.value })}>
+          {reasoningLevels.map(level => <option key={level.id} value={level.id}>{level.label}</option>)}
+        </select>
+      </Row>
+    </Section>
 
-    <Card title="API keys" description="Stored on the active host, encrypted with the operating system’s keychain. A key is never shown again after it is saved.">
-      {modelCredentialStatusError ? <p className="error" role="alert">Credential status unavailable: {modelCredentialStatusError}</p> : null}
-      {modelCredentialActionError ? <p className="error" role="alert">{modelCredentialActionError}</p> : null}
-      <div className="provider-credentials">{modelCredentialProviders.map(provider => {
-        const source = modelCredentials?.find(item => item.provider === provider.id)?.source
+    <Section title="Providers" description="Keys are stored on this host in the system keychain and are never shown again.">
+      {modelCredentialStatusError ? <Row title={<span className="st-error">Status unavailable</span>} description={modelCredentialStatusError} /> : null}
+      {modelCredentialProviders.map(provider => {
+        const source = credentialSource(provider.id)
+        const editing = editingKey === provider.id
         const working = modelCredentialBusy?.provider === provider.id
-        const credentialDisabled = Boolean(modelCredentialBusy) || credentialChangesBlocked
-        return <div className="provider-credential" key={provider.id}>
-          <div className="provider-credential-heading"><strong>{provider.name}</strong><span role="status">{modelCredentialStatusError ? "Status unavailable" : !source ? "Checking…" : source === "saved" ? "Key saved" : source === "environment" ? "Using environment variable" : "No key"}</span></div>
-          <form className="provider-key-form" onSubmit={async event => { await saveModelCredential(event, provider.id); onModelsChanged?.() }}>
-            <label htmlFor={`api-key-${provider.id}`}>API key</label>
-            <div className="provider-key-actions">
-              <input id={`api-key-${provider.id}`} name="apiKey" type="password" autoComplete="new-password" maxLength={4096} placeholder={source === "saved" ? "Enter a new key to replace it" : "Paste an API key"} required disabled={credentialDisabled} />
-              <button className="quiet-button" disabled={credentialDisabled}>{working && modelCredentialBusy?.action === "save" ? "Saving…" : "Save key"}</button>
-              {source === "saved" ? <button type="button" className="quiet-button" disabled={credentialDisabled} onClick={async () => { await changeModelCredential("remove", provider.id); onModelsChanged?.() }}>{working && modelCredentialBusy?.action === "remove" ? "Removing…" : "Remove"}</button> : null}
-            </div>
-          </form>
+        return <div key={provider.id} className="st-row-group">
+          <Row
+            title={provider.name}
+            description={provider.id === "compatible" ? "Any OpenAI-compatible server, such as Ollama or LM Studio." : undefined}
+          >
+            {source === "saved" ? <Status tone="ok">Key saved</Status> : source === "environment" ? <Status tone="ok">From environment</Status> : <Status tone="off">Not set up</Status>}
+            {!editing ? <button type="button" className="st-button" disabled={credentialDisabled} onClick={() => setEditingKey(provider.id)}>{source === "saved" ? "Replace" : "Add key"}</button> : null}
+            {source === "saved" && !editing ? <button type="button" className="st-button is-quiet" disabled={credentialDisabled} onClick={async () => { await changeModelCredential("remove", provider.id); onModelsChanged?.() }}>{working && modelCredentialBusy?.action === "remove" ? "Removing…" : "Remove"}</button> : null}
+          </Row>
+          {editing ? (
+            <form className="st-inline-form" onSubmit={async event => { await saveModelCredential(event, provider.id); setEditingKey(null); onModelsChanged?.() }}>
+              <input name="apiKey" type="password" autoFocus autoComplete="new-password" maxLength={4096} placeholder={`${provider.name} API key`} required disabled={credentialDisabled} aria-label={`${provider.name} API key`} />
+              <button className="st-button is-primary" disabled={credentialDisabled}>{working && modelCredentialBusy?.action === "save" ? "Saving…" : "Save"}</button>
+              <button type="button" className="st-button is-quiet" onClick={() => setEditingKey(null)}>Cancel</button>
+            </form>
+          ) : null}
           {provider.id === "compatible" ? (
-            <form className="provider-key-form" onSubmit={event => void saveCompatible(event)}>
-              <label htmlFor="compatible-url">Endpoint URL and model</label>
-              <div className="provider-key-actions">
-                <input id="compatible-url" value={compatibleDraft.url} onChange={event => setCompatibleDraft(draft => ({ ...draft, url: event.target.value }))} placeholder="http://127.0.0.1:11434/v1" disabled={compatible?.fromEnvironment || compatibleBusy} />
-                <input aria-label="Compatible model" value={compatibleDraft.model} onChange={event => setCompatibleDraft(draft => ({ ...draft, model: event.target.value }))} placeholder="llama3.1" disabled={compatible?.fromEnvironment || compatibleBusy} />
-                <button className="quiet-button" disabled={compatible?.fromEnvironment || compatibleBusy}>{compatibleBusy ? "Saving…" : "Save"}</button>
-              </div>
-              {compatible?.fromEnvironment ? <small className="hint">Set by ADE_COMPATIBLE_URL / ADE_COMPATIBLE_MODEL in the launch environment.</small> : null}
-              {compatibleMessage ? <small className="hint" role="status">{compatibleMessage}</small> : null}
-              <small className="hint">Local endpoints (127.0.0.1, localhost) don’t need a key. Remote endpoints must use HTTPS and a key.</small>
+            <form className="st-inline-form" onSubmit={event => void saveCompatible(event)}>
+              <input value={compatibleDraft.url} onChange={event => setCompatibleDraft(draft => ({ ...draft, url: event.target.value }))} placeholder="Endpoint, e.g. http://127.0.0.1:11434/v1" aria-label="Compatible endpoint URL" disabled={compatible?.fromEnvironment || compatibleBusy} />
+              <input className="is-narrow" value={compatibleDraft.model} onChange={event => setCompatibleDraft(draft => ({ ...draft, model: event.target.value }))} placeholder="Model" aria-label="Compatible model" disabled={compatible?.fromEnvironment || compatibleBusy} />
+              <button className="st-button" disabled={compatible?.fromEnvironment || compatibleBusy}>{compatibleBusy ? "Saving…" : "Save"}</button>
+              {compatibleMessage ? <span className="st-hint" role="status">{compatibleMessage}</span> : compatible?.fromEnvironment ? <span className="st-hint">Set by environment variables</span> : null}
             </form>
           ) : null}
         </div>
-      })}</div>
-    </Card>
-
-    <Card title="GitHub Copilot" description="Use your Copilot subscription’s models. This sign-in is separate from the GitHub CLI account used for repositories.">
-      {copilotStatusError ? <p className="error" role="alert">Copilot status unavailable: {copilotStatusError}</p>
-        : <p className="connection-status" role="status">{copilotHealth ? copilotHealth.copilotSignedIn ? "Signed in" : "Not signed in" : "Checking sign-in…"}</p>}
-      {copilotWaiting ? <p className="hint" role="status">{copilotSignIn?.code && copilotSignIn.url
-        ? <>Open <a href={copilotSignIn.url} target="_blank" rel="noreferrer">GitHub device verification</a> and enter <strong>{copilotSignIn.code}</strong>.</>
-        : "Waiting for GitHub’s device code…"}</p> : null}
-      {copilotSignIn?.message ? <p className="error" role="alert">{copilotSignIn.message}</p> : null}
-      {copilotActionError ? <p className="error" role="alert">{copilotActionError}</p> : null}
-      <div className="form-actions">
-        <button type="button" className="quiet-button" disabled={authBusy || !copilotHealth || Boolean(copilotStatusError) || sending} onClick={() => void changeCopilotAuth(copilotWaiting ? "cancel" : "start")}>{copilotWaiting ? "Cancel sign-in" : copilotHealth?.copilotSignedIn ? "Reconnect" : "Sign in to GitHub Copilot"}</button>
-        {!copilotWaiting && copilotHealth?.copilotSignedIn ? <button type="button" className="quiet-button" disabled={authBusy || sending} onClick={() => void changeCopilotAuth("sign-out")}>Sign out</button> : null}
+      })}
+      <div className="st-row-group">
+        <Row title="GitHub Copilot" description={copilotWaiting && copilotSignIn?.code && copilotSignIn.url
+          ? <>Open <a href={copilotSignIn.url} target="_blank" rel="noreferrer">github.com/login/device</a> and enter <strong>{copilotSignIn.code}</strong></>
+          : "Use your Copilot subscription’s models. Separate from the GitHub CLI account."}>
+          {copilotStatusError ? <Status tone="error">Unavailable</Status> : copilotHealth?.copilotSignedIn ? <Status tone="ok">Signed in</Status> : <Status tone="off">Not signed in</Status>}
+          <button type="button" className="st-button" disabled={authBusy || !copilotHealth || Boolean(copilotStatusError) || sending} onClick={() => void changeCopilotAuth(copilotWaiting ? "cancel" : "start")}>{copilotWaiting ? "Cancel" : copilotHealth?.copilotSignedIn ? "Reconnect" : "Sign in"}</button>
+          {!copilotWaiting && copilotHealth?.copilotSignedIn ? <button type="button" className="st-button is-quiet" disabled={authBusy || sending} onClick={() => void changeCopilotAuth("sign-out")}>Sign out</button> : null}
+        </Row>
       </div>
-    </Card>
+      {modelCredentialActionError || copilotActionError || copilotSignIn?.message ? <Row title={<span className="st-error">{modelCredentialActionError || copilotActionError || copilotSignIn?.message}</span>} /> : null}
+    </Section>
 
     {detectedAgents.length ? (
-      <Card title="Coding agents found on this host" description="These CLI agents are installed here. ADE can’t run them as its agent harness yet, so they aren’t offered in the model picker.">
-        <ul className="settings-project-list">{detectedAgents.map(agent => <li key={agent.id}><Sparkles size={14} /> {agent.name} <code>{agent.command}</code></li>)}</ul>
-      </Card>
+      <Section title="Coding agents on this host" description="Use these instead of ADE’s agent when you start a session. They use their own sign-in and subscription.">
+        {detectedAgents.map(agent => <Row key={agent.id} title={agent.name} description={<code>{agent.command}</code>}><Status tone="ok">Installed</Status></Row>)}
+      </Section>
     ) : null}
   </>
 
+  // --- Agents & permissions ---
   const agents = <>
-    <Card title="What agents can do" description="Coding sessions with a workspace can read and edit files, search code, and run commands in their checkout or worktree. They can also start subagents, drive the built-in browser, and write plans and artifacts.">
-      <div className="settings-facts">
-        <span>Built-in browser</span><strong>{browserState?.available ? "Chrome found" : "Chrome not found — set ADE_CHROME_PATH"}</strong>
-        <span>Skills found</span><strong>{skillsCatalog?.skills.length ?? 0}</strong>
-        <span>Rules files</span><strong>{skillsCatalog?.rules.length ?? 0}</strong>
-        <span>Slash commands</span><strong>{skillsCatalog?.commands.length ?? 0}</strong>
-      </div>
-    </Card>
+    <Section title="Capabilities" description="Sessions with a workspace can read and edit files, search, and run commands in their branch, start subagents, and drive the built-in browser.">
+      <Row title="Built-in browser">{browserState?.available ? <Status tone="ok">Chrome found</Status> : <Status tone="warn">Chrome not found — set ADE_CHROME_PATH</Status>}</Row>
+      <Row title="Skills found"><span className="st-value">{skillsCatalog?.skills.length ?? 0}</span></Row>
+      <Row title="Rules files"><span className="st-value">{skillsCatalog?.rules.length ?? 0}</span></Row>
+      <Row title="Slash commands"><span className="st-value">{skillsCatalog?.commands.length ?? 0}</span></Row>
+    </Section>
     {onChangeApprovalPolicy && onDeleteApprovalRule && onRefreshMcp ? (
-      <McpAndSecuritySettings
-        mcpServers={mcpServers}
-        approvalPolicy={approvalPolicy}
-        approvalRules={approvalRules}
-        onRefreshMcp={onRefreshMcp}
-        onChangeApprovalPolicy={onChangeApprovalPolicy}
-        onDeleteApprovalRule={onDeleteApprovalRule}
-      />
+      <Section title="Approvals and MCP servers" plain>
+        <div className="st-embedded">
+          <McpAndSecuritySettings mcpServers={mcpServers} approvalPolicy={approvalPolicy} approvalRules={approvalRules} onRefreshMcp={onRefreshMcp} onChangeApprovalPolicy={onChangeApprovalPolicy} onDeleteApprovalRule={onDeleteApprovalRule} />
+        </div>
+      </Section>
     ) : null}
   </>
 
+  // --- Git & GitHub ---
   const github = <>
-    <Card title="GitHub account" description="ADE uses the GitHub CLI (gh) on the active host for issues, pushes, and pull requests, with that account’s existing permissions. ADE saves the account name, not a token.">
-      {githubStatusError ? <p className="error" role="alert">GitHub connection unavailable: {githubStatusError}</p>
-        : <p className="connection-status" role="status">{githubConnection ? githubConnection.login ? `Connected as ${githubConnection.login}` : "Not connected" : "Checking connection…"}</p>}
-      {githubActionError ? <p className="error" role="alert">{githubActionError}</p> : null}
-      {!githubConnection?.login && githubCliError ? <p className="hint" role="status">{githubCliError}</p> : null}
-      {!githubConnection?.login ? <p className="hint">If needed, install GitHub CLI and sign in first with <code>gh auth login --hostname github.com --web</code>.</p> : null}
-      <div className="form-actions">
-        <button type="button" className="quiet-button" disabled={githubConnectionBusy || !githubConnection || Boolean(githubStatusError)} onClick={() => void changeGitHubConnection("connect")}>{githubConnectionBusy ? "Working…" : githubConnection?.login ? "Check account" : "Connect GitHub CLI"}</button>
-        {githubConnection?.login ? <button type="button" className="quiet-button" disabled={githubConnectionBusy} onClick={() => void changeGitHubConnection("disconnect")}>Disconnect</button> : null}
-      </div>
-      {githubConnection?.login ? <p className="hint">Disconnecting here doesn’t sign out of GitHub CLI.</p> : null}
-    </Card>
-    <Card title="Pull requests">
-      <Toggle label="Open pull requests as drafts" description="You can still choose per pull request in the session’s Pull request panel." checked={settings.prDraft} onChange={value => update({ prDraft: value })} />
-    </Card>
+    <Section title="GitHub account" description="Issues, pushes, and pull requests go through the GitHub CLI (gh) on this host, with that account’s permissions. ADE never stores a token.">
+      <Row title={githubConnection?.login ? `Connected as ${githubConnection.login}` : "GitHub CLI"} description={githubStatusError || (!githubConnection?.login ? (githubCliError || "Sign in first with gh auth login --hostname github.com --web") : "Disconnecting here doesn’t sign out of the GitHub CLI.")}>
+        {githubConnection?.login ? <Status tone="ok">Connected</Status> : <Status tone="off">Not connected</Status>}
+        <button type="button" className="st-button" disabled={githubConnectionBusy || !githubConnection || Boolean(githubStatusError)} onClick={() => void changeGitHubConnection("connect")}>{githubConnectionBusy ? "Working…" : githubConnection?.login ? "Check" : "Connect"}</button>
+        {githubConnection?.login ? <button type="button" className="st-button is-quiet" disabled={githubConnectionBusy} onClick={() => void changeGitHubConnection("disconnect")}>Disconnect</button> : null}
+      </Row>
+      {githubActionError ? <Row title={<span className="st-error">{githubActionError}</span>} /> : null}
+    </Section>
+    <Section title="Pull requests">
+      <Row title="Open as draft" description="You can still choose for each pull request.">
+        <Switch label="Open pull requests as drafts" checked={settings.prDraft} onChange={value => update({ prDraft: value })} />
+      </Row>
+    </Section>
   </>
 
-  const terminal = <Card title="Terminal">
-    <Toggle label="Start a shell automatically" description="Opening the Terminal panel starts a shell in the session’s workspace right away." checked={settings.terminalAutoStart} onChange={value => update({ terminalAutoStart: value })} />
-    <div className="settings-grid">
-      <label>Font size<select value={settings.terminalFontSize} onChange={event => update({ terminalFontSize: Number(event.target.value) })}>{[11, 12, 13, 14, 15, 16, 18, 20].map(size => <option key={size} value={size}>{size}px</option>)}</select></label>
-      <label>Scrollback<select value={settings.terminalScrollback} onChange={event => update({ terminalScrollback: Number(event.target.value) })}>{[1000, 5000, 10000, 20000].map(lines => <option key={lines} value={lines}>{lines.toLocaleString()} lines</option>)}</select></label>
-    </div>
-    <p className="hint">Commands run as the active host’s OS user. The terminal is yours; agents run their own commands separately, subject to the approval policy.</p>
-  </Card>
+  // --- Terminal ---
+  const terminal = <Section title="Terminal" description="Commands run as this host’s user. Agents run their own commands separately, subject to approvals.">
+    <Row title="Start a shell automatically" description="Opening the Terminal panel starts a shell in the session’s workspace.">
+      <Switch label="Start a shell automatically" checked={settings.terminalAutoStart} onChange={value => update({ terminalAutoStart: value })} />
+    </Row>
+    <Row title="Font size">
+      <select className="st-select" aria-label="Terminal font size" value={settings.terminalFontSize} onChange={event => update({ terminalFontSize: Number(event.target.value) })}>{[11, 12, 13, 14, 15, 16, 18, 20].map(size => <option key={size} value={size}>{size}px</option>)}</select>
+    </Row>
+    <Row title="Scrollback">
+      <select className="st-select" aria-label="Terminal scrollback" value={settings.terminalScrollback} onChange={event => update({ terminalScrollback: Number(event.target.value) })}>{[1000, 5000, 10000, 20000].map(lines => <option key={lines} value={lines}>{lines.toLocaleString()} lines</option>)}</select>
+    </Row>
+  </Section>
 
+  // --- Notifications ---
   const requestPermission = async () => {
     if (typeof Notification === "undefined") return
     setPermission(await Notification.requestPermission())
   }
-  const notifications = <Card title="Desktop notifications" description="Get notified when you’re in another window or app.">
-    {permission === "unsupported" ? <p className="hint">This window can’t show desktop notifications.</p>
-      : permission === "denied" ? <p className="error">Notifications are blocked for ADE. Allow them in your system or browser settings.</p>
-        : permission === "default" ? <div className="form-actions"><button type="button" className="quiet-button" onClick={() => void requestPermission()}>Allow notifications</button></div> : null}
-    <Toggle label="When an agent finishes" description="A session goes from working to idle." checked={settings.notifyOnFinish} disabled={permission !== "granted"} onChange={value => update({ notifyOnFinish: value })} />
-    <Toggle label="When an agent needs approval" description="A command is waiting for you to allow or deny it." checked={settings.notifyOnApproval} disabled={permission !== "granted"} onChange={value => update({ notifyOnApproval: value })} />
-    {permission === "granted" ? <div className="form-actions"><button type="button" className="quiet-button" onClick={() => new Notification("ADE", { body: "Notifications are working." })}>Send a test notification</button></div> : null}
-  </Card>
+  const notifications = <Section title="Desktop notifications" description="Shown only when ADE isn’t the window you’re using.">
+    <Row title="Permission" description={permission === "denied" ? "Blocked. Allow notifications for ADE in your system settings." : permission === "unsupported" ? "This window can’t show notifications." : undefined}>
+      {permission === "granted" ? <><Status tone="ok">Allowed</Status><button type="button" className="st-button is-quiet" onClick={() => new Notification("ADE", { body: "Notifications are working." })}>Send test</button></>
+        : permission === "default" ? <button type="button" className="st-button" onClick={() => void requestPermission()}>Allow</button>
+          : <Status tone="off">{permission === "denied" ? "Blocked" : "Unavailable"}</Status>}
+    </Row>
+    <Row title="When an agent finishes"><Switch label="Notify when an agent finishes" checked={settings.notifyOnFinish} disabled={permission !== "granted"} onChange={value => update({ notifyOnFinish: value })} /></Row>
+    <Row title="When an agent needs approval"><Switch label="Notify when an agent needs approval" checked={settings.notifyOnApproval} disabled={permission !== "granted"} onChange={value => update({ notifyOnApproval: value })} /></Row>
+  </Section>
 
+  // --- Environments ---
   const environments = <>
-    <EnvironmentSettings onEnvironmentChanged={onEnvironmentChanged} disabled={disabled} autoOpenAdd={autoOpenAddEnvironment} />
-    <Card title="Diagnostics">
-      <div className="settings-facts">
-        <span>Active environment</span><strong>{activeEnvironmentName}</strong>
-        <span>Runtime</span><strong>{runtime?.online ? "Online" : runtimeError || "Waiting for runtime"}</strong>
-        <span>Harness</span><strong>{runtime?.harness ?? "Pi Durable"}</strong>
-        <span>MCP servers connected</span><strong>{mcpServers.filter(server => server.status === "connected").length}</strong>
-      </div>
-      <div className="form-actions"><button type="button" className="quiet-button" onClick={onWorktreeDiagnostics}><History size={14} /> Inspect Git worktrees</button></div>
-    </Card>
-    <Card title="About ADE">
-      <p className="hint">ADE is an agentic development environment: projects, isolated agent sessions on their own branches, review, and pull requests in one app. Built with Tauri, React, and Pi Durable.</p>
-    </Card>
+    <Section title="Hosts" plain>
+      <div className="st-embedded"><EnvironmentSettings onEnvironmentChanged={onEnvironmentChanged} disabled={disabled} autoOpenAdd={autoOpenAddEnvironment} /></div>
+    </Section>
+    <Section title="Diagnostics">
+      <Row title="Active environment"><span className="st-value">{activeEnvironmentName}</span></Row>
+      <Row title="Runtime">{runtime?.online ? <Status tone="ok">Online</Status> : <Status tone="error">{runtimeError || "Waiting"}</Status>}</Row>
+      <Row title="MCP servers connected"><span className="st-value">{mcpServers.filter(server => server.status === "connected").length}</span></Row>
+      <Row title="Git worktrees" description="Inspect worktrees registered for a repository."><button type="button" className="st-button" onClick={onWorktreeDiagnostics}>Inspect</button></Row>
+    </Section>
+    <Section title="About">
+      <Row title="ADE" description="Projects, isolated agent sessions on their own branches, review, and pull requests in one app." />
+    </Section>
   </>
 
-  const content = {
-    general, appearance, models, agents, github, terminal, notifications, environments,
-  }[selectedCategory]
+  const content = { general, appearance, models, agents, github, terminal, notifications, environments }[selectedCategory]
 
-  return <main className="settings-layout">
-    <aside className="settings-nav" aria-label="Settings navigation">
-      <button type="button" className="settings-back" onClick={onBack}><ArrowLeft size={14} /> Back</button>
-      <div className="settings-nav-group">
-        <div className="settings-host-name"><span className={`status-dot ${runtime?.online ? "online" : "offline"}`} />{activeEnvironmentName}</div>
-        {items.map(item => {
-          const Icon = item.icon
-          return <button type="button" key={item.id} className={`settings-nav-item${selectedCategory === item.id ? " active" : ""}`} aria-current={selectedCategory === item.id ? "page" : undefined} onClick={() => setSelectedCategory(item.id)}><Icon size={15} /><span>{item.label}</span><ChevronRight size={13} className="settings-nav-chevron" /></button>
-        })}
+  return <main className="st-layout">
+    <aside className="st-nav" aria-label="Settings navigation">
+      <button type="button" className="st-back" onClick={onBack}><ArrowLeft size={14} /> Back to app</button>
+      <div className="st-search">
+        <Search size={13} aria-hidden="true" />
+        <input
+          value={query}
+          onChange={event => setQuery(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === "Enter" && visibleGroups[0]?.items[0]) setSelectedCategory(visibleGroups[0].items[0].id)
+            if (event.key === "Escape") setQuery("")
+          }}
+          placeholder="Search settings"
+          aria-label="Search settings"
+        />
+        {query ? <button type="button" aria-label="Clear search" onClick={() => setQuery("")}><X size={12} /></button> : null}
       </div>
+      <nav className="st-nav-groups">
+        {visibleGroups.map(group => <div key={group.label} className="st-nav-group">
+          <span className="st-nav-label">{group.label}</span>
+          {group.items.map(item => {
+            const Icon = item.icon
+            return <button type="button" key={item.id} className={`st-nav-item ${selectedCategory === item.id ? "is-active" : ""}`} aria-current={selectedCategory === item.id ? "page" : undefined} onClick={() => setSelectedCategory(item.id)}><Icon size={15} /><span>{item.label}</span></button>
+          })}
+        </div>)}
+        {!visibleGroups.length ? <p className="st-nav-empty">No settings match “{query}”.</p> : null}
+      </nav>
+      <div className="st-nav-host"><span className={`st-dot ${runtime?.online ? "is-ok" : "is-off"}`} />{activeEnvironmentName}</div>
     </aside>
-    <section className="settings-main">
-      <header className="settings-heading"><h1>{selected.label}</h1><p>{selected.description}</p></header>
-      {(error || runtimeError) ? <div className="settings-global-errors">{error ? <p className="error" role="alert">{error}</p> : null}{runtimeError && selectedCategory !== "environments" ? <p className="error" role="alert">{runtimeError}</p> : null}</div> : null}
-      <div className="settings-content">{content}</div>
+    <section className="st-main">
+      <header className="st-topbar"><span>Settings</span><span aria-hidden="true">/</span><strong>{selected.label}</strong></header>
+      <div className="st-scroll">
+        <div className="st-content">
+          <h1>{selected.label}</h1>
+          <p className="st-lede">{selected.description}</p>
+          {error ? <p className="st-banner is-error" role="alert">{error}</p> : null}
+          {runtimeError && !runtime?.online ? <p className="st-banner is-error" role="alert">{runtimeError}</p> : null}
+          {content}
+        </div>
+      </div>
     </section>
   </main>
 }

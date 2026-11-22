@@ -30,6 +30,7 @@ import { DiffPanel } from "../panels/DiffPanel"
 import { BrowserPanel } from "../panels/BrowserPanel"
 import { ArtifactPanel } from "../panels/ArtifactPanel"
 import { ProcessesPanel } from "../panels/ProcessesPanel"
+import { RunPanel, type RunStatus } from "../panels/RunPanel"
 import { PullRequestPanel, type PullRequestInfo } from "../panels/PullRequestPanel"
 
 export function BesidePane({
@@ -71,6 +72,10 @@ export function BesidePane({
   onKillProcess,
   onRefreshProcesses,
   onPullRequestChange,
+  agentBusy = false,
+  diffMode = "working",
+  onRunStatusChange,
+  onOpenProjectSettings,
 }: {
   splitRatio: number
   session: Conversation
@@ -110,6 +115,10 @@ export function BesidePane({
   onKillProcess: (id: string) => Promise<void>
   onRefreshProcesses: () => void
   onPullRequestChange: (pr: PullRequestInfo | null) => void
+  agentBusy?: boolean
+  diffMode?: "working" | "branch" | "history"
+  onRunStatusChange?: (status: RunStatus) => void
+  onOpenProjectSettings?: () => void
 }) {
   const tabIcon = (tab: WorkspaceTab) => {
     switch (tab.kind) {
@@ -214,7 +223,7 @@ export function BesidePane({
         ) : null}
 
         {activeBesideTab.kind === "diff" ? (
-          <DiffPanel sessionId={session.id} summary={gitSummary} onRefresh={onRefreshGit} onOpenFile={onOpenFile} />
+          <DiffPanel sessionId={session.id} summary={gitSummary} onRefresh={onRefreshGit} onOpenFile={onOpenFile} agentBusy={agentBusy} initialMode={diffMode} />
         ) : null}
 
         {activeBesideTab.kind === "browser" ? (
@@ -237,6 +246,16 @@ export function BesidePane({
 
         {activeBesideTab.kind === "processes" ? (
           <ProcessesPanel processes={processes} onKill={onKillProcess} onRefresh={onRefreshProcesses} />
+        ) : null}
+
+        {activeBesideTab.kind === "run" ? (
+          <RunPanel
+            sessionId={session.id}
+            onOpenUrl={url => onOpenBrowser(url)}
+            onOpenExternal={url => void onOpenExternalBrowser(url)}
+            onOpenProjectSettings={onOpenProjectSettings}
+            onStatusChange={onRunStatusChange}
+          />
         ) : null}
 
         {activeBesideTab.kind === "pr" ? (

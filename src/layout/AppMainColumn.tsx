@@ -1,4 +1,6 @@
 import type { RefObject } from "react"
+import { InboxView } from "../inbox/InboxView"
+import { sessionStateInfo, type InboxEntry } from "../session-state"
 import { Sparkles } from "lucide-react"
 import { request } from "../../api"
 import type { Conversation, EnvironmentDirectory, GitHubIssue, ProviderCatalogEntry, RuntimeHealth, Screen, SessionArtifact, WorkspaceTab } from "../../app-types"
@@ -98,6 +100,10 @@ type AppMainColumnProps = {
   onAbortSession: () => void
   onCompactSession: () => void
   onReviewArtifact: (artifact: SessionArtifact, decision: "approved" | "changes_requested", feedback?: string) => Promise<void>
+  /** Inbox state per session (status dots, tags, project session list). */
+  inboxEntries: Record<string, InboxEntry>
+  onOpenSessionConversation: (session: Conversation) => void
+  onArchiveSession: (sessionId: string) => void
 }
 
 export function AppMainColumn(props: AppMainColumnProps) {
@@ -149,15 +155,25 @@ export function AppMainColumn(props: AppMainColumnProps) {
 
   return (
     <div className="ade-main-column">
-      {runtimeError && screen !== "settings" ? (
+      {runtimeError && screen !== "settings" && screen !== "inbox" ? (
         <div className="ade-banner-error rounded-none border-x-0 border-t-0">
           <Sparkles className="size-3.5 shrink-0" />
           <span className="flex-1">{runtimeError}</span>
-          <button type="button" className="ade-chip-btn" onClick={() => props.onOpenScreen("settings")}>Open Settings</button>
+          <button type="button" className="ade-chip-btn" onClick={() => props.onOpenSettingsSection("models")}>Open Settings</button>
         </div>
       ) : null}
 
-      {screen === "settings" ? (
+      {screen === "inbox" ? (
+        <InboxView
+          sessions={sessions}
+          projects={projects}
+          entries={props.inboxEntries}
+          onOpenSession={props.onOpenSessionConversation}
+          onOpenExternal={url => void stream.openExternalBrowser(url)}
+          onArchive={props.onArchiveSession}
+          onNewSession={() => props.onOpenNewSession()}
+        />
+      ) : screen === "settings" ? (
         <SettingsView
           settings={settings}
           resolved={resolved}
@@ -237,6 +253,7 @@ export function AppMainColumn(props: AppMainColumnProps) {
             onStartFactoryRun={opts => props.onStartFactoryRun(selectedProject, opts)}
             onFactoryRunAction={props.onFactoryRunAction}
             onUnarchiveSession={props.onUnarchiveSession}
+            inboxEntries={props.inboxEntries}
             onOpenExternal={url => void stream.openExternalBrowser(url)}
             onStartSessionFromIssue={async issue => {
               const kind = selectedProject.repository ? settings.defaultWorkspaceKind : "none"
@@ -321,6 +338,13 @@ export function AppMainColumn(props: AppMainColumnProps) {
       ) : (
         <SplitWorkspace
           session={activeSession}
+          projectName={projects.find(p => p.id === activeSession.projectId)?.name}
+          onOpenProject={activeSession.projectId ? () => props.onOpenProject(activeSession.projectId!, false) : undefined}
+          onOpenProjectSettings={activeSession.projectId ? () => props.onOpenProject(activeSession.projectId!, true) : undefined}
+          stateLabel={(() => {
+            const entry = props.inboxEntries[activeSession.id]
+            return entry && entry.state !== "idle" && entry.state !== "replied" ? sessionStateInfo[entry.state] : undefined
+          })()}
           timeline={stream.timeline}
           subagentTimelines={stream.subagentTimelines}
           subagents={stream.subagents}

@@ -2498,3 +2498,93 @@
 .settings-nav-item .settings-nav-chevron { margin-left: auto; opacity: 0; transition: opacity 120ms ease; }
 .settings-nav-item.active .settings-nav-chevron, .settings-nav-item:hover .settings-nav-chevron { opacity: 0.5; }
 .settings-card + .settings-card { margin-top: 14px; }
+
+/* Session state: one dot + tag vocabulary used in the sidebar, inbox, and project lists */
+.ade-state-dot { width: 7px; height: 7px; border-radius: 999px; flex-shrink: 0; display: inline-block; background: rgb(var(--foreground) / 0.28); }
+.ade-state-dot.is-running { background: rgb(var(--primary)); box-shadow: 0 0 0 3px rgb(var(--primary) / 0.18); animation: ade-pulse 1.6s ease-in-out infinite; }
+.ade-state-dot.is-waiting { background: rgb(213 163 91); }
+.ade-state-dot.is-failed { background: rgb(207 98 91); }
+.ade-state-dot.is-ok { background: rgb(120 174 121); }
+.ade-state-dot.is-review { background: rgb(120 152 199); }
+.ade-state-dot.is-merged { background: rgb(178 138 203); }
+@keyframes ade-pulse { 50% { box-shadow: 0 0 0 1px rgb(var(--primary) / 0.12); } }
+.ade-row-tag { font-size: 10.5px; line-height: 1; padding: 3px 6px; border-radius: 999px; white-space: nowrap; flex-shrink: 0; background: rgb(var(--foreground) / 0.07); }
+.ade-row-tag.is-waiting { background: rgb(213 163 91 / 0.16); color: rgb(230 188 115); }
+.ade-row-tag.is-failed { background: rgb(207 98 91 / 0.16); color: rgb(225 125 114); }
+.ade-row-tag.is-ok { background: rgb(120 174 121 / 0.16); color: rgb(146 197 140); }
+.ade-row-tag.is-review { background: rgb(120 152 199 / 0.16); color: rgb(148 179 224); }
+.ade-row-tag.is-merged { background: rgb(178 138 203 / 0.18); color: rgb(198 162 220); }
+.ade-row-tag.is-running { background: rgb(var(--primary) / 0.14); color: rgb(var(--primary)); }
+.ade-nav-empty { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 1px dashed rgb(var(--border)); border-radius: 8px; background: transparent; color: inherit; font-size: 12px; opacity: 0.75; cursor: pointer; }
+.ade-nav-empty:hover { opacity: 1; border-color: rgb(var(--primary) / 0.6); }
+.ade-rail-badge { position: absolute; top: -2px; right: -2px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 999px; background: rgb(var(--primary)); color: white; font-size: 9.5px; line-height: 15px; text-align: center; }
+.ade-new-session-btn.is-active { outline: 1px solid rgb(var(--primary) / 0.6); }
+
+/* Inbox */
+.ade-inbox { flex: 1; overflow-y: auto; padding: 28px 32px 48px; max-width: 980px; width: 100%; margin: 0 auto; }
+.ade-inbox-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 22px; }
+.ade-inbox-head h1 { display: flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 650; margin: 0; }
+.ade-inbox-head p { margin: 4px 0 0; font-size: 13px; opacity: 0.65; }
+.ade-inbox-group { margin-bottom: 22px; }
+.ade-inbox-group h2 { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; opacity: 0.6; margin: 0 0 8px; display: flex; gap: 6px; }
+.ade-inbox-group h2 span { opacity: 0.7; }
+.ade-inbox-group ul { list-style: none; margin: 0; padding: 0; border: 1px solid rgb(var(--border)); border-radius: 10px; overflow: hidden; }
+.ade-inbox-group li { display: flex; align-items: center; gap: 4px; padding-right: 8px; border-top: 1px solid rgb(var(--border) / 0.6); }
+.ade-inbox-group li:first-child { border-top: 0; }
+.ade-inbox-row { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 11px 14px; background: transparent; border: 0; color: inherit; text-align: left; cursor: pointer; }
+.ade-inbox-group li:hover { background: rgb(var(--foreground) / 0.035); }
+.ade-inbox-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ade-inbox-main strong { font-size: 13.5px; font-weight: 560; }
+.ade-inbox-main small { font-size: 12px; opacity: 0.6; }
+.ade-inbox-time { font-size: 11.5px; opacity: 0.5; width: 64px; text-align: right; flex-shrink: 0; }
+.ade-inbox-empty { font-size: 12.5px; opacity: 0.55; margin: 0; padding: 10px 2px; }
+.ade-inbox-zero { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 64px 0; text-align: center; font-size: 13px; opacity: 0.85; }
+
+/* Session header breadcrumb */
+.ade-breadcrumb { background: none; border: 0; padding: 0; color: inherit; opacity: 0.6; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.ade-breadcrumb:hover { opacity: 1; text-decoration: underline; text-underline-offset: 2px; }
+.ade-breadcrumb-sep { opacity: 0.35; font-size: 13px; }
+
+/* Project session list */
+.ade-session-list { display: flex; flex-direction: column; gap: 14px; padding: 18px 20px; max-width: 980px; width: 100%; margin: 0 auto; }
+.ade-quick-start { display: flex; gap: 8px; padding: 6px; border-radius: 12px; border: 1px solid rgb(var(--border)); background: rgb(var(--surface)); }
+.ade-quick-start input { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; padding: 0 8px; font-size: 13px; color: inherit; }
+.ade-session-rows { list-style: none; margin: 0; padding: 0; border: 1px solid rgb(var(--border)); border-radius: 10px; overflow: hidden; }
+.ade-session-rows li + li { border-top: 1px solid rgb(var(--border) / 0.6); }
+.ade-session-rows button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 11px 14px; background: transparent; border: 0; color: inherit; text-align: left; cursor: pointer; }
+.ade-session-rows button:hover { background: rgb(var(--foreground) / 0.035); }
+
+/* Session header: never push the tools off-screen */
+.ade-workspace-header-left { flex: 1; overflow: hidden; }
+.ade-workspace-header-left .ade-pill { min-width: 0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1; }
+.ade-workspace-header-left .ade-workspace-title { min-width: 60px; flex-shrink: 1; }
+@media (max-width: 1280px) {
+  .ade-header-tool-btn > span:not(.ade-count-badge):not(.ade-pr-dot):not(.ade-dot) { display: none; }
+}
+
+.ade-mp-trigger.ade-mp-setup { color: rgb(var(--primary)); border-color: rgb(var(--primary) / 0.45); }
+
+/* Run panel */
+.ade-run-body { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; overflow-y: auto; min-height: 0; flex: 1; }
+.ade-run-url { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid rgb(var(--border)); border-radius: 8px; }
+.ade-run-url code { flex: 1; min-width: 0; font-size: 12px; }
+.ade-run-log { margin: 0; padding: 10px 12px; border-radius: 8px; background: rgb(var(--background)); border: 1px solid rgb(var(--border) / 0.7); font-family: var(--code-font); font-size: 11.5px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow-y: auto; }
+.ade-run-log.is-setup { max-height: 200px; opacity: 0.9; }
+.ade-run-setup { border-top: 1px solid rgb(var(--border) / 0.6); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.project-scripts { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-top: 1px solid rgb(var(--border)); }
+.project-scripts h3 { margin: 0; font-size: 13px; }
+.project-scripts label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.project-scripts textarea { font-family: var(--code-font); font-size: 12px; padding: 6px 8px; border-radius: 6px; border: 1px solid rgb(var(--border)); background: rgb(var(--background)); color: inherit; resize: vertical; }
+
+/* Checkpoints (R2) */
+.ade-msg-user { position: relative; }
+.ade-msg-rewind { align-self: flex-end; margin-top: 4px; background: none; border: 0; padding: 2px 4px; font-size: 11.5px; color: inherit; opacity: 0; cursor: pointer; transition: opacity 120ms ease; }
+.ade-msg-user:hover .ade-msg-rewind, .ade-msg-rewind:focus-visible { opacity: 0.6; }
+.ade-msg-rewind:hover { opacity: 1 !important; text-decoration: underline; text-underline-offset: 2px; }
+.ade-checkpoints { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; overflow-y: auto; min-height: 0; }
+.ade-checkpoints-head { display: flex; align-items: flex-start; gap: 10px; }
+.ade-checkpoints-head p { flex: 1; margin: 0; }
+.ade-checkpoint-rows { list-style: none; margin: 0; padding: 0; border: 1px solid rgb(var(--border)); border-radius: 10px; overflow: hidden; }
+.ade-checkpoint-rows li { display: flex; align-items: center; gap: 10px; padding: 9px 12px; }
+.ade-checkpoint-rows li + li { border-top: 1px solid rgb(var(--border) / 0.6); }
+.ade-msg.ade-msg-user { flex-direction: column; align-items: flex-end; }

@@ -10,11 +10,11 @@ const execFileAsync = promisify(execFile);
 
 export const MODES = {
 	coding: {
-		label: "Coding lead",
+		label: "Coding chat",
 		instructions: "You are ADE's coding lead. Help with software engineering requests, architecture, planning, and browser inspection. You can write artifacts (write_artifact), manage checklists (update_tasks), and use browser tools. If a question depends on local repository files not yet connected to a workspace, explain that clearly.",
 	},
 	personal: {
-		label: "Personal agent",
+		label: "Personal chat",
 		instructions: "You are ADE's personal agent. Help the user with questions, research, and planning. You can create structured artifacts (write_artifact) and checklists (update_tasks).",
 	},
 } as const;

@@ -44,6 +44,7 @@ export function ComposerDock({
   onCompact,
   onQuickOpenPanel,
   textareaRef,
+  engineLabel,
 }: {
   draft: string
   onDraftChange: (value: string) => void
@@ -70,6 +71,8 @@ export function ComposerDock({
   onCompact?: () => void
   onQuickOpenPanel?: (panel: "files" | "diff" | "browser" | "terminal") => void
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>
+  /** Set for Claude Code / Codex sessions: they pick their own model, so no model picker is shown. */
+  engineLabel?: string
 }) {
   const internalRef = useRef<HTMLTextAreaElement>(null)
   const ref = textareaRef ?? internalRef
@@ -292,7 +295,7 @@ export function ComposerDock({
               ) : null}
             </div>
 
-            <ModelPicker
+            {engineLabel ? <span className="ade-engine-badge" title={`${engineLabel} chooses its own model and uses its own sign-in`}>{engineLabel}</span> : <ModelPicker
               catalog={modelCatalog}
               selectedProvider={selectedProvider}
               selectedModel={selectedModel}
@@ -302,7 +305,7 @@ export function ComposerDock({
               onSelectReasoning={onSelectReasoning}
               onChangeApprovalPolicy={onChangeApprovalPolicy}
               onOpenSettings={onOpenSettings}
-            />
+            />}
 
             {onQuickOpenPanel ? (
               <div className="ade-composer-quick-tools">

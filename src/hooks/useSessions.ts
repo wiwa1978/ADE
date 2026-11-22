@@ -8,7 +8,7 @@ import type { Settings } from "../../useSettings"
 const FALLBACK_SESSION: Conversation = {
   id: "coding",
   mode: "coding",
-  label: "Coding lead",
+  label: "Coding chat",
   status: "idle",
   messages: [],
 }
@@ -67,7 +67,6 @@ export function useSessions(params: {
     onSessionArchived,
     onProjectArchived,
     onExpandProject,
-    onOpenStreamPane,
     onError,
   } = params
 
@@ -325,9 +324,12 @@ export function useSessions(params: {
     repository: string
     prompt: string
     githubIssue?: GitHubIssue
+    engine?: "pi" | "claude-code" | "codex"
   }) => {
     setCreatingSession(true)
     setLaunchError("")
+    // Claude Code / Codex sessions get their task after the engine is chosen.
+    const external = Boolean(input.engine && input.engine !== "pi" && input.kind !== "none")
     const taskId = crypto.randomUUID()
     const start: TaskStart = {
       id: taskId,
@@ -337,7 +339,7 @@ export function useSessions(params: {
       environmentId: activeEnvironmentId,
       projectId: input.projectId,
       githubIssue: input.githubIssue,
-      ...(modelReady && input.prompt.trim()
+      ...(!external && modelReady && input.prompt.trim()
         ? {
             initialMessage: {
               id: crypto.randomUUID(),
@@ -357,8 +359,14 @@ export function useSessions(params: {
         body: JSON.stringify(start),
       })
       clearPendingStart(taskId)
+      if (external) {
+        await request(`/api/sessions/${encodeURIComponent(taskId)}/engine`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ engine: input.engine }) })
+        if (input.prompt.trim()) {
+          await request(`/api/coding-tasks/${encodeURIComponent(taskId)}/messages`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: input.prompt }) })
+        }
+      }
       await loadSessions()
-      if (!start.initialMessage && input.prompt.trim()) {
+      if (!external && !start.initialMessage && input.prompt.trim()) {
         setDraft(input.prompt)
         onError(`${modelSetupMessage} Your message is waiting in the composer.`)
       }
@@ -376,9 +384,9 @@ export function useSessions(params: {
     const taskId = crypto.randomUUID()
     const start: TaskStart = {
       id: taskId,
-      title: prompt.replace(/\s+/g, " ").trim().slice(0, 80) || "New stream",
-      repository: project.repository || "",
-      kind: project.repository ? "worktree" : "none",
+      title: prompt.replace(/\s+/g, " ").trim().slice(0, 80) || "New session",
+      repository: project.repository && settings.defaultWorkspaceKind !== "none" ? project.repository : "",
+      kind: project.repository ? settings.defaultWorkspaceKind : "none",
       environmentId: activeEnvironmentId,
       projectId: project.id,
       ...(modelReady
@@ -400,8 +408,12 @@ export function useSessions(params: {
     })
     await loadSessions()
     if (!start.initialMessage) onError(`${modelSetupMessage} The session was created without sending your message.`)
-    if (res?.session?.id) onOpenStreamPane(project.id, res.session.id)
-  }, [activeEnvironmentId, modelReady, effectiveProvider, selectedModel, settings.reasoning, loadSessions, modelSetupMessage, onError, onOpenStreamPane])
+    // Go straight to the new session, like starting one anywhere else.
+    if (res?.session?.id) {
+      onExpandProject(project.id)
+      onOpenSession(res.session.id)
+    }
+  }, [activeEnvironmentId, modelReady, effectiveProvider, selectedModel, settings.reasoning, settings.defaultWorkspaceKind, loadSessions, modelSetupMessage, onError, onExpandProject, onOpenSession])
 
   const createChatThread = useCallback(async (mode: "coding" | "personal") => {
     try {

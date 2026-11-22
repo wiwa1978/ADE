@@ -1,20 +1,20 @@
 import { useEffect, useState, type FormEvent } from "react"
 import {
   ArrowUp,
-  FolderGit2,
   FolderOpen,
   FolderPlus,
-  GitBranch,
   Link2,
   Server,
   Sparkles,
-  Workflow,
   X,
 } from "lucide-react"
 import { request } from "../../api"
 import type { ApprovalPolicy, GitHubIssue, ProviderCatalogEntry, TaskStart } from "../../app-types"
 import type { Project } from "../../ProjectsView"
 import { ModelPicker } from "../composer/ModelPicker"
+
+type EngineId = "pi" | "claude-code" | "codex"
+type EngineOption = { id: EngineId; name: string; description: string; available: boolean }
 
 type OpenIssueOption = {
   repository: string
@@ -69,6 +69,7 @@ export function NewSessionView({
     repository: string
     prompt: string
     githubIssue?: GitHubIssue
+    engine: EngineId
   }) => Promise<void>
   onLookupIssue?: (projectId: string, url: string) => Promise<GitHubIssue>
 }) {
@@ -83,6 +84,17 @@ export function NewSessionView({
   const [linkedIssue, setLinkedIssue] = useState<GitHubIssue | null>(null)
   const [issueError, setIssueError] = useState("")
   const [lookingUp, setLookingUp] = useState(false)
+  const [engines, setEngines] = useState<EngineOption[]>([])
+  const [engine, setEngine] = useState<EngineId>("pi")
+
+  useEffect(() => {
+    let active = true
+    void request<{ engines: EngineOption[] }>("/api/engines").then(result => { if (active) setEngines(result.engines) }).catch(() => undefined)
+    return () => { active = false }
+  }, [])
+  // External agents need a workspace to work in.
+  const engineAllowed = (id: EngineId) => id === "pi" || kind !== "none"
+  const activeEngine = engines.find(item => item.id === engine)
 
   const effectiveRepo = activeProject?.repository || repository
 
@@ -161,6 +173,7 @@ export function NewSessionView({
       repository: kind === "none" ? "" : effectiveRepo.trim(),
       prompt: prompt.trim(),
       githubIssue: linkedIssue ?? undefined,
+      engine: engineAllowed(engine) ? engine : "pi",
     })
   }
 
@@ -176,9 +189,9 @@ export function NewSessionView({
               <Sparkles className="size-5" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold tracking-tight">New Task</h1>
+              <h1 className="text-lg font-semibold tracking-tight">New session</h1>
               <p className="text-xs opacity-65 mt-0.5">
-                Start a coding task inside a project — inherits its repository, GitHub link, and blueprint automatically.
+                An agent works on the task in its own workspace. You review its changes and ship them as a pull request.
               </p>
             </div>
           </div>
@@ -191,16 +204,16 @@ export function NewSessionView({
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           {/* Clean Top Context Row: Project + Execution Mode */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="flex flex-col gap-3">
             <div className="sf-label">
-              <span>Project (Codebase)</span>
+              <span>Project</span>
               <div className="flex gap-1.5">
                 <select
                   className="sf-field flex-1"
                   value={selectedProjectId ?? "__none__"}
                   onChange={e => handleProjectChange(e.target.value)}
                 >
-                  <option value="__none__">Standalone (no project)</option>
+                  <option value="__none__">No project</option>
                   {projects.map(p => (
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
@@ -214,12 +227,12 @@ export function NewSessionView({
             </div>
 
             <div className="sf-label">
-              <span>Workspace Isolation</span>
+              <span>Workspace</span>
               <div className="sf-segmented h-9 w-full justify-between">
                 {(
                   [
-                    { id: "worktree", label: "Worktree" },
-                    { id: "checkout", label: "Checkout" },
+                    { id: "worktree", label: "Own branch" },
+                    { id: "checkout", label: "Project folder" },
                     { id: "none", label: "Chat only" },
                   ] as const
                 ).map(opt => (
@@ -236,20 +249,29 @@ export function NewSessionView({
             </div>
           </div>
 
-          {/* Inherited Project Context Strip (clean, read-only summary when project already has a repo!) */}
-          {activeProject && activeProject.repository && kind !== "none" ? (
-            <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg border border-[rgb(var(--border)/0.75)] bg-[rgb(var(--surface)/0.65)] text-xs">
-              <span className="sf-badge sf-badge-accent">
-                <Workflow className="size-3" /> {activeProject.blueprintId ?? "automated-factory"}
-              </span>
-              <span className="sf-badge sf-badge-muted font-mono max-w-[280px] truncate">
-                <FolderGit2 className="size-3 shrink-0" /> {activeProject.repository}
-              </span>
-              {activeProject.githubUrl ? (
-                <span className="sf-badge sf-badge-muted font-mono">
-                  <GitBranch className="size-3" /> {activeProject.githubUrl.replace(/^https:\/\/github\.com\//i, "")}
-                </span>
-              ) : null}
+          {/* Which agent does the work */}
+          {engines.length > 1 ? (
+            <div className="sf-label">
+              <span>Agent</span>
+              <div className="sf-segmented h-9 w-full justify-between" role="radiogroup" aria-label="Agent">
+                {engines.map(option => {
+                  const disabledOption = !option.available || !engineAllowed(option.id)
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={engine === option.id}
+                      disabled={disabledOption}
+                      title={!option.available ? `${option.name} isn't installed on this host` : !engineAllowed(option.id) ? `${option.name} needs a workspace (own branch or project folder)` : option.description}
+                      className={`sf-seg-btn flex-1 justify-center ${engine === option.id ? "is-active" : ""}`}
+                      onClick={() => setEngine(option.id)}
+                    >
+                      {option.name}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           ) : null}
 
@@ -342,7 +364,7 @@ export function NewSessionView({
             <textarea
               className="w-full bg-transparent border-0 outline-none resize-none px-4 pt-3.5 pb-2 text-[13.5px] leading-relaxed text-[rgb(var(--foreground))]"
               rows={4}
-              placeholder="What should the Captain and subagents build, fix, or refactor? (Enter to start, Shift+Enter for newline)"
+              placeholder="Describe the task. Enter to start, Shift+Enter for a new line."
               value={prompt}
               onChange={e => setPrompt(e.target.value)}
               onKeyDown={e => {
@@ -354,7 +376,9 @@ export function NewSessionView({
             />
             <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 border-t border-[rgb(var(--border)/0.65)] bg-[rgb(var(--surface-raised)/0.5)]">
               <div className="flex items-center gap-2">
-                <ModelPicker
+                {engine !== "pi" && engineAllowed(engine) ? (
+                  <span className="text-xs opacity-70">{activeEngine?.name} uses its own sign-in and model.</span>
+                ) : <ModelPicker
                   catalog={modelCatalog}
                   selectedProvider={selectedProvider}
                   selectedModel={selectedModel}
@@ -364,7 +388,7 @@ export function NewSessionView({
                   onSelectReasoning={onSelectReasoning}
                   onChangeApprovalPolicy={onChangeApprovalPolicy}
                   onOpenSettings={onOpenSettings}
-                />
+                />}
               </div>
 
               <button
@@ -373,7 +397,7 @@ export function NewSessionView({
                 disabled={starting || !prompt.trim() || (kind !== "none" && !effectiveRepo.trim())}
               >
                 <ArrowUp className="size-3.5" />
-                {starting ? "Starting…" : "Start Task"}
+                {starting ? "Starting…" : "Start session"}
               </button>
             </div>
           </div>

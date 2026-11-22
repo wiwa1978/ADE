@@ -36,7 +36,7 @@ export type Settings = {
 const storageKey = "ade-settings-v1"
 const defaults: Settings = {
   theme: "dark",
-  palette: "paseo",
+  palette: "graphite",
   model: "",
   provider: "",
   harness: "pi",

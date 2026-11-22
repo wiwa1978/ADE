@@ -2,9 +2,10 @@ import type { CSSProperties } from "react"
 
 export type Theme = "light" | "dark" | "system"
 export type ResolvedTheme = Exclude<Theme, "system">
-export type ColorPalette = "aitomium" | "monokai" | "github" | "anthropic" | "tokyo" | "classic" | "solarized" | "nord" | "dracula" | "rose-pine" | "catppuccin" | "gruvbox" | "crimson" | "raspberry" | "one" | "ayu" | "material" | "night-owl" | "everforest" | "cobalt" | "vitesse" | "paseo"
+export type ColorPalette = "aitomium" | "monokai" | "github" | "anthropic" | "tokyo" | "classic" | "solarized" | "nord" | "dracula" | "rose-pine" | "catppuccin" | "gruvbox" | "crimson" | "raspberry" | "one" | "ayu" | "material" | "night-owl" | "everforest" | "cobalt" | "vitesse" | "paseo" | "graphite"
 
 export const colorPalettes: { id: ColorPalette; name: string; description: string }[] = [
+  { id: "graphite", name: "Graphite", description: "Quiet warm-gray surfaces with a calm blue accent. The default." },
   { id: "aitomium", name: "AItomium", description: "The original purple and rose." },
   { id: "monokai", name: "Monokai", description: "Olive neutrals with a lime accent." },
   { id: "github", name: "GitHub", description: "Clean surfaces and familiar blue." },
@@ -115,6 +116,10 @@ const palettes: Record<ColorPalette, Record<ResolvedTheme, PaletteColors>> = {
   vitesse: {
     light: ["#fafaf7", "#303630", "#f0f1ec", "#e7e9e2", "#596357", "#c9d0c4", "#236d52", "#236d52", "#ffffff", "#8a6c38"],
     dark: ["#171b18", "#e5ebe3", "#232b24", "#111612", "#b3c2b1", "#475c48", "#8ccfa8", "#8ccfa8", "#152c20", "#c8b787"],
+  },
+  graphite: {
+    light: ["#fbfbfa", "#1f1f1d", "#f4f4f2", "#f2f2f0", "#6b6a66", "#e3e2de", "#2f7db3", "#2f7db3", "#ffffff", "#8a6bbf"],
+    dark: ["#282826", "#e7e5e0", "#2f2f2d", "#232321", "#9c9a94", "#3b3b38", "#62acd9", "#62acd9", "#16191c", "#c3a6e3"],
   },
   paseo: {
     light: ["#f7f5f2", "#252321", "#f0eeea", "#f3f1ed", "#77716b", "#dedad4", "#bd6247", "#bd6247", "#fffaf7", "#9b4d52"],

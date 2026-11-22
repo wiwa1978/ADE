@@ -12,6 +12,8 @@ import { useProjects } from "./src/hooks/useProjects"
 import { useRuntimeStream } from "./src/hooks/useRuntimeStream"
 import { useDesktopNotifications, useSessions } from "./src/hooks/useSessions"
 import { AppSidebar } from "./src/sidebar/AppSidebar"
+import type { SidebarSelection } from "./src/sidebar/Sidebar"
+import { useInbox } from "./src/session-state"
 import type { ContextMenuTarget } from "./src/sidebar/SidebarContextMenu"
 import { AppMainColumn } from "./src/layout/AppMainColumn"
 import { AppOverlays } from "./src/layout/AppOverlays"
@@ -29,8 +31,6 @@ function readLastView(): LastView {
     return {}
   }
 }
-const lastView = readLastView()
-
 export default function App() {
   return (
     <EventStreamProvider>
@@ -40,8 +40,9 @@ export default function App() {
 }
 
 function AppInner() {
+  const [lastView] = useState(readLastView)
   const { settings, error: settingsError, resolved, update } = useSettings()
-  const [screen, setScreen] = useState<Screen>(() => lastView.screen === "project" || lastView.screen === "factory" ? lastView.screen : "work")
+  const [screen, setScreen] = useState<Screen>(() => lastView.screen === "project" || lastView.screen === "factory" || lastView.screen === "work" ? lastView.screen : "inbox")
   const [newSessionOpen, setNewSessionOpen] = useState(false)
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
     try {
@@ -137,6 +138,25 @@ function AppInner() {
     onArtifactUpdated: artifactId => setExternalOpenRequest({ id: "artifact", kind: "artifact", title: "Artifact", artifactId }),
   })
 
+  const inbox = useInbox(sess.sessions)
+  const markSeen = inbox.markSeen
+  /** Open any session or chat in the session view (marks it seen in the Inbox). */
+  const openSession = useCallback((target: Conversation) => {
+    sess.clearUnread(target.id)
+    void markSeen(target.id)
+    if (target.projectId) {
+      setSelectedProjectId(target.projectId)
+      expandProject(target.projectId)
+    }
+    openSessionInWork(target.id)
+  }, [sess, markSeen, expandProject, openSessionInWork])
+
+  // The session on screen counts as seen, including when its state changes while you watch it.
+  const activeEntry = inbox.entries[activeSessionId]
+  useEffect(() => {
+    if (screen === "work" && !newSessionOpen && activeEntry?.needsYou && activeEntry.state !== "needs-approval" && document.hasFocus()) void markSeen(activeSessionId)
+  }, [screen, newSessionOpen, activeSessionId, activeEntry?.needsYou, activeEntry?.state, markSeen])
+
   useDesktopNotifications({
     sessions: sess.sessions,
     approvals: stream.approvals,
@@ -212,59 +232,61 @@ function AppInner() {
   const archivedSessions = sess.sessions.filter(s => s.archivedAt)
   const ungroupedTasks = sortPinnedFirst(codingTasks.filter(s => !s.projectId && !sess.archivedIds.includes(s.id)))
   const selectedProject = proj.projects.find(p => p.id === selectedProjectId) ?? null
+  const inboxCount = Object.values(inbox.entries).filter(entry => entry.needsYou && !sess.archivedIds.includes(entry.sessionId)).length
+  const sidebarSelection: SidebarSelection =
+    screen === "inbox" ? { kind: "inbox" }
+      : screen === "settings" ? { kind: "settings" }
+        : screen === "project" && selectedProjectId ? { kind: "project", projectId: selectedProjectId }
+          : screen === "work" && newSessionOpen ? { kind: "new-session" }
+            : screen === "work" ? { kind: "session", sessionId: sess.activeSession.id }
+              : { kind: "other" }
 
   return (
     <div className="ade-app-shell">
-      <AppSidebar
-        screen={screen}
-        newSessionOpen={newSessionOpen}
-        activeSession={sess.activeSession}
-        selectedProjectId={selectedProjectId}
-        expandedProjects={expandedProjects}
-        projects={proj.projects}
-        visibleProjects={visibleProjects}
-        codingTasks={codingTasks}
-        ungroupedTasks={ungroupedTasks}
-        generalChats={generalChats}
-        personalChats={personalChats}
-        archivedProjects={archivedProjects}
-        archivedSessions={archivedSessions}
-        archivedIds={sess.archivedIds}
-        pinnedIds={sess.pinnedIds}
-        unreadIds={sess.unreadIds}
-        factoryRuns={proj.factoryRuns}
-        openStreamIdsByProject={proj.openStreamIdsByProject}
-        focusedStreamId={proj.focusedStreamId}
-        runtime={model.runtime}
-        activeEnvironmentName={env.activeEnvironmentName}
-        sseConnected={stream.sseConnected}
-        renamingId={renamingId}
-        renameText={renameText}
-        onStartRename={s => { setRenamingId(s.id); setRenameText(s.label) }}
-        onChangeRenameText={setRenameText}
-        onCancelRename={() => setRenamingId(null)}
-        onSubmitRename={async s => { setRenamingId(null); await sess.renameSession(s, renameText) }}
-        onOpenNewSession={projectId => { if (projectId) setSelectedProjectId(projectId); setNewSessionOpen(true); setScreen("work") }}
-        onOpenCommandCenter={() => setCommandOpen(true)}
-        onOpenProjectsIndex={() => { proj.setProjectsError(""); setSelectedProjectId(null); setScreen("projects") }}
-        onOpenAddProject={() => setAddProjectOpen(true)}
-        onOpenProject={openProject}
-        onToggleExpandProject={id => setExpandedProjects(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]))}
-        onSelectProjectStream={(projectId, streamId, sessionId) => {
-          if (sessionId) sess.clearUnread(sessionId)
-          setSelectedProjectId(projectId)
-          proj.openStreamPane(projectId, streamId)
-          setScreen("project")
-        }}
-        onMaximizeSession={id => { sess.clearUnread(id); openSessionInWork(id) }}
-        onSelectSession={id => { sess.clearUnread(id); openSessionInWork(id) }}
-        onCreateChatThread={mode => void sess.createChatThread(mode)}
-        onToggleArchive={(id, archivedNow) => void sess.toggleArchive(id, archivedNow)}
-        onOpenContextMenu={setContextMenu}
-        onOpenScreen={target => { previousScreen.current = screen; setScreen(target) }}
-        onOpenBrowser={() => { setNewSessionOpen(false); setScreen("work"); setExternalOpenRequest({ id: "browser", kind: "browser", title: "Browser" }) }}
-        onOpenEnvironmentPalette={() => setEnvPaletteOpen(true)}
-      />
+      {/* Settings take over the window (they have their own navigation and a Back button). */}
+      {screen === "settings" ? null : (
+        <AppSidebar
+          selection={sidebarSelection}
+          expandedProjects={expandedProjects}
+          visibleProjects={visibleProjects}
+          codingTasks={codingTasks}
+          ungroupedTasks={ungroupedTasks}
+          chats={[...generalChats, ...personalChats]}
+          archivedProjects={archivedProjects}
+          archivedSessions={archivedSessions}
+          archivedIds={sess.archivedIds}
+          pinnedIds={sess.pinnedIds}
+          unreadIds={sess.unreadIds}
+          factoryRuns={proj.factoryRuns}
+          inbox={inbox.entries}
+          inboxCount={inboxCount}
+          runtime={model.runtime}
+          activeEnvironmentName={env.activeEnvironmentName}
+          sseConnected={stream.sseConnected}
+          renamingId={renamingId}
+          renameText={renameText}
+          onChangeRenameText={setRenameText}
+          onCancelRename={() => setRenamingId(null)}
+          onSubmitRename={async s => { setRenamingId(null); await sess.renameSession(s, renameText) }}
+          onOpenNewSession={projectId => { if (projectId) setSelectedProjectId(projectId); setNewSessionOpen(true); setScreen("work") }}
+          onOpenCommandCenter={() => setCommandOpen(true)}
+          onOpenInbox={() => setScreen("inbox")}
+          onOpenAddProject={() => setAddProjectOpen(true)}
+          onOpenProject={projectId => openProject(projectId, false)}
+          onToggleExpandProject={id => setExpandedProjects(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]))}
+          onOpenSession={openSession}
+          onOpenFactoryRun={(projectId, runId) => {
+            setSelectedProjectId(projectId)
+            proj.openStreamPane(projectId, `factory:${runId}`)
+            setScreen("project")
+          }}
+          onCreateChatThread={mode => void sess.createChatThread(mode)}
+          onToggleArchive={(id, archivedNow) => void sess.toggleArchive(id, archivedNow)}
+          onOpenContextMenu={setContextMenu}
+          onOpenSettings={() => { previousScreen.current = screen; setScreen("settings") }}
+          onOpenEnvironmentPalette={() => setEnvPaletteOpen(true)}
+        />
+      )}
 
       <AppMainColumn
         screen={screen}
@@ -348,6 +370,9 @@ function AppInner() {
         onAbortSession={() => void sess.abortSession()}
         onCompactSession={() => void sess.compactSession()}
         onReviewArtifact={handleReviewArtifact}
+        inboxEntries={inbox.entries}
+        onOpenSessionConversation={openSession}
+        onArchiveSession={id => void sess.toggleArchive(id, false)}
       />
 
       <AppOverlays

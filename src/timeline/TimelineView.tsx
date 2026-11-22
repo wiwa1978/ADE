@@ -280,6 +280,7 @@ export function TimelineView({
   onOpenBrowser,
   onOpenExternalBrowser,
   onOpenArtifact,
+  onRewind,
 }: {
   timeline: ConversationTimelineSnapshot | null
   fallbackMessages?: ConversationMessage[]
@@ -294,6 +295,8 @@ export function TimelineView({
   onOpenBrowser?: (url?: string) => void
   onOpenExternalBrowser?: (url: string) => void
   onOpenArtifact?: (artifactId?: string) => void
+  /** Offer "Rewind files to before this message" on user messages (coding sessions with a workspace). */
+  onRewind?: (messageContent: string) => void
 }) {
   const endRef = useRef<HTMLDivElement>(null)
 
@@ -330,6 +333,11 @@ export function TimelineView({
           return (
             <div key={item.id} className="ade-msg ade-msg-user">
               <div className="ade-msg-user-bubble">{item.content}</div>
+              {onRewind && !busy ? (
+                <button type="button" className="ade-msg-rewind" onClick={() => onRewind(item.content)} title="Put the workspace's files back the way they were before this message">
+                  ↺ Rewind files to here
+                </button>
+              ) : null}
             </div>
           )
         }

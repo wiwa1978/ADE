@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { Check, FileCode2, GitCommit, Minus, Plus, RefreshCw, RotateCcw } from "lucide-react"
 import { request } from "../../api"
 import type { WorkspaceGitSummary } from "../../app-types"
+import { CheckpointList } from "./CheckpointList"
 
 type BranchFile = { path: string; additions: number; deletions: number; status: "added" | "modified" | "deleted" | "renamed" }
 
@@ -10,11 +11,16 @@ export function DiffPanel({
   summary,
   onRefresh,
   onOpenFile,
+  agentBusy = false,
+  initialMode = "working",
 }: {
   sessionId: string
   summary: WorkspaceGitSummary
   onRefresh: () => void
   onOpenFile?: (path: string) => void
+  /** The agent is working; rewinding is disabled until it stops. */
+  agentBusy?: boolean
+  initialMode?: "working" | "branch" | "history"
 }) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [showStaged, setShowStaged] = useState(false)
@@ -24,7 +30,12 @@ export function DiffPanel({
   const [notice, setNotice] = useState("")
   const [error, setError] = useState("")
   // "working" = uncommitted changes (stage/commit); "branch" = everything this session changed since its base commit.
-  const [mode, setMode] = useState<"working" | "branch">("working")
+  const [mode, setMode] = useState<"working" | "branch" | "history">(initialMode)
+  const [prevInitialMode, setPrevInitialMode] = useState(initialMode)
+  if (initialMode !== prevInitialMode) {
+    setPrevInitialMode(initialMode)
+    setMode(initialMode)
+  }
   const [branchFiles, setBranchFiles] = useState<BranchFile[] | null>(null)
 
   const loadBranchFiles = useCallback(async () => {
@@ -169,8 +180,20 @@ export function DiffPanel({
       <button type="button" role="tab" aria-selected={mode === "branch"} className={mode === "branch" ? "is-active" : ""} onClick={() => { setMode("branch"); setSelectedPath(null) }}>
         All branch changes{branchFiles?.length ? ` · ${branchFiles.length}` : ""}
       </button>
+      <button type="button" role="tab" aria-selected={mode === "history"} className={mode === "history" ? "is-active" : ""} onClick={() => setMode("history")}>
+        History
+      </button>
     </div>
   )
+
+  if (mode === "history") {
+    return (
+      <div className="ade-pane-body">
+        <div className="ade-pane-toolbar">{modeToggle}</div>
+        <CheckpointList sessionId={sessionId} busy={agentBusy} onRestored={onRefresh} />
+      </div>
+    )
+  }
   const renderDiff = () => (
     <div className="ade-diff-code">
       {diffLines.length === 0 ? (

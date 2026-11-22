@@ -147,7 +147,7 @@ export function LiveSessionPane({
           <button
             type="button"
             className="ade-icon-btn !w-6 !h-6"
-            title="Close pane (keeps stream in sidebar)"
+            title="Close pane (the session stays in the sidebar)"
             onClick={e => { e.stopPropagation(); onClose() }}
           >
             <X className="size-3.5" />
@@ -164,9 +164,9 @@ export function LiveSessionPane({
           <div className="ade-stream-pane-body">
             {items.length === 0 ? (
               <div className="my-auto text-center py-6 px-3 opacity-65">
-                <div className="text-[12.5px] font-medium">Stream ready</div>
+                <div className="text-[12.5px] font-medium">Session ready</div>
                 <div className="text-[11.5px] mt-1">
-                  Send a message below, switch to Diff to inspect changes, or click Maximize for Terminal &amp; Browser.
+                  Send a message below, or open the session for Changes, Run, Terminal, Browser, and Pull request.
                 </div>
               </div>
             ) : (
@@ -237,7 +237,7 @@ export function LiveSessionPane({
               type="submit"
               className="ade-icon-btn !w-7 !h-7"
               disabled={sending || !draft.trim()}
-              title="Send to stream"
+              title="Send to session"
             >
               <Send className="size-3.5" />
             </button>

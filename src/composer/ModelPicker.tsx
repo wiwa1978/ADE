@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Check, ChevronDown, Search, Star } from "lucide-react"
+import { Check, ChevronDown, Search, Sparkles, Star } from "lucide-react"
 import type { ApprovalPolicy, ProviderCatalogEntry } from "../../app-types"
 import { ProviderGlyph } from "./ProviderGlyph"
 import { ModelPickerFooter } from "./ModelPickerFooter"
@@ -268,6 +268,18 @@ export function ModelPicker({
   const rightHeaderModelName = shortModelLabel((highlightedEntry && !highlightedEntry.isDefault ? highlightedEntry.name : triggerModelName))
   const effectiveReasoning = reasoning === "off" ? "none" : reasoning
   const activeProviderMeta = activeTab !== "favorites" ? orderedCatalog.find(p => p.id === activeTab) : null
+
+  // With no provider set up there is nothing to pick: send the user straight to Settings → Models.
+  if (catalog.length > 0 && !catalog.some(p => p.configured)) {
+    return (
+      <div className="ade-mp-root" ref={rootRef}>
+        <button type="button" className="ade-mp-trigger ade-mp-setup" onClick={() => onOpenSettings?.()} title="No model provider is set up yet">
+          <Sparkles className="size-3.5 shrink-0" />
+          <span className="ade-mp-trigger-name">Set up a model</span>
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="ade-mp-root" ref={rootRef}>

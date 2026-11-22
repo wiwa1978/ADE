@@ -17,6 +17,9 @@ import type {
 import { TimelineView } from "../timeline/TimelineView"
 import { AmbientTracksBar } from "../composer/AmbientTracksBar"
 import { ComposerDock } from "../composer/ComposerDock"
+import { request } from "../../api"
+import type { RunStatus } from "../panels/RunPanel"
+import { confirmRestore, restoreCheckpoint, type CheckpointInfo } from "../panels/checkpoint-actions"
 import type { PullRequestInfo } from "../panels/PullRequestPanel"
 import { WorkspaceHeaderBar } from "./WorkspaceHeaderBar"
 import { BesidePane } from "./BesidePane"
@@ -64,6 +67,10 @@ export function SplitWorkspace({
   terminalScrollback,
   terminalAutoStart = true,
   prDraftDefault = true,
+  projectName,
+  onOpenProject,
+  onOpenProjectSettings,
+  stateLabel,
   environmentId,
   externalOpenRequest,
   onClearExternalOpenRequest,
@@ -111,6 +118,12 @@ export function SplitWorkspace({
   terminalScrollback: number
   terminalAutoStart?: boolean
   prDraftDefault?: boolean
+  /** Breadcrumb back to the session's project. */
+  projectName?: string
+  onOpenProject?: () => void
+  onOpenProjectSettings?: () => void
+  /** Attention state from the inbox (e.g. "Ready to review"). */
+  stateLabel?: { label: string; tone: string; hint: string }
   environmentId: string
   externalOpenRequest: WorkspaceTab | null
   onClearExternalOpenRequest: () => void
@@ -221,7 +234,52 @@ export function SplitWorkspace({
   }, [openBeside])
 
   const openFiles = useCallback(() => openBeside({ id: "files", kind: "files", title: "Files" }), [openBeside])
-  const openDiff = useCallback(() => openBeside({ id: "diff", kind: "diff", title: "Changes" }), [openBeside])
+  const [diffMode, setDiffMode] = useState<"working" | "branch" | "history">("working")
+  const openDiff = useCallback((mode: "working" | "branch" | "history" = "working") => {
+    setDiffMode(mode)
+    openBeside({ id: "diff", kind: "diff", title: "Changes" })
+  }, [openBeside])
+  const openRun = useCallback(() => openBeside({ id: "run", kind: "run", title: "Run" }), [openBeside])
+
+  // Setup/run status for the header, polled lightly while the session has a workspace.
+  const [runStatus, setRunStatus] = useState<RunStatus | null>(null)
+  useEffect(() => {
+    if (!hasWorkspace) return
+    let active = true
+    const poll = async () => {
+      try {
+        const result = await request<{ setup: { status: RunStatus["setup"] }; run: { status: RunStatus["run"]; url: string | null } }>(`/api/sessions/${encodeURIComponent(session.id)}/scripts`)
+        if (active) setRunStatus({ setup: result.setup.status, run: result.run.status, url: result.run.url })
+      } catch {
+        if (active) setRunStatus(null)
+      }
+    }
+    void poll()
+    const timer = window.setInterval(() => void poll(), 4000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [session.id, hasWorkspace])
+
+  /** "Rewind files to here" on a message: find the checkpoint saved just before it was sent. */
+  const rewindTo = useCallback(async (content: string) => {
+    try {
+      const { checkpoints } = await request<{ checkpoints: CheckpointInfo[] }>(`/api/sessions/${encodeURIComponent(session.id)}/checkpoints`)
+      const label = content.replace(/\s+/g, " ").trim().slice(0, 160)
+      const match = checkpoints.find(item => item.label === label)
+      if (!match) {
+        openDiff("history")
+        return
+      }
+      if (match.filesChanged === 0) {
+        alert("The files are already the same as before this message.")
+        return
+      }
+      if (!confirmRestore(match)) return
+      await restoreCheckpoint(session.id, match)
+      onRefreshGit()
+    } catch (cause) {
+      alert(cause instanceof Error ? cause.message : "Could not rewind.")
+    }
+  }, [session.id, openDiff, onRefreshGit])
   const openBrowser = useCallback((url?: string) => {
     openBeside({ id: "browser", kind: "browser", title: "Browser", ...(url ? { initialUrl: url } : {}) })
   }, [openBeside])
@@ -264,9 +322,14 @@ export function SplitWorkspace({
         onOpenExternalBrowser={onOpenExternalBrowser}
         onOpenSubagent={openSubagent}
         onOpenFiles={openFiles}
-        onOpenDiff={openDiff}
+        onOpenDiff={() => openDiff()}
         onOpenTerminal={() => openTerminal()}
         onOpenPullRequest={openPullRequest}
+        onOpenRun={openRun}
+        runStatus={hasWorkspace ? runStatus : null}
+        projectName={projectName}
+        onOpenProject={onOpenProject}
+        stateLabel={stateLabel}
         onOpenBrowser={() => openBrowser()}
         onOpenArtifact={() => openArtifact()}
         onOpenProcesses={openProcesses}
@@ -283,14 +346,17 @@ export function SplitWorkspace({
               busy={isBusy}
               emptyTitle={session.label}
               emptySubtitle={hasWorkspace
-                ? `Connected to ${workspacePath}. Use /plan for an approval plan, /subagent to spin up parallel workers, or open Browser/Files/Diff beside this chat.`
-                : "Ask anything, create structured plans (/plan), or preview web pages in the built-in browser."}
+                ? `The agent works on ${session.workspace?.branch ? `branch ${session.workspace.branch}` : "the project folder"}. Describe a task below. Review its work in Changes, run it with Run or Terminal, and ship it from Pull request.`
+                : session.workspace?.removed
+                  ? "This session was archived and its worktree removed. Restore it from Archived in the sidebar to continue."
+                  : "Ask anything, plan work with /plan, or preview web pages in the built-in browser."}
               onResolveApproval={onResolveApproval}
               onOpenFile={hasWorkspace ? openFile : undefined}
               onOpenSubagent={openSubagent}
               onOpenBrowser={openBrowser}
               onOpenExternalBrowser={onOpenExternalBrowser}
               onOpenArtifact={openArtifact}
+              onRewind={hasWorkspace ? content => void rewindTo(content) : undefined}
             />
           </div>
 
@@ -306,7 +372,7 @@ export function SplitWorkspace({
               hasWorkspace={hasWorkspace}
               onOpenSubagent={openSubagent}
               onStopSubagent={id => void onStopSubagent(id)}
-              onOpenDiff={openDiff}
+              onOpenDiff={() => openDiff()}
               onOpenArtifact={openArtifact}
               onOpenProcesses={openProcesses}
               onChangeApprovalPolicy={onChangeApprovalPolicy}
@@ -342,6 +408,7 @@ export function SplitWorkspace({
                 else if (panel === "pr") openPullRequest()
               }}
               textareaRef={textareaRef}
+              engineLabel={session.engine === "claude-code" ? "Claude Code" : session.engine === "codex" ? "Codex" : undefined}
             />
           </div>
         </section>
@@ -382,8 +449,12 @@ export function SplitWorkspace({
               onOpenTerminal={openTerminal}
               onOpenSubagent={openSubagent}
               onOpenFile={openFile}
-              onOpenDiff={openDiff}
+              onOpenDiff={() => openDiff()}
               onOpenBrowser={openBrowser}
+              agentBusy={isBusy}
+              diffMode={diffMode}
+              onRunStatusChange={setRunStatus}
+              onOpenProjectSettings={onOpenProjectSettings}
               onOpenExternalBrowser={onOpenExternalBrowser}
               onBrowserStateChange={onBrowserStateChange}
               onMessageSubagent={onMessageSubagent}

@@ -26,6 +26,8 @@ import { FactoryKanban } from "../factory/FactoryKanban"
 import { FactoryIssuesList, type ProjectGitHubIssue } from "../factory/FactoryIssuesList"
 import type { FactoryRunDetail } from "../factory/types"
 import { ProjectPullRequests } from "./ProjectPullRequests"
+import { ProjectSessionList } from "./ProjectSessionList"
+import type { InboxEntry } from "../session-state"
 import { LiveSessionPane } from "./LiveSessionPane"
 import { LiveFactoryRunPane } from "./LiveFactoryRunPane"
 import { ProjectSubagentsTab } from "./ProjectSubagentsTab"
@@ -58,6 +60,7 @@ export function ProjectStreamsWorkspace({
   onOpenAgent,
   onStartSessionFromIssue,
   onOpenExternal,
+  inboxEntries = {},
 }: {
   project: Project
   sessions: Conversation[]
@@ -83,10 +86,13 @@ export function ProjectStreamsWorkspace({
   onOpenAgent: (sessionId: string, agent: FeatureAgent) => void
   onStartSessionFromIssue?: (issue: ProjectGitHubIssue) => Promise<void>
   onOpenExternal?: (url: string) => void
+  inboxEntries?: Record<string, InboxEntry>
 }) {
   const [activeTab, setActiveTab] = useState<ProjectTab>("sessions")
   const [layout, setLayout] = useState<StreamLayout>("split")
   const [archivedOpen, setArchivedOpen] = useState(false)
+  // "list" shows every session's status; "side" opens several live sessions next to each other.
+  const [sessionView, setSessionView] = useState<"list" | "side">("list")
   const [quickPrompt, setQuickPrompt] = useState("")
   const [launching, setLaunching] = useState(false)
   const [launchError, setLaunchError] = useState("")
@@ -130,7 +136,7 @@ export function ProjectStreamsWorkspace({
       await onQuickStartStream(trimmed)
       setQuickPrompt("")
     } catch (err) {
-      setLaunchError(err instanceof Error ? err.message : "Could not start stream.")
+      setLaunchError(err instanceof Error ? err.message : "Could not start the session.")
     } finally {
       setLaunching(false)
     }
@@ -153,7 +159,7 @@ export function ProjectStreamsWorkspace({
             onClick={() => void onStartFactoryRun()}
             title="Launch a new Software Factory run on this project"
           >
-            <Workflow className="size-3.5" /> New Factory Run
+            <Workflow className="size-3.5" /> Factory run
           </button>
           <button
             type="button"
@@ -163,7 +169,7 @@ export function ProjectStreamsWorkspace({
               void onQuickStartStream("")
             }}
           >
-            <Plus className="size-3.5" /> New Stream
+            <Plus className="size-3.5" /> New session
           </button>
           <button
             type="button"
@@ -185,28 +191,34 @@ export function ProjectStreamsWorkspace({
           </button>
           <button type="button" role="tab" aria-selected={activeTab === "kanban"} className={`ade-project-tab ${activeTab === "kanban" ? "is-active" : ""}`} onClick={() => setActiveTab("kanban")}>
             <KanbanSquare className="size-3.5" />
-            <span>Kanban</span>
+            <span>Factory</span>
             <span className="ade-count-badge">{factoryRuns.length}</span>
           </button>
           <button type="button" role="tab" aria-selected={activeTab === "issues"} className={`ade-project-tab ${activeTab === "issues" ? "is-active" : ""}`} onClick={() => setActiveTab("issues")}>
             <ListTodo className="size-3.5" />
-            <span>GitHub Issues</span>
+            <span>Issues</span>
           </button>
           <button type="button" role="tab" aria-selected={activeTab === "pulls"} className={`ade-project-tab ${activeTab === "pulls" ? "is-active" : ""}`} onClick={() => setActiveTab("pulls")}>
             <GitPullRequest className="size-3.5" />
-            <span>Pull Requests</span>
+            <span>Pull requests</span>
           </button>
           <button type="button" role="tab" aria-selected={activeTab === "subagents"} className={`ade-project-tab ${activeTab === "subagents" ? "is-active" : ""}`} onClick={() => setActiveTab("subagents")}>
             <Bot className="size-3.5" />
-            <span>Subagents Activity</span>
+            <span>Agents</span>
             {totalSubagentsCount > 0 ? <span className="ade-count-badge is-accent">{totalSubagentsCount}</span> : null}
           </button>
         </nav>
 
-        {activeTab === "sessions" && visiblePaneIds.length > 0 ? (
+        {activeTab === "sessions" ? (
+          <div className="ade-segmented" role="tablist" aria-label="Session view">
+            <button type="button" role="tab" aria-selected={sessionView === "list"} className={sessionView === "list" ? "is-active" : ""} onClick={() => setSessionView("list")}>List</button>
+            <button type="button" role="tab" aria-selected={sessionView === "side"} className={sessionView === "side" ? "is-active" : ""} onClick={() => setSessionView("side")}>Side by side</button>
+          </div>
+        ) : null}
+        {activeTab === "sessions" && sessionView === "side" && visiblePaneIds.length > 0 ? (
           <div className="flex items-center gap-2">
             {hiddenStreamIds.length > 0 ? (
-              <button type="button" className="ade-chip-btn" onClick={() => onOpenStreamPane(hiddenStreamIds[0])} title="Open another stream side-by-side">
+              <button type="button" className="ade-chip-btn" onClick={() => onOpenStreamPane(hiddenStreamIds[0])} title="Open another session side by side">
                 <Plus className="size-3" /> Add pane ({hiddenStreamIds.length})
               </button>
             ) : null}
@@ -219,7 +231,20 @@ export function ProjectStreamsWorkspace({
         ) : null}
       </div>
 
-      {activeTab === "sessions" ? (
+      {activeTab === "sessions" && sessionView === "list" ? (
+        <div className="ade-streams-canvas">
+          <ProjectSessionList
+            projectName={project.name}
+            sessions={sessions}
+            factoryRuns={factoryRuns}
+            entries={inboxEntries}
+            onOpenSession={onMaximizeSession}
+            onOpenFactoryRun={runId => { onOpenStreamPane(`factory:${runId}`); setSessionView("side") }}
+            onQuickStart={onQuickStartStream}
+          />
+        </div>
+      ) : null}
+      {activeTab === "sessions" && sessionView === "side" ? (
         <div className="ade-streams-canvas">
           {launchError ? <div className="ade-banner-error">{launchError}</div> : null}
 
@@ -228,9 +253,9 @@ export function ProjectStreamsWorkspace({
               <div className="w-11 h-11 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] grid place-items-center mb-4 opacity-85">
                 <Columns2 className="size-5" />
               </div>
-              <h2 className="text-[16px] font-semibold m-0">Start a stream in {project.name}</h2>
+              <h2 className="text-[16px] font-semibold m-0">Start a session in {project.name}</h2>
               <p className="text-[13px] opacity-65 max-w-md mt-1.5 mb-5 leading-relaxed">
-                Streams appear under {project.name} on the left and open side-by-side here so you can run parallel agents, features, and Factory pipelines at once.
+                Each session is an agent working on its own branch. Open several here to watch them side by side.
               </p>
               <form
                 className="w-full max-w-xl flex items-center gap-2 p-2 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]"
@@ -244,7 +269,7 @@ export function ProjectStreamsWorkspace({
                   disabled={launching}
                 />
                 <button type="submit" className="sf-btn-primary !h-8" disabled={launching || !quickPrompt.trim()}>
-                  {launching ? "Starting…" : "Start stream"}
+                  {launching ? "Starting…" : "Start session"}
                 </button>
               </form>
               <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
@@ -300,7 +325,7 @@ export function ProjectStreamsWorkspace({
                 <span>Archived sessions</span>
                 <span className="ade-count-badge">{archivedSessions.length}</span>
               </span>
-              <span className="text-[11px] font-normal opacity-70">Right-click any stream to archive</span>
+              <span className="text-[11px] font-normal opacity-70">Right-click a session to archive it</span>
             </button>
             {archivedOpen ? (
               <div className="border-t border-[rgb(var(--border)/0.7)] divide-y divide-[rgb(var(--border)/0.5)]">

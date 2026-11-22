@@ -1,4 +1,5 @@
 import {
+  Play,
   Activity,
   Bot,
   ExternalLink,
@@ -43,6 +44,11 @@ export function WorkspaceHeaderBar({
   onOpenBrowser,
   onOpenArtifact,
   onOpenProcesses,
+  onOpenRun,
+  runStatus,
+  projectName,
+  onOpenProject,
+  stateLabel,
 }: {
   session: Conversation
   isBusy: boolean
@@ -65,18 +71,33 @@ export function WorkspaceHeaderBar({
   onOpenBrowser: () => void
   onOpenArtifact: () => void
   onOpenProcesses: () => void
+  onOpenRun: () => void
+  runStatus: { setup: string; run: string; url: string | null } | null
+  /** Breadcrumb back to the session's project. */
+  projectName?: string
+  onOpenProject?: () => void
+  /** Attention state from the inbox (e.g. "Ready to review"). */
+  stateLabel?: { label: string; tone: string; hint: string }
 }) {
   return (
     <header className="ade-workspace-header">
       <div className="ade-workspace-header-left">
-        <span className={`ade-dot ade-dot-${isBusy ? "running" : approvals.length > 0 ? "waiting" : "completed"}`} />
+        {projectName ? (
+          <>
+            <button type="button" className="ade-breadcrumb" onClick={onOpenProject} title={`Open ${projectName}`}>{projectName}</button>
+            <span className="ade-breadcrumb-sep" aria-hidden="true">/</span>
+          </>
+        ) : null}
         <h2 className="ade-workspace-title ade-truncate" title={session.label}>{session.label}</h2>
+        {stateLabel ? <span className={`ade-row-tag is-${stateLabel.tone}`} title={stateLabel.hint}>{stateLabel.label}</span>
+          : isBusy ? <span className="ade-row-tag is-running">Working</span>
+            : approvals.length > 0 ? <span className="ade-row-tag is-waiting">Needs approval</span> : null}
+        {runStatus?.setup === "running" ? <button type="button" className="ade-row-tag is-running" onClick={onOpenRun} title="The project's setup script is running in this worktree">Setting up…</button>
+          : runStatus?.setup === "failed" ? <button type="button" className="ade-row-tag is-failed" onClick={onOpenRun} title="The setup script failed; open Run to see its output">Setup failed</button> : null}
         {session.workspace?.branch ? (
           <span className="ade-pill ade-mono"><GitBranch className="size-3" /> {session.workspace.branch}</span>
         ) : null}
-        {session.workspace?.kind === "worktree" ? (
-          <span className="ade-pill">worktree</span>
-        ) : null}
+
         {session.githubIssue ? (
           <button
             type="button"
@@ -127,6 +148,16 @@ export function WorkspaceHeaderBar({
               {gitSummary.files.length > 0 ? (
                 <span className="ade-count-badge">{gitSummary.files.length}</span>
               ) : null}
+            </button>
+            <button
+              type="button"
+              className={`ade-header-tool-btn ${activeBesideTab?.kind === "run" ? "is-active" : ""}`}
+              onClick={onOpenRun}
+              title="Run the app with the project's run script"
+            >
+              <Play className="size-3.5" />
+              <span>Run</span>
+              {runStatus?.run === "running" ? <span className="ade-state-dot is-running" aria-label="App running" /> : null}
             </button>
             <button
               type="button"

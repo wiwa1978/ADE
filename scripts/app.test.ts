@@ -135,6 +135,8 @@ beforeEach(() => {
   mcpRecords = []
 
   browser.localStorage.clear()
+  // Start on the session view (the app's first-run default is the Inbox).
+  browser.localStorage.setItem("ade.last-view", JSON.stringify({ screen: "work", activeSessionId: "coding" }))
   ;(browser as unknown as Record<string, unknown>).setInterval = (callback: () => void, delay: number) => {
     const id = Symbol("interval")
     intervals.set(id, { callback, delay })
@@ -326,7 +328,7 @@ test("renders Paseo split-pane workspace with live multi-subagent tracks, side-b
 
 test("opens Built-in Browser pane and triggers external system browser launch", async () => {
   await act(async () => root.render(React.createElement(App)))
-  await click("Built-in Browser")
+  await click("Browser")
   assert.match(container.textContent ?? "", /Built-in Interactive Browser/)
   await click("External")
   assert.ok(requests.some(r => r.url === "/api/browser/open-external" && r.method === "POST"))
@@ -347,8 +349,8 @@ test("composer slash command autocomplete and Settings MCP + appearance persist"
   await act(async () => setInput(textarea, "/pl"))
   assert.match(container.textContent ?? "", /Write an Implementation Plan artifact/)
 
-  // Open Settings & MCP
-  await click("Settings & MCP")
+  // Open Settings
+  await click("Settings")
   await click("Appearance")
   await click("Light")
   assert.equal(browser.document.documentElement.dataset.theme, "light")

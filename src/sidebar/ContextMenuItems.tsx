@@ -39,7 +39,7 @@ export function ProjectContextMenuItems({
   return (
     <>
       <button type="button" className="ade-ctx-item" role="menuitem" onClick={() => { onNewProjectStream(project); onClose() }}>
-        <span>New stream</span>
+        <span>New session</span>
         <span className="ade-ctx-shortcut">N</span>
       </button>
 
