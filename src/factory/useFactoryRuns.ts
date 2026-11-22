@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react"
-import { getCaptainEndpoint, request, resolveCaptainUrl, setCaptainEndpoint } from "../../api"
+import { getCaptainEndpoint, request, setCaptainEndpoint } from "../../api"
 import type { FactoryBlueprint, ModelProfileId } from "../../app-types"
 import type { Project } from "../../ProjectsView"
+import { useEventStream, useEventStreamListener } from "../hooks/EventStreamContext"
 import type { FactoryCapabilities, FactoryRunDetail } from "./types"
 
 const DEFAULT_PROFILES: { id: ModelProfileId; name: string; euCompliantByDefault: boolean }[] = [
@@ -21,6 +22,7 @@ export function useFactoryRuns(params: {
   onRunStarted: () => void
 }) {
   const { activeProject, selectedRunId, onSelectRun, onNeedProjectModal, onRunStarted } = params
+  const eventStream = useEventStream()
 
   const [caps, setCaps] = useState<FactoryCapabilities | null>(null)
   const [blueprints, setBlueprints] = useState<FactoryBlueprint[]>([])
@@ -56,32 +58,23 @@ export function useFactoryRuns(params: {
     void refresh()
   }, [refresh])
 
-  useEffect(() => {
-    if (typeof EventSource === "undefined") return
-    const es = new EventSource(resolveCaptainUrl("/api/events"))
-    const onFactoryEvent = (ev: MessageEvent) => {
-      try {
-        const parsed = JSON.parse(ev.data) as { payload?: { type?: string; payload?: FactoryRunDetail } }
-        const inner = parsed?.payload
-        if (inner?.type === "run.updated" && inner.payload?.run?.runId) {
-          const updated = inner.payload
-          setRuns(prev => {
-            const exists = prev.some(r => r.run.runId === updated.run.runId)
-            return exists
-              ? prev.map(r => (r.run.runId === updated.run.runId ? updated : r))
-              : [...prev, updated]
-          })
-        }
-      } catch (err) {
-        console.warn("[ADE] Ignored malformed factory.event SSE frame:", err instanceof Error ? err.message : String(err))
+  useEventStreamListener("factory.event", (ev) => {
+    try {
+      const parsed = JSON.parse(ev.data) as { payload?: { type?: string; payload?: FactoryRunDetail } }
+      const inner = parsed?.payload
+      if (inner?.type === "run.updated" && inner.payload?.run?.runId) {
+        const updated = inner.payload
+        setRuns(prev => {
+          const exists = prev.some(r => r.run.runId === updated.run.runId)
+          return exists
+            ? prev.map(r => (r.run.runId === updated.run.runId ? updated : r))
+            : [...prev, updated]
+        })
       }
+    } catch (err) {
+      console.warn("[ADE] Ignored malformed factory.event SSE frame:", err instanceof Error ? err.message : String(err))
     }
-    es.addEventListener("factory.event", onFactoryEvent)
-    return () => {
-      es.removeEventListener("factory.event", onFactoryEvent)
-      es.close()
-    }
-  }, [endpointFlavor])
+  })
 
   const projectRuns = activeProject ? runs.filter(r => r.run.projectId === activeProject.id) : runs
   const activeRun =
@@ -95,6 +88,7 @@ export function useFactoryRuns(params: {
     if (nextFlavor === "local") {
       setShowRemoteConfig(false)
       setCaptainEndpoint({ flavor: "local", baseUrl: "", region: "local" })
+      eventStream.reconnect()
       void refresh()
     } else {
       setShowRemoteConfig(true)
@@ -105,6 +99,7 @@ export function useFactoryRuns(params: {
           authToken: remoteToken.trim() || undefined,
           region: "eu",
         })
+        eventStream.reconnect()
         void refresh()
       }
     }

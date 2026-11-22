@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react"
-import { request, resolveCaptainUrl } from "../../api"
+import { request } from "../../api"
 import type { Screen } from "../../app-types"
 import type { GitHubRepositoryPage, Project, ProjectActivity, ProjectInput } from "../../ProjectsView"
 import type { FactoryRunDetail } from "../factory/types"
+import { useEventStreamListener } from "./EventStreamContext"
 
 export function searchGitHubRepositories(login: string, query: string, page: number, signal?: AbortSignal) {
   return request<GitHubRepositoryPage>("/api/github/repositories", {
@@ -54,32 +55,23 @@ export function useProjects(params: {
     void loadFactoryRuns()
   }, [loadProjects, loadFactoryRuns, environmentVersion])
 
-  useEffect(() => {
-    if (typeof EventSource === "undefined") return
-    const es = new EventSource(resolveCaptainUrl("/api/events"))
-    const onFactoryEvent = (ev: MessageEvent) => {
-      try {
-        const parsed = JSON.parse(ev.data) as { payload?: { type?: string; payload?: FactoryRunDetail } }
-        const inner = parsed?.payload
-        if (inner?.type === "run.updated" && inner.payload?.run?.runId) {
-          const updated = inner.payload
-          setFactoryRuns(prev => {
-            const exists = prev.some(r => r.run.runId === updated.run.runId)
-            return exists
-              ? prev.map(r => (r.run.runId === updated.run.runId ? updated : r))
-              : [...prev, updated]
-          })
-        }
-      } catch (err) {
-        console.warn("[ADE] Ignored malformed factory.event SSE frame:", err instanceof Error ? err.message : String(err))
+  useEventStreamListener("factory.event", (ev) => {
+    try {
+      const parsed = JSON.parse(ev.data) as { payload?: { type?: string; payload?: FactoryRunDetail } }
+      const inner = parsed?.payload
+      if (inner?.type === "run.updated" && inner.payload?.run?.runId) {
+        const updated = inner.payload
+        setFactoryRuns(prev => {
+          const exists = prev.some(r => r.run.runId === updated.run.runId)
+          return exists
+            ? prev.map(r => (r.run.runId === updated.run.runId ? updated : r))
+            : [...prev, updated]
+        })
       }
+    } catch (err) {
+      console.warn("[ADE] Ignored malformed factory.event SSE frame:", err instanceof Error ? err.message : String(err))
     }
-    es.addEventListener("factory.event", onFactoryEvent)
-    return () => {
-      es.removeEventListener("factory.event", onFactoryEvent)
-      es.close()
-    }
-  }, [environmentVersion])
+  })
 
   // Load project activity when viewing a project.
   useEffect(() => {

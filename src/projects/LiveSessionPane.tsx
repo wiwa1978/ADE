@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react"
 import { GitBranch, Maximize2, Send, X } from "lucide-react"
-import { request, resolveCaptainUrl } from "../../api"
+import { request } from "../../api"
 import type { Conversation, ConversationTimelineSnapshot, WorkspaceGitSummary } from "../../app-types"
+import { useEventStreamListener } from "../hooks/EventStreamContext"
 import { DiffPanel } from "../panels/DiffPanel"
 
 const EMPTY_GIT: WorkspaceGitSummary = {
@@ -60,9 +61,10 @@ export function LiveSessionPane({
   useEffect(() => {
     void refresh()
     void refreshGit()
-    if (typeof EventSource === "undefined") return
-    const es = new EventSource(resolveCaptainUrl("/api/events"))
-    const onMsg = (ev: MessageEvent) => {
+  }, [session.id, refresh, refreshGit])
+
+  const handleStreamMessage = useCallback(
+    (ev: MessageEvent) => {
       try {
         const parsed = JSON.parse(ev.data)
         if (parsed?.sessionId === session.id || parsed?.payload?.sessionId === session.id) {
@@ -72,11 +74,11 @@ export function LiveSessionPane({
       } catch (err) {
         console.warn("[ADE] Ignored malformed stream SSE message:", err instanceof Error ? err.message : String(err))
       }
-    }
-    es.addEventListener("timeline.updated", onMsg)
-    es.addEventListener("message", onMsg)
-    return () => { es.close() }
-  }, [session.id, refresh, refreshGit])
+    },
+    [session.id, refresh, refreshGit],
+  )
+  useEventStreamListener("timeline.updated", handleStreamMessage)
+  useEventStreamListener("message", handleStreamMessage)
 
   const items = timeline?.items ?? []
   const isWorking = session.status === "working" || Boolean(timeline?.busy)

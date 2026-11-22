@@ -4,6 +4,7 @@ import type { SettingsCategory } from "./SettingsView"
 import { useConnections } from "./useConnections"
 import { useSettings } from "./useSettings"
 import { useWorktrees } from "./useWorktrees"
+import { EventStreamProvider, useEventStream } from "./src/hooks/EventStreamContext"
 import { useEnvironments } from "./src/hooks/useEnvironments"
 import { useModelSelection } from "./src/hooks/useModelSelection"
 import { useProjects } from "./src/hooks/useProjects"
@@ -30,6 +31,14 @@ function readLastView(): LastView {
 const lastView = readLastView()
 
 export default function App() {
+  return (
+    <EventStreamProvider>
+      <AppInner />
+    </EventStreamProvider>
+  )
+}
+
+function AppInner() {
   const { settings, error: settingsError, resolved, update } = useSettings()
   const [screen, setScreen] = useState<Screen>(() => lastView.screen === "project" || lastView.screen === "factory" ? lastView.screen : "work")
   const [newSessionOpen, setNewSessionOpen] = useState(false)
@@ -62,6 +71,14 @@ export default function App() {
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
 
   const env = useEnvironments()
+  const eventStream = useEventStream()
+  const lastEnvVersion = useRef(env.environmentVersion)
+  useEffect(() => {
+    if (lastEnvVersion.current !== env.environmentVersion) {
+      lastEnvVersion.current = env.environmentVersion
+      eventStream.reconnect()
+    }
+  }, [env.environmentVersion, eventStream])
   const model = useModelSelection({ settings, environmentVersion: env.environmentVersion, screen })
   const connections = useConnections(screen, model.setRuntime, env.environmentVersion)
   const worktrees = useWorktrees()

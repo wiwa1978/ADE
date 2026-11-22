@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { request } from "../../api"
+import { useEventStream } from "./EventStreamContext"
 import type {
   ApprovalPolicy,
   ApprovalRule,
@@ -73,7 +74,8 @@ export function useRuntimeStream(opts: {
   const [skillsCatalog, setSkillsCatalog] = useState<SkillsAndRulesCatalog>(EMPTY_SKILLS)
   const [browserState, setBrowserState] = useState<BrowserState>(EMPTY_BROWSER)
   const [mcpServers, setMcpServers] = useState<McpServerStatus[]>([])
-  const [sseConnected, setSseConnected] = useState(false)
+  const eventStream = useEventStream()
+  const sseConnected = eventStream.connected
 
   const callbacksRef = useRef({ onSessionsChanged, onAgentBrowserDriving, onArtifactUpdated })
   callbacksRef.current = { onSessionsChanged, onAgentBrowserDriving, onArtifactUpdated }
@@ -193,34 +195,18 @@ export function useRuntimeStream(opts: {
     if (hasWorkspace) void refreshGit(sessionId)
   }, [sessionId, hasWorkspace, isCodingTask, environmentVersion, refreshTimeline, refreshSubagents, refreshApprovals, refreshProcesses, refreshGit, refreshArtifactsAndTasks, refreshSkills, refreshBrowser, refreshMcp])
 
-  // Live SSE EventSource subscription
+  // Subscribe to the shared EventSource stream by event type
   useEffect(() => {
-    if (typeof EventSource === "undefined") return
-    let closed = false
-    let source: EventSource | null = null
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-    let retryDelay = 2500
-
-    const connect = () => {
-      if (closed) return
-      try {
-        source = new EventSource("/api/events")
-      } catch {
-        return
-      }
-      source.addEventListener("connected", () => {
-        retryDelay = 2500
-        setSseConnected(true)
-      })
-      source.addEventListener("sessions.changed", () => {
+    const unsubs = [
+      eventStream.subscribe("sessions.changed", () => {
         callbacksRef.current.onSessionsChanged?.()
         const sid = sessionIdRef.current
         if (sid) {
           void refreshTimeline(sid)
           if (hasWorkspace) void refreshGit(sid)
         }
-      })
-      source.addEventListener("timeline.update", (ev: MessageEvent) => {
+      }),
+      eventStream.subscribe("timeline.update", (ev) => {
         try {
           const parsed = JSON.parse(ev.data)
           const snap = parsed.payload as ConversationTimelineSnapshot
@@ -233,8 +219,8 @@ export function useRuntimeStream(opts: {
         } catch (error) {
           reportStreamWarning("timeline.update parse", error)
         }
-      })
-      source.addEventListener("subagents.update", (ev: MessageEvent) => {
+      }),
+      eventStream.subscribe("subagents.update", (ev) => {
         try {
           const parsed = JSON.parse(ev.data)
           const sid = sessionIdRef.current
@@ -244,17 +230,17 @@ export function useRuntimeStream(opts: {
         } catch (error) {
           reportStreamWarning("subagents.update parse", error)
         }
-      })
-      source.addEventListener("approval.requested", (ev: MessageEvent) => {
+      }),
+      eventStream.subscribe("approval.requested", (ev) => {
         try {
           const parsed = JSON.parse(ev.data)
           const item = parsed.payload as PendingApproval
-          setApprovals(prev => prev.some(p => p.id === item.id) ? prev : [...prev, item])
+          setApprovals(prev => (prev.some(p => p.id === item.id) ? prev : [...prev, item]))
         } catch (error) {
           reportStreamWarning("approval.requested parse", error)
         }
-      })
-      source.addEventListener("approval.resolved", (ev: MessageEvent) => {
+      }),
+      eventStream.subscribe("approval.resolved", (ev) => {
         try {
           const parsed = JSON.parse(ev.data)
           const item = parsed.payload as PendingApproval
@@ -263,8 +249,8 @@ export function useRuntimeStream(opts: {
         } catch (error) {
           reportStreamWarning("approval.resolved parse", error)
         }
-      })
-      source.addEventListener("processes.update", (ev: MessageEvent) => {
+      }),
+      eventStream.subscribe("processes.update", (ev) => {
         try {
           const parsed = JSON.parse(ev.data)
           if (!parsed.sessionId || parsed.sessionId === sessionIdRef.current) {
@@ -273,8 +259,8 @@ export function useRuntimeStream(opts: {
         } catch (error) {
           reportStreamWarning("processes.update parse", error)
         }
-      })
-      source.addEventListener("artifacts.update", (ev: MessageEvent) => {
+      }),
+      eventStream.subscribe("artifacts.update", (ev) => {
         try {
           const parsed = JSON.parse(ev.data)
           if (parsed.sessionId === sessionIdRef.current) {
@@ -286,8 +272,8 @@ export function useRuntimeStream(opts: {
         } catch (error) {
           reportStreamWarning("artifacts.update parse", error)
         }
-      })
-      source.addEventListener("tasks.update", (ev: MessageEvent) => {
+      }),
+      eventStream.subscribe("tasks.update", (ev) => {
         try {
           const parsed = JSON.parse(ev.data)
           if (parsed.sessionId === sessionIdRef.current) {
@@ -296,8 +282,8 @@ export function useRuntimeStream(opts: {
         } catch (error) {
           reportStreamWarning("tasks.update parse", error)
         }
-      })
-      source.addEventListener("browser.update", (ev: MessageEvent) => {
+      }),
+      eventStream.subscribe("browser.update", (ev) => {
         try {
           const parsed = JSON.parse(ev.data)
           const next = parsed.payload as BrowserState
@@ -306,8 +292,8 @@ export function useRuntimeStream(opts: {
         } catch (error) {
           reportStreamWarning("browser.update parse", error)
         }
-      })
-      source.addEventListener("browser.frame", (ev: MessageEvent) => {
+      }),
+      eventStream.subscribe("browser.frame", (ev) => {
         try {
           const parsed = JSON.parse(ev.data)
           if (parsed.payload?.frame) {
@@ -316,33 +302,20 @@ export function useRuntimeStream(opts: {
         } catch (error) {
           reportStreamWarning("browser.frame parse", error)
         }
-      })
-      source.addEventListener("mcp.update", (ev: MessageEvent) => {
+      }),
+      eventStream.subscribe("mcp.update", (ev) => {
         try {
           const parsed = JSON.parse(ev.data)
           setMcpServers(parsed.payload?.servers ?? [])
         } catch (error) {
           reportStreamWarning("mcp.update parse", error)
         }
-      })
-      source.onerror = () => {
-        setSseConnected(false)
-        source?.close()
-        source = null
-        if (!closed) {
-          reconnectTimer = setTimeout(connect, retryDelay)
-          retryDelay = Math.min(retryDelay * 2, 15_000)
-        }
-      }
-    }
-
-    connect()
+      }),
+    ]
     return () => {
-      closed = true
-      if (reconnectTimer) clearTimeout(reconnectTimer)
-      source?.close()
+      for (const unsub of unsubs) unsub()
     }
-  }, [environmentVersion, hasWorkspace, refreshApprovals, refreshGit, refreshSubagents, refreshTimeline])
+  }, [eventStream, hasWorkspace, refreshApprovals, refreshGit, refreshSubagents, refreshTimeline])
 
   // Periodic light git refresh when workspace is open
   useEffect(() => {
