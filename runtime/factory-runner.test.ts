@@ -195,3 +195,112 @@ test("LocalFactoryRunner drives real git worktree sandbox, Goldfish audit loopba
     rmSync(stateDir, { recursive: true, force: true });
   }
 });
+
+test("LocalFactoryRunner enforces approval gate cancel/request_changes, pause/takeover, watchdog escalation, and cross-family check", async () => {
+  const repoDir = createTempGitRepo();
+  const stateDir = mkdtempSync(join(tmpdir(), "ade-factory-watchdog-"));
+  const db = new DatabaseSync(":memory:");
+  const host = createNodeSqliteCaptainHost({ db, region: "local" });
+  const captain = new CaptainCore({ host });
+  const sandbox = new LocalDockerSandbox({
+    worktreesRoot: join(stateDir, "worktrees"),
+    mode: "worktree",
+  });
+
+  const runner = new LocalFactoryRunner({
+    captain,
+    stateDirectory: stateDir,
+    sandbox,
+    stageExecutor: async ({ stageId }) => {
+      if (stageId === "review") {
+        // Always request changes so the Goldfish loopback budget exhausts and escalates to a human gate.
+        return {
+          summary: "Persistent test failure in auth.spec.ts",
+          verdict: { outcome: "changes_requested", summary: "auth.spec.ts keeps failing" },
+        };
+      }
+      return { summary: `Completed ${stageId}` };
+    },
+  });
+
+  try {
+    // 1. Cross-family Goldfish vs coder verification: default balanced profile uses distinct families.
+    const crossFamilyRun = await runner.createRun({
+      runId: "run_cross_family",
+      blueprintId: "automated-factory",
+      repoPath: repoDir,
+      taskPrompt: "Check cross-family",
+      modelProfile: "balanced",
+    });
+    assert.equal(crossFamilyRun.crossFamilyVerified, true);
+
+    // Forcing coder (implement) and Goldfish auditor (review) onto the exact same family marks crossFamilyVerified=false.
+    const sameFamilyRun = await runner.createRun({
+      runId: "run_same_family",
+      blueprintId: "automated-factory",
+      repoPath: repoDir,
+      taskPrompt: "Force same family",
+      stageOverrides: {
+        implement: { provider: "openai", model: "gpt-5.4" },
+        review: { provider: "openai", model: "gpt-5.4" },
+      },
+    });
+    assert.equal(sameFamilyRun.crossFamilyVerified, false);
+
+    // 2. Failure-loop watchdog: repeating the exact same failure signature triggers watchdog intervention after 3 hits.
+    const failureObs = {
+      signature: "tsc:TS2322:src/auth.ts",
+      stageId: "verify",
+      subagentId: "worker-1",
+      commandOrTool: "npx tsc -b",
+      errorExcerpt: "Type 'string' is not assignable to type 'number'",
+    };
+    assert.equal(captain.watchdog.recordFailure({ ...failureObs, timestamp: Date.now() }).action, "continue");
+    assert.equal(captain.watchdog.recordFailure({ ...failureObs, timestamp: Date.now() + 50 }).action, "continue");
+    const intervened = captain.watchdog.recordFailure({ ...failureObs, timestamp: Date.now() + 100 });
+    assert.equal(intervened.action, "intervene");
+    assert.match(intervened.reason ?? "", /failure loop/i);
+    assert.equal(captain.watchdog.interventionCount, 1);
+
+    // 3. Pause & Takeover prevent stepping until resumed.
+    const paused = await runner.pauseRun("run_cross_family");
+    assert.equal(paused.pausedByHuman, true);
+    await assert.rejects(() => runner.stepRun("run_cross_family"), /paused/i);
+    await runner.takeOverRun("run_cross_family", false);
+
+    // 4. Exhausting maxAuditLoopbacks escalates to human approval gate; request_changes re-opens and cancel terminates.
+    let state = runner.getRun("run_cross_family")!;
+    for (let i = 0; i < 20 && state.run.status !== "awaiting_human" && state.run.status !== "completed"; i++) {
+      state = await runner.stepRun("run_cross_family");
+    }
+    assert.equal(state.run.status, "awaiting_human");
+    assert.equal(state.run.auditLoopbacksUsed, state.run.maxAuditLoopbacks);
+    assert.equal(state.run.stages[state.run.currentStageIndex]?.status, "awaiting_approval");
+    assert.ok(state.telemetry.loopInterventions >= 1);
+
+    const requestedChanges = await runner.approveRunStage(
+      "run_cross_family",
+      "request_changes",
+      state.pendingEscalations[0]?.id,
+      "Try a different approach",
+    );
+    assert.equal(requestedChanges.run.status, "running");
+
+    // Step once more so the exhausted review hits the human gate again, then cancel it cleanly.
+    const gatedAgain = await runner.stepRun("run_cross_family");
+    assert.equal(gatedAgain.run.status, "awaiting_human");
+    const cancelled = await runner.approveRunStage(
+      "run_cross_family",
+      "cancel",
+      gatedAgain.pendingEscalations[0]?.id,
+      "Stop after watchdog escalation",
+    );
+    assert.equal(cancelled.run.status, "cancelled");
+  } finally {
+    await runner.close();
+    host.close();
+    db.close();
+    rmSync(repoDir, { recursive: true, force: true });
+    rmSync(stateDir, { recursive: true, force: true });
+  }
+});
