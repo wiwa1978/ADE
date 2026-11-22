@@ -227,22 +227,24 @@ export function createPiFactoryStageExecutor(deps: {
 
 		if (workspaceRoot && identity) {
 			const wsExt = createWorkspaceTools(workspaceRoot, identity);
+			const wsTools = wsExt.tools ?? [];
 			if (canMutate && allowedGroups.has("workspace-edit")) {
 				registry.install(wsExt);
 			} else if (allowedGroups.has("repo-read") || allowedGroups.has("diff-read") || isGoldfish) {
 				// Strictly read-only subset for Brain-only and Goldfish auditor stages
-				const readOnlyTools = wsExt.tools.filter((t) => t.name === "read" || t.name === "list_files");
-				prunedCount += wsExt.tools.length - readOnlyTools.length;
+				const readOnlyTools = wsTools.filter((t) => t.name === "read" || t.name === "list_files");
+				prunedCount += wsTools.length - readOnlyTools.length;
 				registry.install(defineExtension({ name: "ade-workspace-readonly", tools: readOnlyTools }));
 			} else {
-				prunedCount += wsExt.tools.length;
+				prunedCount += wsTools.length;
 			}
 
 			const searchExt = createSearchTools(workspaceRoot, identity);
+			const searchTools = searchExt.tools ?? [];
 			if (allowedGroups.has("search") || allowedGroups.has("repo-read") || isGoldfish) {
 				registry.install(searchExt);
 			} else {
-				prunedCount += searchExt.tools.length;
+				prunedCount += searchTools.length;
 			}
 
 			if (canMutate && allowedGroups.has("shell")) {

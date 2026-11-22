@@ -1,19 +1,39 @@
-import { createModels, createProvider } from "@earendil-works/pi-ai/models";
+import { createModels, createProvider, type Provider } from "@earendil-works/pi-ai/models";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { radiusProvider } from "@earendil-works/pi-ai/providers/radius";
-import { apiKeyEnvironment, copilotId, createApiKeyStore, createCopilotSignIn, createCopilotStore, isValidApiKey } from "./copilot-auth.ts";
+import {
+	apiKeyEnvironment,
+	copilotId,
+	createApiKeyStore,
+	createCopilotSignIn,
+	createCopilotStore,
+	isValidApiKey,
+	type StoredApiKeyCredential,
+	type StoredOAuthCredential,
+} from "./copilot-auth.ts";
 
-function isLoopback(hostname) {
+export type ModelOption = { id: string; name: string };
+export type EnvMap = Record<string, string | undefined>;
+type ProviderConfigBase = {
+	provider: string;
+	defaultModel?: string;
+	availableModels: ModelOption[];
+	configured: boolean;
+	setupMessage: string;
+	signedIn?: boolean;
+};
+
+function isLoopback(hostname: string): boolean {
 	return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(hostname);
 }
 
-function compatibleProvider(environment, hasStoredKey = false) {
+function compatibleProvider(environment: EnvMap, hasStoredKey = false) {
 	const baseUrl = environment.ADE_COMPATIBLE_URL;
 	if (!baseUrl) return null;
-	let endpoint;
+	let endpoint: URL;
 	try {
 		endpoint = new URL(baseUrl);
 	} catch {
@@ -58,9 +78,9 @@ function compatibleProvider(environment, hasStoredKey = false) {
 	});
 }
 
-export function createModelConfig(environment = process.env, { hasStoredCompatibleKey = false } = {}) {
+export function createModelConfig(environment: EnvMap = process.env, { hasStoredCompatibleKey = false }: { hasStoredCompatibleKey?: boolean } = {}) {
 	const requestedProvider = environment.ADE_PROVIDER ?? "openai";
-	let provider;
+	let provider: Provider | undefined;
 	let configured = false;
 	let setupMessage = "";
 	if (requestedProvider === "openai") {
@@ -81,7 +101,7 @@ export function createModelConfig(environment = process.env, { hasStoredCompatib
 
 	const models = createModels();
 	if (provider) models.setProvider(provider);
-	const availableModels = provider?.getModels().map(({ id, name }) => ({ id, name })) ?? [];
+	const availableModels: ModelOption[] = provider?.getModels().map(({ id, name }) => ({ id, name })) ?? [];
 	const defaultModel = environment.ADE_MODEL ?? (requestedProvider === "compatible" ? environment.ADE_COMPATIBLE_MODEL : undefined) ?? "";
 	if (configured && defaultModel && !availableModels.some(({ id }) => id === defaultModel)) {
 		setupMessage = `Model "${defaultModel}" is not available from the configured ${requestedProvider} provider.`;
@@ -93,46 +113,46 @@ export function createModelConfig(environment = process.env, { hasStoredCompatib
 		configured,
 		setupMessage,
 		models,
-		resolveModel(modelId) {
+		resolveModel(modelId: string) {
 			if (!provider) return undefined;
 			return models.getModel(provider.id, modelId);
 		},
 	};
 }
 
-export function createRuntimeModels(environment, stateDirectory) {
+export function createRuntimeModels(environment: EnvMap, stateDirectory: string) {
 	const fallback = environment.ADE_PROVIDER ?? "openai";
 	const copilotCredentials = createCopilotStore(stateDirectory);
 	const apiKeys = createApiKeyStore(stateDirectory);
-	const sensitiveKeys = new Map();
-	const remember = (id, value) => {
+	const sensitiveKeys = new Map<string, string>();
+	const remember = (id: string, value: StoredApiKeyCredential | undefined): StoredApiKeyCredential | undefined => {
 		if (value?.type === "api_key" && value.key) sensitiveKeys.set(id, value.key);
 		else sensitiveKeys.delete(id);
 		return value;
 	};
 	const credentials = {
-		async read(id) {
+		async read(id: string): Promise<StoredOAuthCredential | StoredApiKeyCredential | undefined> {
 			return id === copilotId ? copilotCredentials.read(id) : remember(id, await apiKeys.read(id));
 		},
 		async list() {
 			return [...await copilotCredentials.list(), ...await apiKeys.list()];
 		},
-		async modify(id, update) {
+		async modify(id: string, update: (current: unknown) => Promise<unknown> | unknown) {
 			return id === copilotId
-				? copilotCredentials.modify(id, update)
-				: remember(id, await apiKeys.modify(id, update));
+				? copilotCredentials.modify(id, update as (c: StoredOAuthCredential | undefined) => Promise<StoredOAuthCredential | undefined>)
+				: remember(id, await apiKeys.modify(id, update as (c: StoredApiKeyCredential | undefined) => Promise<StoredApiKeyCredential | undefined>));
 		},
-		async delete(id) {
+		async delete(id: string) {
 			if (id === copilotId) return copilotCredentials.delete(id);
 			await apiKeys.delete(id);
 			sensitiveKeys.delete(id);
 		},
 	};
-	const redact = error => safeErrorMessage(error, environment, [...sensitiveKeys.values()]);
+	const redact = (error: unknown) => safeErrorMessage(error, environment, [...sensitiveKeys.values()]);
 	const models = createModels({
-		credentials: credentials as any,
+		credentials: credentials as Parameters<typeof createModels>[0] extends { credentials?: infer C } ? C : never,
 		authContext: {
-			env: async name => ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"].includes(name) ? undefined : environment[name],
+			env: async (name: string) => ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"].includes(name) ? undefined : environment[name],
 			fileExists: async () => false,
 		},
 	});
@@ -143,7 +163,7 @@ export function createRuntimeModels(environment, stateDirectory) {
 		[copilotId, "GitHub Copilot"],
 		["radius", "Radius (Pi)"],
 	].map(([id, name]) => ({ id, name }));
-	const other = new Map();
+	const other = new Map<string, ProviderConfigBase>();
 	for (const { id } of providers) {
 		if (id === copilotId || id === "radius") continue;
 		try {
@@ -157,12 +177,13 @@ export function createRuntimeModels(environment, stateDirectory) {
 	}
 	models.setProvider(githubCopilotProvider());
 	models.setProvider(radiusProvider());
-	let radiusCatalog;
-	let credentialChange;
-	async function radiusConfig() {
+	let radiusCatalog: Promise<ProviderConfigBase> | undefined;
+	let credentialChange: Promise<void> | undefined;
+	async function radiusConfig(): Promise<ProviderConfigBase> {
 		const provider = "radius";
 		const key = await credentials.read(provider);
-		if (!key?.key && !environment.RADIUS_API_KEY) {
+		const hasSavedKey = Boolean(key && key.type === "api_key" && key.key);
+		if (!hasSavedKey && !environment.RADIUS_API_KEY) {
 			return { provider, configured: false, availableModels: [], setupMessage: "Add a Radius API key in Settings → Connections." };
 		}
 		radiusCatalog ??= (async () => {
@@ -184,11 +205,12 @@ export function createRuntimeModels(environment, stateDirectory) {
 		if (credentialChange) await credentialChange;
 		return Promise.all(Object.entries(apiKeyEnvironment).map(async ([provider, variable]) => {
 			const stored = await credentials.read(provider);
-			return { provider, source: stored?.key ? "saved" : environment[variable] ? "environment" : "none" };
+			const hasSaved = Boolean(stored && stored.type === "api_key" && stored.key);
+			return { provider, source: hasSaved ? "saved" as const : environment[variable] ? "environment" as const : "none" as const };
 		}));
 	}
-	async function changeCredential(action, provider, key) {
-		if (!Object.hasOwn(apiKeyEnvironment, provider)) {
+	async function changeCredential(action: unknown, provider: unknown, key?: unknown) {
+		if (typeof provider !== "string" || !Object.hasOwn(apiKeyEnvironment, provider)) {
 			throw Object.assign(new Error("Unknown API-key provider."), { statusCode: 400 });
 		}
 		if (action !== "save" && action !== "remove") {
@@ -200,7 +222,7 @@ export function createRuntimeModels(environment, stateDirectory) {
 		if (credentialChange) throw Object.assign(new Error("A credential change is already in progress."), { statusCode: 409 });
 		const change = (async () => {
 			if (provider === "radius" && radiusCatalog) await radiusCatalog;
-			if (action === "save") await credentials.modify(provider, async () => ({ type: "api_key", key }));
+			if (action === "save") await credentials.modify(provider, async () => ({ type: "api_key" as const, key: key as string }));
 			else await credentials.delete(provider);
 			if (provider === "radius") radiusCatalog = undefined;
 		})();
@@ -218,16 +240,22 @@ export function createRuntimeModels(environment, stateDirectory) {
 		credentialStatus,
 		changeCredential,
 		safeErrorMessage: redact,
-		signIn: createCopilotSignIn(models),
+		signIn: createCopilotSignIn(models as unknown as Parameters<typeof createCopilotSignIn>[0]),
 		async config(id = fallback) {
 			if (credentialChange) await credentialChange;
 			if (!providers.some(provider => provider.id === id)) {
 				throw Object.assign(new Error("Unknown model provider."), { statusCode: 400 });
 			}
-			let config = id === "radius" ? await radiusConfig() : other.get(id);
+			let config: ProviderConfigBase = (id === "radius" ? await radiusConfig() : other.get(id)) ?? {
+				provider: id,
+				configured: false,
+				availableModels: [],
+				setupMessage: "",
+			};
 			if (id === "openai" || id === "anthropic") {
 				const stored = await credentials.read(id);
-				const configured = Boolean(stored?.key || environment[apiKeyEnvironment[id]]);
+				const hasSaved = Boolean(stored && stored.type === "api_key" && stored.key);
+				const configured = Boolean(hasSaved || environment[apiKeyEnvironment[id]]);
 				const invalidDefault = config.defaultModel && !config.availableModels.some(model => model.id === config.defaultModel);
 				config = {
 					...config, configured,
@@ -238,19 +266,21 @@ export function createRuntimeModels(environment, stateDirectory) {
 			}
 			if (id === "compatible") {
 				const stored = await credentials.read(id);
+				const hasSaved = Boolean(stored && stored.type === "api_key" && stored.key);
 				try {
-					config = createModelConfig({ ...environment, ADE_PROVIDER: id, ADE_MODEL: fallback === id ? environment.ADE_MODEL : undefined },
-						{ hasStoredCompatibleKey: Boolean(stored?.key) });
-					const provider = config.models.getProvider(id);
+					const compatConfig = createModelConfig({ ...environment, ADE_PROVIDER: id, ADE_MODEL: fallback === id ? environment.ADE_MODEL : undefined },
+						{ hasStoredCompatibleKey: hasSaved });
+					const provider = compatConfig.models.getProvider(id);
 					if (provider && !models.getProvider(id)) models.setProvider(provider);
 					if (!provider && models.getProvider(id)) models.deleteProvider(id);
+					config = compatConfig;
 				} catch (error) {
 					if (models.getProvider(id)) models.deleteProvider(id);
 					config = { provider: id, configured: false, setupMessage: redact(error), availableModels: [] };
 				}
 			}
 			if (id === copilotId) {
-				let availableModels = [];
+				let availableModels: ModelOption[] = [];
 				let setupMessage = "Sign in to GitHub Copilot in ADE Settings.";
 				let signedIn = false;
 				try {
@@ -268,15 +298,15 @@ export function createRuntimeModels(environment, stateDirectory) {
 			const preferred = (id === fallback ? environment.ADE_MODEL : undefined) ?? config.defaultModel;
 			return {
 				...config,
-				defaultModel: availableModels.some(model => model.id === preferred) ? preferred : availableModels[0]?.id ?? "",
+				defaultModel: availableModels.some(model => model.id === preferred) ? preferred ?? "" : availableModels[0]?.id ?? "",
 				models,
-				resolveModel: (modelId) => availableModels.some(model => model.id === modelId) ? models.getModel(id, modelId) : undefined,
+				resolveModel: (modelId: string) => availableModels.some(model => model.id === modelId) ? models.getModel(id, modelId) : undefined,
 			};
 		},
 	};
 }
 
-export function safeErrorMessage(error, environment = process.env, extraSecrets = []) {
+export function safeErrorMessage(error: unknown, environment: EnvMap = process.env, extraSecrets: (string | undefined)[] = []): string {
 	let message = error instanceof Error ? error.message : String(error);
 	for (const secret of [environment.OPENAI_API_KEY, environment.ANTHROPIC_API_KEY, environment.ADE_COMPATIBLE_KEY, environment.RADIUS_API_KEY, ...extraSecrets]) {
 		if (secret) message = message.replaceAll(secret, "[redacted]");

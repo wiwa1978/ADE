@@ -11,7 +11,7 @@ export const apiKeyEnvironment = Object.freeze({
 	compatible: "ADE_COMPATIBLE_KEY",
 });
 
-export function isValidApiKey(key) {
+export function isValidApiKey(key: unknown): key is string {
 	return typeof key === "string" && key.length > 0 && key.length <= 4096 && key === key.trim() &&
 		![...key].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
 }
@@ -272,15 +272,40 @@ export function isSecretStoreAvailable(platform: NodeJS.Platform = process.platf
 	return false;
 }
 
-function createProtectedStore(path, description, valid, secretStore: SecretStore = createSecretStore()) {
-	let cached;
+export type StoredOAuthCredential = {
+	type: "oauth";
+	access: string;
+	refresh: string;
+	expires: number;
+	availableModelIds?: string[];
+};
+
+export type StoredApiKeyCredential = {
+	type: "api_key";
+	key: string;
+};
+
+type ProtectedStore<T> = {
+	read(): Promise<T | undefined>;
+	modify(update: (current: T | undefined) => Promise<T | undefined> | T | undefined): Promise<T | undefined>;
+	delete(): Promise<void>;
+};
+
+function createProtectedStore<T>(
+	path: string,
+	description: string,
+	valid: (value: unknown) => value is T,
+	secretStore: SecretStore = createSecretStore(),
+): ProtectedStore<T> {
+	let cached: T | undefined;
 	let loaded = false;
-	let chain: Promise<any> = Promise.resolve(undefined);
-	async function load() {
+	let chain: Promise<unknown> = Promise.resolve(undefined);
+	async function load(): Promise<T | undefined> {
 		if (!loaded) {
 			try {
-				cached = JSON.parse(await secretStore.read(path));
-				if (!valid(cached)) throw new Error("Invalid credential.");
+				const parsed: unknown = JSON.parse(await secretStore.read(path));
+				if (!valid(parsed)) throw new Error("Invalid credential.");
+				cached = parsed;
 			} catch (error) {
 				if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
 					throw new Error(`Could not read the protected ${description} credential.`);
@@ -291,7 +316,7 @@ function createProtectedStore(path, description, valid, secretStore: SecretStore
 		}
 		return cached;
 	}
-	function serialize(action) {
+	function serialize<R>(action: () => Promise<R>): Promise<R> {
 		const result = chain.then(action);
 		chain = result.catch(() => {});
 		return result;
@@ -321,57 +346,86 @@ function createProtectedStore(path, description, valid, secretStore: SecretStore
 	};
 }
 
+function isStoredOAuth(value: unknown): value is StoredOAuthCredential {
+	const rec = value as Partial<StoredOAuthCredential> | null;
+	return Boolean(rec && rec.type === "oauth" && typeof rec.access === "string" &&
+		typeof rec.refresh === "string" && typeof rec.expires === "number" && Number.isFinite(rec.expires));
+}
+
+function isStoredApiKey(value: unknown): value is StoredApiKeyCredential {
+	const rec = value as Partial<StoredApiKeyCredential> | null;
+	return Boolean(rec && rec.type === "api_key" && isValidApiKey(rec.key));
+}
+
 // The ADE state-directory owner lock makes these the only writers across processes.
-export function createCopilotStore(directory) {
-	const store = createProtectedStore(join(directory, "copilot-auth.dpapi"), "Copilot", value =>
-		value?.type === "oauth" && typeof value.access === "string" &&
-		typeof value.refresh === "string" && Number.isFinite(value.expires));
+export function createCopilotStore(directory: string) {
+	const store = createProtectedStore<StoredOAuthCredential>(join(directory, "copilot-auth.dpapi"), "Copilot", isStoredOAuth);
 	return {
-		read: id => id === copilotId ? store.read() : Promise.resolve(undefined),
+		read: (id: string) => id === copilotId ? store.read() : Promise.resolve(undefined),
 		async list() {
 			const credential = await store.read();
-			return credential ? [{ providerId: copilotId, type: "oauth" }] : [];
+			return credential ? [{ providerId: copilotId, type: "oauth" as const }] : [];
 		},
-		modify(id, update) {
+		modify(id: string, update: (current: StoredOAuthCredential | undefined) => Promise<StoredOAuthCredential | undefined> | StoredOAuthCredential | undefined) {
 			if (id !== copilotId) throw new Error("This store only accepts Copilot OAuth credentials.");
 			return store.modify(update);
 		},
-		delete: id => id === copilotId ? store.delete() : Promise.resolve(),
+		delete: (id: string) => id === copilotId ? store.delete() : Promise.resolve(),
 	};
 }
 
-export function createApiKeyStore(directory) {
-	const stores = new Map(Object.keys(apiKeyEnvironment).map(id => [
+export function createApiKeyStore(directory: string) {
+	const stores = new Map<string, ProtectedStore<StoredApiKeyCredential>>(Object.keys(apiKeyEnvironment).map(id => [
 		id,
-		createProtectedStore(join(directory, `provider-${id}-auth.dpapi`), id, value =>
-			value?.type === "api_key" && isValidApiKey(value.key)),
+		createProtectedStore<StoredApiKeyCredential>(join(directory, `provider-${id}-auth.dpapi`), id, isStoredApiKey),
 	]));
 	return {
-		read: id => stores.get(id)?.read() ?? Promise.resolve(undefined),
+		read: (id: string) => stores.get(id)?.read() ?? Promise.resolve(undefined),
 		async list() {
 			const entries = await Promise.all([...stores].map(async ([providerId, store]) =>
-				(await store.read()) ? { providerId, type: "api_key" } : null));
-			return entries.filter(Boolean);
+				(await store.read()) ? { providerId, type: "api_key" as const } : null));
+			return entries.filter((e): e is { providerId: string; type: "api_key" } => e !== null);
 		},
-		modify(id, update) {
+		modify(id: string, update: (current: StoredApiKeyCredential | undefined) => Promise<StoredApiKeyCredential | undefined> | StoredApiKeyCredential | undefined) {
 			const store = stores.get(id);
 			if (!store) throw new Error("Unknown API-key provider.");
 			return store.modify(update);
 		},
-		delete: id => stores.get(id)?.delete() ?? Promise.resolve(),
+		delete: (id: string) => stores.get(id)?.delete() ?? Promise.resolve(),
 	};
 }
 
-export function createCopilotSignIn(models) {
-	let state: any = { status: "idle" };
-	let controller;
-	let running;
+export type CopilotSignInState =
+	| { status: "idle" }
+	| { status: "waiting"; code?: string; url?: string }
+	| { status: "complete" }
+	| { status: "failed"; message: string };
+
+type CopilotModelsLike = {
+	login(
+		providerId: string,
+		kind: "oauth",
+		handlers: {
+			signal?: AbortSignal;
+			prompt(input: { type: string }): Promise<string>;
+			notify(event: { type: string; verificationUri?: string; userCode?: string }): void;
+		},
+		options?: { signal?: AbortSignal },
+	): Promise<unknown>;
+	logout(providerId: string): Promise<unknown>;
+};
+
+export function createCopilotSignIn(models: CopilotModelsLike) {
+	let state: CopilotSignInState = { status: "idle" };
+	let controller: AbortController | undefined;
+	let running: Promise<void> | undefined;
 	return {
-		status: () => state,
-		start() {
+		status: (): CopilotSignInState => state,
+		start(): CopilotSignInState {
 			if (running) throw Object.assign(new Error("Copilot sign-in is already in progress."), { statusCode: 409 });
 			controller = new AbortController();
-			const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(15 * 60 * 1000)]);
+			const activeController = controller;
+			const signal = AbortSignal.any([activeController.signal, AbortSignal.timeout(15 * 60 * 1000)]);
 			state = { status: "waiting" };
 			running = models.login(copilotId, "oauth", {
 				signal,
@@ -380,7 +434,7 @@ export function createCopilotSignIn(models) {
 					return ""; // github.com; do not send credentials to a user-supplied domain.
 				},
 				notify(event) {
-					if (event.type !== "device_code") return;
+					if (event.type !== "device_code" || !event.verificationUri) return;
 					const url = new URL(event.verificationUri);
 					if (url.origin !== "https://github.com" || url.pathname !== "/login/device" || url.search || url.hash) {
 						throw new Error("Unexpected GitHub verification URL.");
@@ -390,20 +444,20 @@ export function createCopilotSignIn(models) {
 			}, { signal }).then(() => {
 				state = { status: "complete" };
 			}, () => {
-				state = controller.signal.aborted ? { status: "idle" } : {
+				state = activeController.signal.aborted ? { status: "idle" } : {
 					status: "failed",
 					message: "GitHub Copilot sign-in could not finish. Check your subscription and organization policy, then try again.",
 				};
 			}).finally(() => { running = undefined; controller = undefined; });
 			return state;
 		},
-		async cancel() {
+		async cancel(): Promise<CopilotSignInState> {
 			controller?.abort();
 			await running;
 			state = { status: "idle" };
 			return state;
 		},
-		async signOut() {
+		async signOut(): Promise<CopilotSignInState> {
 			await this.cancel();
 			await models.logout(copilotId);
 			return state;

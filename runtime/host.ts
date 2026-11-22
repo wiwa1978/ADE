@@ -39,6 +39,89 @@ const modes = {
 		label: "Personal agent",
 		instructions: "You are ADE's personal agent. Help the user with questions, research, and planning. You can create structured artifacts (write_artifact) and checklists (update_tasks).",
 	},
+} as const;
+
+export type SessionMode = keyof typeof modes;
+
+type ProjectRow = {
+	id: string;
+	name: string;
+	githubUrl: string | null;
+	repository: string | null;
+	createdAt: number;
+	updatedAt: number;
+	blueprintId: string | null;
+	modelProfile: string | null;
+	euOnlyMode: number | null;
+	cloudActFree: number | null;
+	stageOverridesJson: string | null;
+};
+
+type CodingTaskRow = {
+	id: string;
+	title: string;
+	repository: string;
+	kind: string;
+	base: string;
+	branch: string | null;
+	workspace: string | null;
+	status: string;
+	message: string | null;
+	createdAt: number;
+	workspaceDev: string | null;
+	workspaceIno: string | null;
+	initialTurnId: string | null;
+	projectId: string | null;
+	initialTitle: string | null;
+	issueUrl: string | null;
+	issueRepository: string | null;
+	issueNumber: number | null;
+	issueTitle: string | null;
+	issueState: string | null;
+};
+
+type ChatThreadRow = {
+	id: string;
+	mode: SessionMode;
+	title: string;
+	manuallyNamed: number;
+	createdAt: number;
+};
+
+type TurnRow = {
+	id: string;
+	mode: SessionMode;
+	content: string;
+	provider: string | null;
+	model: string;
+	reasoning: string;
+	status: "pending" | "completed" | "failed" | "blocked";
+	answer: string | null;
+	error: string | null;
+	createdAt: number;
+	updatedAt: number;
+	taskId: string | null;
+	chatId: string | null;
+};
+
+type ModelConfigResult = {
+	provider: string;
+	defaultModel: string;
+	availableModels: { id: string; name: string }[];
+	configured: boolean;
+	setupMessage: string;
+	signedIn?: boolean;
+	models: ReturnType<typeof createModels>;
+	resolveModel(modelId: string): unknown;
+};
+
+type OpenSession = {
+	harness: Harness;
+	root: Awaited<ReturnType<Harness["root"]>>;
+};
+
+type WatchHandle = {
+	stop(): Promise<void>;
 };
 
 const execFileAsync = promisify(execFile);
@@ -58,25 +141,28 @@ export async function detectGitHubRemoteFromCheckout(repoPath: string): Promise<
 	}
 }
 
-function plainText(content) {
+function plainText(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
-	return content.filter((part) => part?.type === "text").map((part) => part.text).join("");
+	return content
+		.filter((part): part is { type: string; text: string } => Boolean(part && typeof part === "object" && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string"))
+		.map((part) => part.text)
+		.join("");
 }
 
 export class LocalAgentHost {
-	#db;
-	#sessions = new Map();
-	#watches = new Map<string, any>();
-	#active = new Map();
-	#modelConfigFactory;
-	#runtimeModels;
-	#environment;
-	#stateDirectory;
+	#db: DatabaseSync;
+	#sessions = new Map<string, OpenSession>();
+	#watches = new Map<string, WatchHandle>();
+	#active = new Map<string, Promise<unknown>>();
+	#modelConfigFactory?: (environment: NodeJS.ProcessEnv, provider?: string) => ModelConfigResult | Promise<ModelConfigResult>;
+	#runtimeModels?: ReturnType<typeof createRuntimeModels>;
+	#environment: NodeJS.ProcessEnv;
+	#stateDirectory: string;
 	#closing = false;
-	#recovering = new Set();
-	#provisioning = new Map();
-	#githubIssueFetcher;
+	#recovering = new Set<string>();
+	#provisioning = new Map<string, Promise<void>>();
+	#githubIssueFetcher: typeof fetch;
 	#credentialChangeBusy = false;
 	#credentialRevision = 0;
 	#worktreeManager?: WorktreeManager;
@@ -94,7 +180,7 @@ export class LocalAgentHost {
 	constructor({ stateDirectory, environment = process.env, modelConfigFactory, githubIssueFetcher = fetch, worktreeManager }: {
 		stateDirectory: string;
 		environment?: NodeJS.ProcessEnv;
-		modelConfigFactory?: any;
+		modelConfigFactory?: (environment: NodeJS.ProcessEnv, provider?: string) => ModelConfigResult | Promise<ModelConfigResult>;
 		githubIssueFetcher?: typeof fetch;
 		worktreeManager?: WorktreeManager;
 	}) {
@@ -241,16 +327,17 @@ export class LocalAgentHost {
 		return this.#db.prepare("SELECT * FROM projects ORDER BY createdAt,id").all().map(row => this.#serializeProject(row));
 	}
 
-	githubConnection() {
-		const connection = this.#db.prepare("SELECT login FROM github_connection WHERE id=1").get();
+	githubConnection(): { login: string | null } {
+		const connection = this.#db.prepare("SELECT login FROM github_connection WHERE id=1").get() as { login: string } | undefined;
 		return { login: connection?.login ?? null };
 	}
 
 	githubAutoConnectEnabled() {
-		return this.#db.prepare("SELECT auto_connect FROM github_connection_preferences WHERE id=1").get()?.auto_connect !== 0;
+		const row = this.#db.prepare("SELECT auto_connect FROM github_connection_preferences WHERE id=1").get() as { auto_connect: number } | undefined;
+		return row?.auto_connect !== 0;
 	}
 
-	connectGitHub(login) {
+	connectGitHub(login: unknown) {
 		if (typeof login !== "string" || !/^[a-z0-9][a-z0-9-]{0,38}$/i.test(login)) {
 			throw Object.assign(new Error("GitHub CLI did not return a valid account."), { statusCode: 502 });
 		}
@@ -269,12 +356,14 @@ export class LocalAgentHost {
 		return this.githubConnection();
 	}
 
-	async lookupGitHubIssue(projectId, url) {
-		const project = this.#db.prepare("SELECT * FROM projects WHERE id=?").get(projectId);
+	async lookupGitHubIssue(projectId: unknown, url: unknown) {
+		const project = typeof projectId === "string"
+			? (this.#db.prepare("SELECT * FROM projects WHERE id=?").get(projectId) as ProjectRow | undefined)
+			: undefined;
 		return lookupGitHubIssue({ project, url, fetcher: this.#githubIssueFetcher });
 	}
 
-	renameCodingTask(id, title) {
+	renameCodingTask(id: string, title: unknown) {
 		if (typeof title !== "string" || !title.trim() || title.length > 200) {
 			throw Object.assign(new Error("Provide a session name of up to 200 characters."), { statusCode: 400 });
 		}
@@ -283,12 +372,12 @@ export class LocalAgentHost {
 		return this.sessions().find(item => item.id === id);
 	}
 
-	createChatThread(input) {
+	createChatThread(input: { id?: unknown; mode?: unknown } | null | undefined) {
 		if (typeof input?.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.id) ||
-			!Object.hasOwn(modes, input.mode)) {
+			typeof input.mode !== "string" || !Object.hasOwn(modes, input.mode)) {
 			throw Object.assign(new Error("Provide a valid chat ID and mode."), { statusCode: 400 });
 		}
-		const existing = this.#db.prepare("SELECT * FROM chat_threads WHERE id=?").get(input.id);
+		const existing = this.#db.prepare("SELECT * FROM chat_threads WHERE id=?").get(input.id) as ChatThreadRow | undefined;
 		if (existing) {
 			if (existing.mode !== input.mode) throw Object.assign(new Error("This chat ID already belongs to a different conversation."), { statusCode: 409 });
 			return this.sessions().find(item => item.id === input.id);
@@ -298,7 +387,7 @@ export class LocalAgentHost {
 		return this.sessions().find(item => item.id === input.id);
 	}
 
-	renameChatThread(id, title) {
+	renameChatThread(id: string, title: unknown) {
 		if (typeof title !== "string" || !title.trim() || title.length > 200) {
 			throw Object.assign(new Error("Provide a chat name of up to 200 characters."), { statusCode: 400 });
 		}
@@ -406,7 +495,7 @@ export class LocalAgentHost {
 		throw Object.assign(new Error("Session not found."), { statusCode: 404 });
 	}
 
-	async saveProject(input, id) {
+	async saveProject(input: Record<string, unknown> | null | undefined, id?: string) {
 		const projectId = id ?? input?.id;
 		if (typeof projectId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(projectId) ||
 			typeof input?.name !== "string" || !input.name.trim() || input.name.length > 100 ||
@@ -414,15 +503,15 @@ export class LocalAgentHost {
 			(input.repository != null && typeof input.repository !== "string")) {
 			throw Object.assign(new Error("Provide a project ID, name and optional repository links."), { statusCode: 400 });
 		}
-		let githubUrl = null;
-		if (input.githubUrl?.trim()) {
+		let githubUrl: string | null = null;
+		if (typeof input.githubUrl === "string" && input.githubUrl.trim()) {
 			const match = /^(?:https:\/\/github\.com\/)?([a-z0-9-]+)\/([a-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(input.githubUrl.trim());
 			if (!match || [".", ".."].includes(match[2])) {
 				throw Object.assign(new Error("Use a GitHub repository URL or owner/repository, without credentials or query parameters."), { statusCode: 400 });
 			}
 			githubUrl = `https://github.com/${match[1]}/${match[2]}`;
 		}
-		const repository = input.repository?.trim() ? await resolveCheckout(input.repository.trim()) : null;
+		const repository = typeof input.repository === "string" && input.repository.trim() ? await resolveCheckout(input.repository.trim()) : null;
 		// Auto-detect GitHub origin when a local repo is set and no GitHub URL was entered
 		if (!githubUrl && repository && input.githubUrl === undefined) {
 			const detected = await detectGitHubRemoteFromCheckout(repository);
@@ -583,7 +672,8 @@ export class LocalAgentHost {
 		}
 		const open = this.#sessions.get(sessionId);
 		if (!open) throw Object.assign(new Error("Session is not currently active."), { statusCode: 409 });
-		await open.root.submit({ type: "input", content: trimmed, whenBusy: mode }, context);
+		const whenBusy = mode === "steer" ? "steer" : "followUp";
+		await open.root.submit({ type: "input", content: trimmed, whenBusy }, context);
 		this.events.emit("sessions.changed", { sessionId }, sessionId);
 		return { ok: true, mode };
 	}
@@ -612,7 +702,8 @@ export class LocalAgentHost {
 		const conv = await open.harness.conversation(convId, context);
 		if (!conv) throw Object.assign(new Error("Subagent not found."), { statusCode: 404 });
 		await this.#watchConversation(sessionId, open.harness, convId, true);
-		await conv.submit({ type: "input", content: trimmed, whenBusy: mode }, context);
+		const whenBusy = mode === "steer" ? "steer" : "followUp";
+		await conv.submit({ type: "input", content: trimmed, whenBusy }, context);
 		this.events.emit("subagents.update", { sessionId, subagentId: String(convId) }, sessionId);
 		return { ok: true };
 	}
@@ -628,8 +719,8 @@ export class LocalAgentHost {
 		return { ok: true };
 	}
 
-	async featureAgents(taskId) {
-		const task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(taskId);
+	async featureAgents(taskId: string) {
+		const task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(taskId) as CodingTaskRow | undefined;
 		if (!task) throw Object.assign(new Error("Feature not found."), { statusCode: 404 });
 		const path = join(this.#stateDirectory, `coding-task-${taskId}.sqlite`);
 		let harness = this.#sessions.get(taskId)?.harness;
@@ -641,10 +732,11 @@ export class LocalAgentHost {
 		}
 		const ownReader = !harness;
 		if (ownReader) harness = await Harness.open(await openNodeSqliteStorage(path), { models: createModels(), registry: createRegistry(), readOnly: true }, context);
+		if (!harness) return [];
 		try {
 			const live = await harness.inspect(context);
 			const agents = [];
-			let cursor;
+			let cursor: Parameters<Parameters<Harness["commit"]>[0]>[0] extends { scanConversations: (f: never, l: number, c?: infer C) => unknown } ? C | undefined : undefined;
 			do {
 				const page = await harness.commit(tx => tx.scanConversations({}, 100, cursor), context);
 				for (const record of page.items) {
@@ -652,17 +744,26 @@ export class LocalAgentHost {
 					const conversation = await harness.conversation(record.id, context);
 					if (!conversation) continue;
 					const transcript = await conversation.context(context);
-					const metadata = transcript.entries.find(entry => entry.kind === "ade.assignment")?.data;
+					const metadata = transcript.entries.find(entry => entry.kind === "ade.assignment")?.data as {
+						name?: string;
+						role?: string;
+						mode?: string;
+						background?: boolean;
+						workspacePath?: string | null;
+						branch?: string | null;
+						createdAt?: number;
+						task?: string;
+					} | undefined;
 					if (!record.owner && !metadata) continue;
 					const latest = record.owner
-						? await harness.commit(tx => tx.submissionByRequest(record.id, `ade-delegate:${record.owner.taskId}`), context)
+						? await harness.commit(tx => tx.submissionByRequest(record.id, `ade-delegate:${record.owner!.taskId}`), context)
 						: null;
 					const tasks = live.tasks.filter(item => item.record.conversationId === record.id);
 					const pending = live.submissions.some(item => item.conversationId === record.id);
 					const liveDoc = await harness.snapshot(LiveDoc, record.id, context);
 					const { items: rawEntries } = await conversation.entries({ order: "ascending" }, 200, undefined, context);
-					const timeline = projectTimeline({ sessionId: taskId, conversationId: record.id, entries: rawEntries, live: liveDoc });
-					const hasAssistantReply = transcript.messages.some((m: any) => m.role === "assistant" && plainText(m.content).trim());
+					const timeline = projectTimeline({ sessionId: taskId, conversationId: String(record.id), entries: rawEntries, live: liveDoc });
+					const hasAssistantReply = transcript.messages.some((m) => m.role === "assistant" && plainText(m.content).trim());
 					const status = ownReader && (tasks.length || pending) ? "unknown"
 						: tasks.some(item => item.state.kind === "blocked") ? "blocked"
 						: tasks.some(item => item.state.kind === "running") || Boolean(liveDoc?.run) ? "running"
@@ -701,11 +802,11 @@ export class LocalAgentHost {
 		}
 	}
 
-	async projectAgents(projectId) {
+	async projectAgents(projectId: string) {
 		if (!this.#db.prepare("SELECT 1 FROM projects WHERE id=?").get(projectId)) {
 			throw Object.assign(new Error("Project not found."), { statusCode: 404 });
 		}
-		const sessions = this.#db.prepare("SELECT id,title FROM coding_tasks WHERE projectId=? ORDER BY createdAt DESC").all(projectId);
+		const sessions = this.#db.prepare("SELECT id,title FROM coding_tasks WHERE projectId=? ORDER BY createdAt DESC").all(projectId) as { id: string; title: string }[];
 		const agents = [];
 		const errors = [];
 		for (const session of sessions) {
@@ -719,13 +820,15 @@ export class LocalAgentHost {
 		}
 		return { agents, errors, observedAt: Date.now() };
 	}
-	#modelConfig(provider) {
-		return this.#runtimeModels?.config(provider) ?? this.#modelConfigFactory(this.#environment, provider);
+	async #modelConfig(provider?: string): Promise<ModelConfigResult> {
+		if (this.#runtimeModels) return this.#runtimeModels.config(provider);
+		if (this.#modelConfigFactory) return await this.#modelConfigFactory(this.#environment, provider);
+		throw new Error("Model configuration is unavailable.");
 	}
 
 	async modelCatalog() {
 		const scanned = await this.providerTools({});
-		const apiConfigs = new Map<string, any>();
+		const apiConfigs = new Map<string, ModelConfigResult>();
 		const runtimeProviders = this.#runtimeModels?.providers ?? [];
 		for (const p of runtimeProviders) {
 			try {
@@ -772,7 +875,7 @@ export class LocalAgentHost {
 		return { providers: results };
 	}
 
-	async health(provider) {
+	async health(provider?: string) {
 		const config = await this.#modelConfig(provider);
 		return {
 			online: true,
@@ -788,7 +891,7 @@ export class LocalAgentHost {
 		};
 	}
 
-	async copilotAuth(action) {
+	async copilotAuth(action: unknown) {
 		const signIn = this.#runtimeModels?.signIn;
 		if (!signIn) throw Object.assign(new Error("Copilot sign-in is unavailable."), { statusCode: 404 });
 		if (action === "start") return signIn.start();
@@ -800,11 +903,11 @@ export class LocalAgentHost {
 		throw Object.assign(new Error("Unknown Copilot sign-in action."), { statusCode: 400 });
 	}
 
-	safeErrorMessage(error) {
+	safeErrorMessage(error: unknown) {
 		return this.#runtimeModels?.safeErrorMessage(error) ?? safeErrorMessage(error, this.#environment);
 	}
 
-	async modelCredentials(input) {
+	async modelCredentials(input: { action?: unknown; provider?: unknown; key?: unknown } | null | undefined) {
 		if (!this.#runtimeModels) throw Object.assign(new Error("Model credentials are unavailable."), { statusCode: 404 });
 		if (input?.action === "status") return { credentials: await this.#runtimeModels.credentialStatus() };
 		if (this.#credentialChangeBusy || this.#active.size || this.#recovering.size || this.#provisioning.size) {
@@ -819,7 +922,7 @@ export class LocalAgentHost {
 		}
 	}
 
-	async providerTools(input) {
+	async providerTools(input: { action?: unknown; id?: unknown; enabled?: unknown } | null | undefined) {
 		if (input?.action === "set") {
 			if (typeof input.id !== "string" || typeof input.enabled !== "boolean") {
 				throw Object.assign(new Error("Provide a provider id and enabled state."), { statusCode: 400 });
@@ -828,23 +931,39 @@ export class LocalAgentHost {
 				.run(input.id, input.enabled ? 1 : 0);
 		}
 		const scanned = await scanProviderTools();
-		const preferences = new Map(this.#db.prepare("SELECT id,enabled FROM provider_preferences").all().map(item => [item.id, Boolean(item.enabled)]));
-		const providers = [...scanned];
+		const prefRows = this.#db.prepare("SELECT id,enabled FROM provider_preferences").all() as { id: string; enabled: number }[];
+		const preferences = new Map(prefRows.map(item => [item.id, Boolean(item.enabled)]));
+		type ProviderToolEntry = {
+			id: string;
+			name: string;
+			command: string | null;
+			kind: string;
+			install: string | null;
+			installed: boolean;
+			available: boolean;
+			modelCount: number | null;
+			models?: readonly { readonly id: string; readonly name: string }[];
+		};
+		const providers: ProviderToolEntry[] = scanned.map(item => ({
+			...item,
+			command: item.command,
+			install: item.install,
+		}));
 
 		if (this.#runtimeModels) {
+			const apiNames: Record<string, string> = {
+				openai: "OpenAI",
+				anthropic: "Anthropic",
+				compatible: "OpenAI-compatible",
+				radius: "Pi",
+				"github-copilot": "GitHub Copilot",
+			};
 			for (const id of ["openai", "anthropic", "compatible", "radius", copilotId]) {
 				try {
 					const config = await this.#runtimeModels.config(id);
-					const names = {
-						openai: "OpenAI",
-						anthropic: "Anthropic",
-						compatible: "OpenAI-compatible",
-						radius: "Pi",
-						"github-copilot": "GitHub Copilot",
-					};
 					providers.push({
 						id,
-						name: names[id],
+						name: apiNames[id] ?? id,
 						command: null,
 						kind: "api",
 						install: null,
@@ -855,7 +974,7 @@ export class LocalAgentHost {
 				} catch {
 					providers.push({
 						id,
-						name: id === "openai" ? "OpenAI" : id === "anthropic" ? "Anthropic" : id === "compatible" ? "OpenAI-compatible" : id === "radius" ? "Pi" : "GitHub Copilot",
+						name: apiNames[id] ?? id,
 						command: null,
 						kind: "api",
 						install: null,
@@ -870,25 +989,26 @@ export class LocalAgentHost {
 		return {
 			providers: providers.map(provider => ({
 				...provider,
-				enabled: preferences.has(provider.id) ? preferences.get(provider.id) : provider.available,
+				enabled: preferences.has(provider.id) ? Boolean(preferences.get(provider.id)) : provider.available,
 			})),
 		};
 	}
 
 	sessions() {
-		const tasks = this.#db.prepare("SELECT * FROM coding_tasks ORDER BY createdAt DESC").all();
-		const chats = this.#db.prepare("SELECT * FROM chat_threads ORDER BY createdAt DESC").all();
-		const definitions = [
-			...Object.entries(modes).map(([mode, definition]) => ({ id: mode, mode, label: definition.label, task: null })),
-			...chats.map(chat => ({ id: chat.id, mode: chat.mode, label: chat.title, chat })),
-			...tasks.map(task => ({ id: task.id, mode: "coding", label: task.title, task })),
+		const tasks = this.#db.prepare("SELECT * FROM coding_tasks ORDER BY createdAt DESC").all() as CodingTaskRow[];
+		const chats = this.#db.prepare("SELECT * FROM chat_threads ORDER BY createdAt DESC").all() as ChatThreadRow[];
+		type SessionDef = { id: string; mode: SessionMode; label: string; task: CodingTaskRow | null; chat: ChatThreadRow | null };
+		const definitions: SessionDef[] = [
+			...(Object.entries(modes) as [SessionMode, (typeof modes)[SessionMode]][]).map(([mode, definition]) => ({ id: mode, mode, label: definition.label, task: null, chat: null })),
+			...chats.map(chat => ({ id: chat.id, mode: chat.mode, label: chat.title, task: null, chat })),
+			...tasks.map(task => ({ id: task.id, mode: "coding" as const, label: task.title, task, chat: null })),
 		];
 		return definitions.map(({ id, mode, label, task, chat }) => {
-			const turns = chat
+			const turns = (chat
 				? this.#db.prepare("SELECT * FROM turns WHERE chatId=? ORDER BY createdAt, id").all(id)
 				: task
 					? this.#db.prepare("SELECT * FROM turns WHERE taskId=? ORDER BY createdAt, id").all(id)
-					: this.#db.prepare("SELECT * FROM turns WHERE mode=? AND taskId IS NULL AND chatId IS NULL ORDER BY createdAt, id").all(mode);
+					: this.#db.prepare("SELECT * FROM turns WHERE mode=? AND taskId IS NULL AND chatId IS NULL ORDER BY createdAt, id").all(mode)) as TurnRow[];
 			const messages = turns.flatMap((turn) => {
 				const result = [{
 					id: `${turn.id}:user`,
@@ -929,37 +1049,61 @@ export class LocalAgentHost {
 		});
 	}
 
-	async createCodingTask(input, manager) {
+	async createCodingTask(input: {
+		id?: unknown;
+		kind?: unknown;
+		repository?: unknown;
+		title?: unknown;
+		projectId?: unknown;
+		githubIssue?: unknown;
+		initialMessage?: {
+			id?: unknown;
+			content?: unknown;
+			provider?: unknown;
+			model?: unknown;
+			reasoning?: unknown;
+		};
+	} | null | undefined, manager: WorktreeManager) {
 		const credentialRevision = this.#credentialRevision;
 		if (typeof input?.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.id) ||
-			!["none", "checkout", "worktree"].includes(input.kind) || typeof input.repository !== "string" ||
+			typeof input.kind !== "string" || !["none", "checkout", "worktree"].includes(input.kind) || typeof input.repository !== "string" ||
 			typeof input.title !== "string" || !input.title.trim() || input.title.length > 200) {
 			throw Object.assign(new Error("Provide a task ID, title, repository and workspace choice."), { statusCode: 400 });
 		}
 		if (input.projectId != null && (typeof input.projectId !== "string" || !this.#db.prepare("SELECT 1 FROM projects WHERE id=?").get(input.projectId))) {
 			throw Object.assign(new Error("Choose an existing project for this feature."), { statusCode: 400 });
 		}
-		const project = input.projectId ? this.#db.prepare("SELECT * FROM projects WHERE id=?").get(input.projectId) : null;
+		const project = typeof input.projectId === "string"
+			? (this.#db.prepare("SELECT * FROM projects WHERE id=?").get(input.projectId) as ProjectRow | undefined) ?? null
+			: null;
 		const githubIssue = validateLinkedIssue(input.githubIssue, project);
 		if (input.kind === "none" && input.repository.trim()) {
 			throw Object.assign(new Error("A workspace-free feature cannot have a checkout path."), { statusCode: 400 });
 		}
-		let initial;
-		let config;
+		type ValidatedInitialMessage = { id: string; content: string; provider: string; model: string; reasoning: string };
+		let initial: ValidatedInitialMessage | undefined;
+		let config: ModelConfigResult | undefined;
 		if (input.initialMessage !== undefined) {
 			const message = input.initialMessage;
 			if (typeof message?.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(message.id) ||
 				typeof message.content !== "string" || !message.content.trim() || message.content.length > 8000 ||
 				typeof message.provider !== "string" || !message.provider || typeof message.model !== "string" || !message.model ||
-				!["none", "off", "low", "medium", "high", "xhigh", "max"].includes(message.reasoning)) {
+				typeof message.reasoning !== "string" || !["none", "off", "low", "medium", "high", "xhigh", "max"].includes(message.reasoning)) {
 				throw Object.assign(new Error("Provide a valid initial message, provider, model and reasoning level."), { statusCode: 400 });
 			}
-			initial = { ...message, content: message.content.trim() };
+			initial = { id: message.id, content: message.content.trim(), provider: message.provider, model: message.model, reasoning: message.reasoning };
 		}
 		if (this.#closing) throw Object.assign(new Error("ADE is shutting down"), { statusCode: 503 });
 		const repository = input.kind === "none" ? "" : await resolveCheckout(input.repository);
-		let task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(input.id);
-		if (task) this.#verifyTaskInputs(task, input, repository, initial);
+		const normalizedInput = {
+			id: input.id,
+			kind: input.kind,
+			title: input.title,
+			projectId: typeof input.projectId === "string" ? input.projectId : null,
+			githubIssue,
+		};
+		let task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(input.id) as CodingTaskRow | undefined;
+		if (task) this.#verifyTaskInputs(task, normalizedInput, repository, initial);
 		if (!task) {
 			const branch = input.kind === "worktree" ? `ade/task-${input.id}` : null;
 			const base = input.kind === "worktree" ? await resolveBaseCommit(repository, "HEAD") : "HEAD";
@@ -970,8 +1114,8 @@ export class LocalAgentHost {
 					throw Object.assign(new Error("The selected model is not available from this provider."), { statusCode: 400 });
 				}
 			}
-			task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(input.id);
-			if (task) this.#verifyTaskInputs(task, input, repository, initial);
+			task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(input.id) as CodingTaskRow | undefined;
+			if (task) this.#verifyTaskInputs(task, normalizedInput, repository, initial);
 			if (!task) {
 				if (this.#closing) throw Object.assign(new Error("ADE is shutting down"), { statusCode: 503 });
 				if (initial && (this.#credentialChangeBusy || credentialRevision !== this.#credentialRevision)) {
@@ -984,7 +1128,7 @@ export class LocalAgentHost {
 						throw Object.assign(new Error("This initial message ID already belongs to another turn."), { statusCode: 409 });
 					}
 					this.#db.prepare("INSERT INTO coding_tasks (id,title,repository,kind,base,branch,status,createdAt,initialTurnId,projectId,initialTitle,issueUrl,issueRepository,issueNumber,issueTitle,issueState) VALUES (?,?,?,?,?,?,'provisioning',?,?,?,?,?,?,?,?,?)")
-						.run(input.id, input.title.trim(), repository, input.kind, base, branch, now, initial?.id ?? null, input.projectId ?? null, input.title.trim(),
+						.run(input.id, input.title.trim(), repository, input.kind, base, branch, now, initial?.id ?? null, normalizedInput.projectId, input.title.trim(),
 							githubIssue?.url ?? null, githubIssue?.repository ?? null, githubIssue?.number ?? null, githubIssue?.title ?? null, githubIssue?.state ?? null);
 					if (initial) this.#db.prepare("INSERT INTO turns (id,mode,content,provider,model,reasoning,status,createdAt,updatedAt,taskId) VALUES (?,'coding',?,?,?,?,'pending',?,?,?)")
 						.run(initial.id, initial.content, initial.provider, initial.model, initial.reasoning, now, now, input.id);
@@ -993,18 +1137,23 @@ export class LocalAgentHost {
 					this.#db.exec("ROLLBACK");
 					throw error;
 				}
-				task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(input.id);
+				task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(input.id) as CodingTaskRow | undefined;
 			}
 		}
-		if (task.status === "provisioning") await this.#ensureProvisioned(task, manager);
-		task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(input.id);
-		if (initial && this.#db.prepare("SELECT status FROM turns WHERE id=?").get(initial.id)?.status === "pending") {
+		if (task?.status === "provisioning") await this.#ensureProvisioned(task, manager);
+		task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(input.id) as CodingTaskRow | undefined;
+		if (!task) throw Object.assign(new Error("Session not found."), { statusCode: 404 });
+		const pendingStatus = initial
+			? (this.#db.prepare("SELECT status FROM turns WHERE id=?").get(initial.id) as { status: string } | undefined)?.status
+			: undefined;
+		if (initial && pendingStatus === "pending") {
 			if (task.status !== "ready") {
 				this.#finishTurn(initial.id, "blocked", null, `Workspace needs attention; the saved message was not submitted. ${task.message ?? ""}`);
 			} else if (!this.#recovering.has(task.id)) {
 				this.#recovering.add(task.id);
 				try {
-					await this.#resumeSavedTurn(this.#db.prepare("SELECT * FROM turns WHERE id=?").get(initial.id), config);
+					const savedTurn = this.#db.prepare("SELECT * FROM turns WHERE id=?").get(initial.id) as TurnRow | undefined;
+					if (savedTurn) await this.#resumeSavedTurn(savedTurn, config);
 				} finally {
 					this.#recovering.delete(task.id);
 				}
@@ -1013,7 +1162,12 @@ export class LocalAgentHost {
 		return this.sessions().find(item => item.id === input.id);
 	}
 
-	#verifyTaskInputs(task, input, repository, initial) {
+	#verifyTaskInputs(
+		task: CodingTaskRow,
+		input: { kind: string; title: string; projectId: string | null; githubIssue: ReturnType<typeof validateLinkedIssue> },
+		repository: string,
+		initial: { id: string; content: string; provider: string; model: string; reasoning: string } | undefined,
+	) {
 		const issue = input.githubIssue;
 		if (task.repository !== repository || task.kind !== input.kind || (task.initialTitle ?? task.title) !== input.title.trim() ||
 			task.initialTurnId !== (initial?.id ?? null) || task.projectId !== (input.projectId ?? null) ||
@@ -1022,7 +1176,7 @@ export class LocalAgentHost {
 			throw Object.assign(new Error("This task ID already belongs to different inputs."), { statusCode: 409 });
 		}
 		if (initial) {
-			const turn = this.#db.prepare("SELECT * FROM turns WHERE id=?").get(initial.id);
+			const turn = this.#db.prepare("SELECT * FROM turns WHERE id=?").get(initial.id) as TurnRow | undefined;
 			if (!turn || turn.taskId !== task.id || turn.content !== initial.content || turn.provider !== initial.provider ||
 				turn.model !== initial.model || turn.reasoning !== initial.reasoning) {
 				throw Object.assign(new Error("This task ID already belongs to a different initial message."), { statusCode: 409 });
@@ -1030,7 +1184,7 @@ export class LocalAgentHost {
 		}
 	}
 
-	async #ensureProvisioned(task, manager) {
+	async #ensureProvisioned(task: CodingTaskRow, manager: WorktreeManager) {
 		if (!this.#provisioning.has(task.id)) {
 			const work = this.#provisionTask(task, manager).finally(() => this.#provisioning.delete(task.id));
 			this.#provisioning.set(task.id, work);
@@ -1038,14 +1192,14 @@ export class LocalAgentHost {
 		await this.#provisioning.get(task.id);
 	}
 
-	async #provisionTask(task, manager) {
+	async #provisionTask(task: CodingTaskRow, manager: WorktreeManager) {
 		try {
 			if (task.kind === "none") {
 				this.#db.prepare("UPDATE coding_tasks SET status='ready' WHERE id=?").run(task.id);
 				return;
 			}
 			let path = task.repository;
-			let note = null;
+			let note: string | null = null;
 			if (task.kind === "worktree") {
 				const operation = await manager.create({ id: task.id, repository: task.repository, branch: task.branch, base: task.base });
 				if (operation.status !== "completed") throw new Error(operation.message);
@@ -1061,8 +1215,9 @@ export class LocalAgentHost {
 		}
 	}
 
-	async #verifyTaskWorkspace(task) {
+	async #verifyTaskWorkspace(task: CodingTaskRow) {
 		if (task.kind === "none") return;
+		if (!task.workspace) throw Object.assign(new Error("Task workspace is missing."), { statusCode: 409 });
 		try {
 			const info = statSync(task.workspace, { bigint: true });
 			if (String(info.dev) !== task.workspaceDev || String(info.ino) !== task.workspaceIno) {
@@ -1074,9 +1229,15 @@ export class LocalAgentHost {
 		}
 	}
 
-	async #existingTurn(mode, taskId, chatId, input, key) {
+	async #existingTurn(
+		mode: SessionMode,
+		taskId: string | null,
+		chatId: string | null,
+		input: { id?: string; content: string; provider?: string; model?: string; reasoning?: string },
+		key: string,
+	) {
 		if (!input.id) return undefined;
-		const existing = this.#db.prepare("SELECT * FROM turns WHERE id=?").get(input.id);
+		const existing = this.#db.prepare("SELECT * FROM turns WHERE id=?").get(input.id) as TurnRow | undefined;
 		if (!existing) return undefined;
 		if (existing.mode !== mode || existing.taskId !== taskId || existing.chatId !== chatId || existing.content !== input.content.trim() ||
 			(input.provider && existing.provider !== input.provider) || (input.model && existing.model !== input.model) ||
@@ -1087,14 +1248,20 @@ export class LocalAgentHost {
 		return this.sessions().find(item => item.id === key);
 	}
 
-	async send(mode, input, taskId = null, chatId = null) {
+	async send(
+		mode: string,
+		input: { id?: unknown; content?: unknown; provider?: unknown; model?: unknown; reasoning?: unknown; async?: unknown } | null | undefined,
+		taskId: string | null = null,
+		chatId: string | null = null,
+	) {
 		const credentialRevision = this.#credentialRevision;
 		if (!Object.hasOwn(modes, mode)) throw Object.assign(new Error("Unknown conversation"), { statusCode: 404 });
-		const task = taskId ? this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(taskId) : null;
-		if (taskId && (mode !== "coding" || !task || task.status !== "ready")) throw Object.assign(new Error("This coding task has no ready workspace."), { statusCode: 409 });
-		const chat = chatId ? this.#db.prepare("SELECT * FROM chat_threads WHERE id=?").get(chatId) : null;
-		if (chatId && (!chat || chat.mode !== mode || taskId)) throw Object.assign(new Error("This chat thread is unavailable."), { statusCode: 404 });
-		const key = chatId ?? taskId ?? mode;
+		const sessionMode = mode as SessionMode;
+		const task = taskId ? (this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(taskId) as CodingTaskRow | undefined) ?? null : null;
+		if (taskId && (sessionMode !== "coding" || !task || task.status !== "ready")) throw Object.assign(new Error("This coding task has no ready workspace."), { statusCode: 409 });
+		const chat = chatId ? (this.#db.prepare("SELECT * FROM chat_threads WHERE id=?").get(chatId) as ChatThreadRow | undefined) ?? null : null;
+		if (chatId && (!chat || chat.mode !== sessionMode || taskId)) throw Object.assign(new Error("This chat thread is unavailable."), { statusCode: 404 });
+		const key = chatId ?? taskId ?? sessionMode;
 		if (this.#closing) throw Object.assign(new Error("ADE is shutting down"), { statusCode: 503 });
 		if (typeof input?.content !== "string" || !input.content.trim() || input.content.length > 8000) {
 			throw Object.assign(new Error("Enter a message between 1 and 8000 characters"), { statusCode: 400 });
@@ -1104,11 +1271,19 @@ export class LocalAgentHost {
 				throw Object.assign(new Error("Invalid message ID."), { statusCode: 400 });
 			}
 		}
-		const existing = await this.#existingTurn(mode, taskId, chatId, input, key);
+		const normalizedSend = {
+			id: typeof input.id === "string" ? input.id : undefined,
+			content: input.content,
+			provider: typeof input.provider === "string" ? input.provider : undefined,
+			model: typeof input.model === "string" ? input.model : undefined,
+			reasoning: typeof input.reasoning === "string" ? input.reasoning : undefined,
+			async: Boolean(input.async),
+		};
+		const existing = await this.#existingTurn(sessionMode, taskId, chatId, normalizedSend, key);
 		if (existing) return existing;
 		if (task) await this.#verifyTaskWorkspace(task);
-		const config = await this.#modelConfig(input.provider);
-		const admitted = await this.#existingTurn(mode, taskId, chatId, input, key);
+		const config = await this.#modelConfig(normalizedSend.provider);
+		const admitted = await this.#existingTurn(sessionMode, taskId, chatId, normalizedSend, key);
 		if (admitted) return admitted;
 		if (this.#closing) throw Object.assign(new Error("ADE is shutting down"), { statusCode: 503 });
 		if (this.#credentialChangeBusy || credentialRevision !== this.#credentialRevision) {
@@ -1117,29 +1292,29 @@ export class LocalAgentHost {
 		if (this.#active.has(key) || this.#recovering.has(key) ||
 			(chatId ? this.#db.prepare("SELECT 1 FROM turns WHERE chatId=? AND status='pending' LIMIT 1").get(chatId)
 				: taskId ? this.#db.prepare("SELECT 1 FROM turns WHERE taskId=? AND status='pending' LIMIT 1").get(taskId)
-				: this.#db.prepare("SELECT 1 FROM turns WHERE mode=? AND taskId IS NULL AND chatId IS NULL AND status='pending' LIMIT 1").get(mode))) {
-			const alreadyAdmitted = await this.#existingTurn(mode, taskId, chatId, input, key);
+				: this.#db.prepare("SELECT 1 FROM turns WHERE mode=? AND taskId IS NULL AND chatId IS NULL AND status='pending' LIMIT 1").get(sessionMode))) {
+			const alreadyAdmitted = await this.#existingTurn(sessionMode, taskId, chatId, normalizedSend, key);
 			if (alreadyAdmitted) return alreadyAdmitted;
 			throw Object.assign(new Error("This conversation has a turn in progress or awaiting recovery"), { statusCode: 409 });
 		}
 		if (task) {
-			const otherTasks = this.#db.prepare("SELECT id FROM coding_tasks WHERE id<>? AND workspaceDev=? AND workspaceIno=?").all(taskId, task.workspaceDev, task.workspaceIno);
+			const otherTasks = this.#db.prepare("SELECT id FROM coding_tasks WHERE id<>? AND workspaceDev=? AND workspaceIno=?").all(taskId, task.workspaceDev, task.workspaceIno) as { id: string }[];
 			if (otherTasks.some(other => this.#active.has(other.id) || this.#recovering.has(other.id) ||
 				this.#db.prepare("SELECT 1 FROM turns WHERE taskId=? AND status='pending'").get(other.id))) {
 				throw Object.assign(new Error("Another task is already working in this checkout. Use a separate worktree for concurrent work."), { statusCode: 409 });
 			}
 		}
 		if (!config.configured) throw Object.assign(new Error(config.setupMessage || "The selected model provider is not configured"), { statusCode: 503 });
-		const modelId = typeof input.model === "string" && input.model ? input.model : config.defaultModel;
+		const modelId = normalizedSend.model || config.defaultModel;
 		if (!modelId || !config.resolveModel(modelId)) {
 			throw Object.assign(new Error(`Model "${modelId || "(none)"}" is not available from ${config.provider}`), { statusCode: 400 });
 		}
-		const reasoning = input.reasoning ?? "medium";
+		const reasoning = normalizedSend.reasoning ?? "medium";
 		if (!["none", "off", "low", "medium", "high", "xhigh", "max"].includes(reasoning)) {
 			throw Object.assign(new Error("Reasoning must be none, off, low, medium, high, xhigh, or max"), { statusCode: 400 });
 		}
 		const now = Date.now();
-		const turn = { id: input.id ?? randomUUID(), mode, taskId, chatId, content: input.content.trim(), provider: config.provider, model: modelId, reasoning };
+		const turn = { id: normalizedSend.id ?? randomUUID(), mode: sessionMode, taskId, chatId, content: normalizedSend.content.trim(), provider: config.provider, model: modelId, reasoning };
 		this.#db.exec("BEGIN IMMEDIATE");
 		try {
 			if (chat) {
@@ -1150,23 +1325,23 @@ export class LocalAgentHost {
 				}
 			}
 			this.#db.prepare("INSERT INTO turns (id,mode,content,provider,model,reasoning,status,createdAt,updatedAt,taskId,chatId) VALUES (?,?,?,?,?,?,'pending',?,?,?,?)")
-				.run(turn.id, mode, turn.content, turn.provider, modelId, reasoning, now, now, taskId, chatId);
+				.run(turn.id, sessionMode, turn.content, turn.provider, modelId, reasoning, now, now, taskId, chatId);
 			this.#db.exec("COMMIT");
 		} catch (error) {
 			this.#db.exec("ROLLBACK");
 			throw error;
 		}
 		const operation = this.#executeTurn(turn, config);
-		if (input.async) {
+		if (normalizedSend.async) {
 			operation.catch(() => {});
 			return this.sessions().find(item => item.id === key);
 		}
 		return operation;
 	}
 
-	async #openSession(mode, config, modelId, reasoning, taskId, chatId) {
+	async #openSession(mode: SessionMode, config: ModelConfigResult, modelId: string, reasoning: string, taskId: string | null, chatId: string | null): Promise<OpenSession> {
 		const key = chatId ?? taskId ?? mode;
-		const task = taskId ? this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(taskId) : null;
+		const task = taskId ? (this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(taskId) as CodingTaskRow | undefined) ?? null : null;
 		if (taskId) {
 			if (!task || task.status !== "ready") throw new Error("The task workspace is unavailable.");
 			await this.#verifyTaskWorkspace(task);
@@ -1178,16 +1353,17 @@ export class LocalAgentHost {
 			: modes[mode].instructions;
 		const instructions = skillsPrompt ? `${baseInstructions}\n\n${skillsPrompt}` : baseInstructions;
 		const openSession = this.#sessions.get(key);
+		const thinkingLevel = reasoning as "none" | "off" | "low" | "medium" | "high" | "xhigh" | "max";
 		if (openSession) {
 			await openSession.root.configure({
 				model: { provider: config.provider, modelId },
-				thinkingLevel: reasoning,
+				thinkingLevel: thinkingLevel as never,
 				instructions,
 			}, context);
 			return openSession;
 		}
 		const registry = createRegistry();
-		const identity = task?.workspace ? { dev: task.workspaceDev, ino: task.workspaceIno } : null;
+		const identity = task?.workspace && task.workspaceDev && task.workspaceIno ? { dev: task.workspaceDev, ino: task.workspaceIno } : null;
 		const workspaceExt = task?.workspace && identity ? createWorkspaceTools(task.workspace, identity) : null;
 		const searchExt = task?.workspace && identity ? createSearchTools(task.workspace, identity) : null;
 		const shellExt = task?.workspace && identity ? createShellTools({ sessionId: key, workspace: task.workspace, identity, processes: this.processes }) : null;
@@ -1195,13 +1371,14 @@ export class LocalAgentHost {
 		if (searchExt) registry.install(searchExt);
 		if (shellExt) registry.install(shellExt);
 		if (task) {
+			const wsTools = workspaceExt?.tools ?? [];
 			registry.install(createSubagentTools({
 				sessionId: key,
 				workspace: task.workspace ?? null,
 				workspaceIdentity: identity,
 				repository: task.repository ?? null,
-				readTools: workspaceExt?.tools.filter(tool => ["read", "list_files"].includes(tool.name)) ?? [],
-				workspaceTools: workspaceExt?.tools ?? [],
+				readTools: wsTools.filter(tool => ["read", "list_files"].includes(tool.name)),
+				workspaceTools: wsTools,
 				searchTools: searchExt?.tools ?? [],
 				shellTools: shellExt?.tools ?? [],
 				worktreeManager: this.#worktreeManager,
@@ -1221,12 +1398,13 @@ export class LocalAgentHost {
 		const mcpExt = this.mcp.createExtension();
 		if (mcpExt) registry.install(mcpExt);
 
-		let harnessRef: any = null;
+		let harnessRef: Harness | null = null;
 		registry.install(this.approvals.createExtension(key, () => harnessRef));
 
+		const workspaceDir = task?.workspace ?? undefined;
 		const harness = await Harness.open(
 			await openNodeSqliteStorage(join(this.#stateDirectory, chatId ? `chat-thread-${chatId}.sqlite` : task ? `coding-task-${taskId}.sqlite` : `${mode}.sqlite`)),
-			{ models: config.models, registry, ...(task?.workspace ? { env: () => new NodeExecutionEnv({ cwd: task.workspace }) } : {}) },
+			{ models: config.models, registry, ...(workspaceDir ? { env: () => new NodeExecutionEnv({ cwd: workspaceDir }) } : {}) },
 			context,
 		);
 		harnessRef = harness;
@@ -1234,16 +1412,16 @@ export class LocalAgentHost {
 			const root = await harness.root(context, {
 				agent: {
 					model: { provider: config.provider, modelId },
-					thinkingLevel: reasoning,
+					thinkingLevel: thinkingLevel as never,
 					instructions,
 				},
 			});
 			await root.configure({
 				model: { provider: config.provider, modelId },
-				thinkingLevel: reasoning,
+				thinkingLevel: thinkingLevel as never,
 				instructions,
 			}, context);
-			const session = { harness, root };
+			const session: OpenSession = { harness, root };
 			this.#sessions.set(key, session);
 			harness.resume();
 			await this.#watchConversation(key, harness, ROOT_CONVERSATION_ID, false);
@@ -1254,7 +1432,11 @@ export class LocalAgentHost {
 		}
 	}
 
-	async #executeTurn(turn, config, recovery = false) {
+	async #executeTurn(
+		turn: { id: string; mode: SessionMode; taskId: string | null; chatId: string | null; content: string; provider: string | null; model: string; reasoning: string },
+		config: ModelConfigResult,
+		recovery = false,
+	) {
 		const key = turn.chatId ?? turn.taskId ?? turn.mode;
 		if (this.#active.has(key)) throw Object.assign(new Error("This conversation is already processing a turn"), { statusCode: 409 });
 		const operation = (async () => {
@@ -1284,7 +1466,7 @@ export class LocalAgentHost {
 				this.#finishTurn(turn.id, "completed", answer, null);
 				return this.sessions().find((item) => item.id === key);
 			} catch (error) {
-				const current = this.#db.prepare("SELECT status FROM turns WHERE id=?").get(turn.id);
+				const current = this.#db.prepare("SELECT status FROM turns WHERE id=?").get(turn.id) as { status: string } | undefined;
 				const safeMessage = config.provider === copilotId && current?.status === "pending"
 					? "The Copilot turn could not be confirmed." : this.safeErrorMessage(error);
 				if (current?.status === "pending") {
@@ -1296,7 +1478,8 @@ export class LocalAgentHost {
 				const message = recovery
 					? `Saved turn ${turn.id} could not be reconnected`
 					: safeMessage;
-				throw Object.assign(new Error(message), { statusCode: error.statusCode ?? 502 });
+				const statusCode = (error as { statusCode?: number })?.statusCode ?? 502;
+				throw Object.assign(new Error(message), { statusCode });
 			} finally {
 				this.#active.delete(key);
 				this.events.emit("sessions.changed", { sessionId: key, status: "idle" }, key);
@@ -1306,12 +1489,12 @@ export class LocalAgentHost {
 		return operation;
 	}
 
-	#finishTurn(id, status, answer, error) {
+	#finishTurn(id: string, status: TurnRow["status"], answer: string | null, error: string | null) {
 		this.#db.prepare("UPDATE turns SET status=?,answer=?,error=?,updatedAt=? WHERE id=?")
 			.run(status, answer, error, Date.now(), id);
 	}
 
-	async #resumeSavedTurn(row, providedConfig) {
+	async #resumeSavedTurn(row: TurnRow, providedConfig: ModelConfigResult | undefined) {
 		const key = row.chatId ?? row.taskId ?? row.mode;
 		try {
 			if (this.#active.has(key)) {
@@ -1319,13 +1502,13 @@ export class LocalAgentHost {
 				return;
 			}
 			if (row.taskId) {
-				const task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(row.taskId);
+				const task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(row.taskId) as CodingTaskRow | undefined;
 				if (!task || task.status !== "ready") {
 					this.#finishTurn(row.id, "blocked", null, `Workspace needs attention; the saved message was not submitted. ${task?.message ?? ""}`);
 					return;
 				}
 				await this.#verifyTaskWorkspace(task);
-				const others = this.#db.prepare("SELECT id FROM coding_tasks WHERE id<>? AND workspaceDev=? AND workspaceIno=?").all(task.id, task.workspaceDev, task.workspaceIno);
+				const others = this.#db.prepare("SELECT id FROM coding_tasks WHERE id<>? AND workspaceDev=? AND workspaceIno=?").all(task.id, task.workspaceDev, task.workspaceIno) as { id: string }[];
 				const earlier = this.#db.prepare("SELECT 1 FROM turns WHERE taskId=? AND status='pending' AND (createdAt<? OR (createdAt=? AND id<?)) LIMIT 1");
 				if (others.some(other => this.#active.has(other.id) || earlier.get(other.id, row.createdAt, row.createdAt, row.id))) {
 					this.#finishTurn(row.id, "blocked", null, "Another task is working in this checkout; the saved message was not submitted. Use a separate worktree for concurrent work.");
@@ -1343,19 +1526,21 @@ export class LocalAgentHost {
 			}
 			await this.#executeTurn(row, config, true);
 		} catch (error) {
-			if (this.#db.prepare("SELECT status FROM turns WHERE id=?").get(row.id)?.status === "pending") {
+			const rowStatus = (this.#db.prepare("SELECT status FROM turns WHERE id=?").get(row.id) as { status: string } | undefined)?.status;
+			if (rowStatus === "pending") {
 				this.#finishTurn(row.id, "blocked", null, `Could not recover the saved turn: ${this.safeErrorMessage(error)}`);
 			}
 		}
 	}
 
-	async recover(manager) {
+	async recover(manager?: WorktreeManager) {
 		if (manager) {
-			for (const task of this.#db.prepare("SELECT * FROM coding_tasks WHERE status='provisioning'").all()) {
+			const provisioningTasks = this.#db.prepare("SELECT * FROM coding_tasks WHERE status='provisioning'").all() as CodingTaskRow[];
+			for (const task of provisioningTasks) {
 				await this.#ensureProvisioned(task, manager);
 			}
 		}
-		const pending = this.#db.prepare("SELECT * FROM turns WHERE status='pending' ORDER BY createdAt, id").all();
+		const pending = this.#db.prepare("SELECT * FROM turns WHERE status='pending' ORDER BY createdAt, id").all() as TurnRow[];
 		for (const row of pending) {
 			const key = row.chatId ?? row.taskId ?? row.mode;
 			if (this.#recovering.has(key)) continue;

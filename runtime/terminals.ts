@@ -1,4 +1,4 @@
-import { spawn as spawnPty } from "node-pty";
+import { spawn as spawnPty, type IPty } from "node-pty";
 import { realpathSync, statSync } from "node:fs";
 import { basename, isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -7,40 +7,57 @@ const MAX_INPUT_BYTES = 8_192;
 const MAX_OUTPUT_CHARACTERS = 500_000;
 const MAX_ACTIVE_TERMINALS = 8;
 
-function inputError(message, statusCode = 400) {
+type TerminalRecord = {
+	id: string;
+	pty: IPty;
+	shell: string;
+	cwd: string;
+	output: string;
+	baseCursor: number;
+	exited: boolean;
+	exitCode: number | null;
+};
+
+function inputError(message: string, statusCode = 400) {
 	return Object.assign(new Error(message), { statusCode });
 }
 
-function integerInRange(value, min, max, fallback, label) {
+function integerInRange(value: unknown, min: number, max: number, fallback: number | undefined, label: string): number {
 	const number = value === undefined ? fallback : Number(value);
-	if (!Number.isInteger(number) || number < min || number > max) throw inputError(`${label} must be between ${min} and ${max}.`);
+	if (typeof number !== "number" || !Number.isInteger(number) || number < min || number > max) {
+		throw inputError(`${label} must be between ${min} and ${max}.`);
+	}
 	return number;
 }
 
-function terminalShell(environment) {
+function terminalShell(environment: NodeJS.ProcessEnv): string {
 	return process.platform === "win32" ? environment.COMSPEC || "powershell.exe" : environment.SHELL || "/bin/sh";
 }
 
 export class TerminalManager {
-	#terminals = new Map();
-	#spawn;
-	#environment;
-	#maxOutputCharacters;
+	#terminals = new Map<string, TerminalRecord>();
+	#spawn: typeof spawnPty;
+	#environment: NodeJS.ProcessEnv;
+	#maxOutputCharacters: number;
 
-	constructor({ spawn = spawnPty, environment = process.env, maxOutputCharacters = MAX_OUTPUT_CHARACTERS } = {}) {
+	constructor({ spawn = spawnPty, environment = process.env, maxOutputCharacters = MAX_OUTPUT_CHARACTERS }: {
+		spawn?: typeof spawnPty;
+		environment?: NodeJS.ProcessEnv;
+		maxOutputCharacters?: number;
+	} = {}) {
 		this.#spawn = spawn;
 		this.#environment = environment;
 		this.#maxOutputCharacters = maxOutputCharacters;
 	}
 
-	create(input) {
+	create(input: { cwd?: unknown; cols?: unknown; rows?: unknown } | null | undefined) {
 		if ([...this.#terminals.values()].filter(terminal => !terminal.exited).length >= MAX_ACTIVE_TERMINALS) {
 			throw inputError(`Close an existing terminal before starting another (limit ${MAX_ACTIVE_TERMINALS}).`, 429);
 		}
 		if (typeof input?.cwd !== "string" || !input.cwd || input.cwd.includes("\0") || !isAbsolute(input.cwd)) {
 			throw inputError("Choose an absolute workspace directory before opening a terminal.");
 		}
-		let cwd;
+		let cwd: string;
 		try {
 			cwd = realpathSync(input.cwd);
 			if (!statSync(cwd).isDirectory()) throw new Error("Not a directory");
@@ -50,17 +67,17 @@ export class TerminalManager {
 		const cols = integerInRange(input.cols, 20, 300, 80, "Terminal columns");
 		const rows = integerInRange(input.rows, 5, 200, 24, "Terminal rows");
 		const shell = terminalShell(this.#environment);
-		let pty;
+		let pty: IPty;
 		try {
 			pty = this.#spawn(shell, [], {
 				name: "xterm-256color", cols, rows, cwd,
-				env: { ...this.#environment, TERM: "xterm-256color", COLORTERM: "truecolor" },
+				env: { ...this.#environment, TERM: "xterm-256color", COLORTERM: "truecolor" } as Record<string, string>,
 			});
 		} catch {
 			throw inputError("Could not start the system shell for this workspace.", 503);
 		}
 		const id = randomUUID();
-		const terminal = { id, pty, shell: basename(shell), cwd, output: "", baseCursor: 0, exited: false, exitCode: null };
+		const terminal: TerminalRecord = { id, pty, shell: basename(shell), cwd, output: "", baseCursor: 0, exited: false, exitCode: null };
 		pty.onData(data => {
 			terminal.output += data;
 			if (terminal.output.length > this.#maxOutputCharacters) {
@@ -77,13 +94,13 @@ export class TerminalManager {
 		return { id, shell: terminal.shell, cwd, cols, rows };
 	}
 
-	#terminal(id) {
+	#terminal(id: string): TerminalRecord {
 		const terminal = this.#terminals.get(id);
 		if (!terminal) throw inputError("Terminal session not found or already closed.", 404);
 		return terminal;
 	}
 
-	read(id, cursorValue) {
+	read(id: string, cursorValue?: unknown) {
 		const terminal = this.#terminal(id);
 		const cursor = cursorValue === undefined ? 0 : Number(cursorValue);
 		if (!Number.isSafeInteger(cursor) || cursor < 0) throw inputError("Terminal output cursor must be a non-negative integer.");
@@ -96,7 +113,7 @@ export class TerminalManager {
 		};
 	}
 
-	write(id, data) {
+	write(id: string, data: unknown) {
 		const terminal = this.#terminal(id);
 		if (terminal.exited) throw inputError("This terminal has exited. Start a new terminal to continue.", 409);
 		if (typeof data !== "string" || !data || Buffer.byteLength(data, "utf8") > MAX_INPUT_BYTES) {
@@ -106,7 +123,7 @@ export class TerminalManager {
 		return { ok: true };
 	}
 
-	resize(id, input) {
+	resize(id: string, input: { cols?: unknown; rows?: unknown } | null | undefined) {
 		const terminal = this.#terminal(id);
 		if (terminal.exited) return { ok: true, exited: true };
 		const cols = integerInRange(input?.cols, 20, 300, undefined, "Terminal columns");
@@ -115,7 +132,7 @@ export class TerminalManager {
 		return { ok: true, cols, rows };
 	}
 
-	close(id) {
+	close(id: string) {
 		const terminal = this.#terminals.get(id);
 		if (!terminal) return { closed: false };
 		this.#terminals.delete(id);
