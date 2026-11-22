@@ -15,6 +15,8 @@ type TerminalPanelProps = {
   visible: boolean
   fontSize: number
   scrollback: number
+  /** Start a shell as soon as the terminal is ready instead of waiting for "Start terminal". */
+  autoStart?: boolean
 }
 
 function terminalTheme() {
@@ -35,7 +37,7 @@ function terminalTheme() {
   }
 }
 
-export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontSize, scrollback }: TerminalPanelProps) {
+export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontSize, scrollback, autoStart = false }: TerminalPanelProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTermInstance | null>(null)
   const fitRef = useRef<FitAddonInstance | null>(null)
@@ -205,6 +207,14 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
       setError(cause instanceof Error ? cause.message : "Could not start the terminal.")
     }
   }
+
+  // Auto-start once per mount when enabled and nothing is running for this workspace yet.
+  const autoStartedRef = useRef(false)
+  useEffect(() => {
+    if (!autoStart || autoStartedRef.current || !terminalReady || terminalId || !cwd || !visible) return
+    autoStartedRef.current = true
+    void start()
+  })
 
   async function close() {
     const id = terminalIdRef.current

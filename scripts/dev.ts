@@ -9,7 +9,7 @@ const children = [
 		["--watch-path=runtime", "--watch-path=packages", "--watch-preserve-output", join(root, "runtime", "server.ts")],
 		{ cwd: root, stdio: "inherit", env: process.env },
 	),
-	spawn(process.execPath, [join(root, "node_modules", "vite", "bin", "vite.js"), "--host", "127.0.0.1", "--port", "1420"], {
+	spawn(process.execPath, [join(root, "node_modules", "vite", "bin", "vite.js"), "--host", "127.0.0.1", "--port", process.env.ADE_UI_PORT ?? "1420"], {
 		cwd: root,
 		stdio: "inherit",
 		env: process.env,

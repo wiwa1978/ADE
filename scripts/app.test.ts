@@ -343,7 +343,7 @@ test("composer slash command autocomplete and Settings MCP + appearance persist"
   await click("Appearance")
   await click("Light")
   assert.equal(browser.document.documentElement.dataset.theme, "light")
-  await click("Plugins")
+  await click("Agents & permissions")
   assert.match(container.textContent, /MCP Servers/)
   assert.match(container.textContent, /Command Approvals/)
 })

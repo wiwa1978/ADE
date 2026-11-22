@@ -108,7 +108,8 @@ export type Conversation = {
   projectId?: string | null
   githubIssue?: Pick<GitHubIssue, "url" | "repository" | "number" | "title" | "state">
   status: "working" | "idle"
-  workspace?: { kind: "none" | "checkout" | "worktree"; path: string | null; repository: string; branch: string | null; status: "provisioning" | "ready" | "attention"; message: string | null }
+  archivedAt?: number | null
+  workspace?: { kind: "none" | "checkout" | "worktree"; path: string | null; repository: string; branch: string | null; status: "provisioning" | "ready" | "attention" | "archived"; message: string | null; removed?: boolean }
   messages: ConversationMessage[]
 }
 
@@ -120,7 +121,7 @@ export type TaskStart = {
   environmentId?: string
   projectId?: string | null
   githubIssue?: GitHubIssue
-  initialMessage: { id: string; content: string; provider: string; model: string; reasoning: string }
+  initialMessage?: { id: string; content: string; provider: string; model: string; reasoning: string }
 }
 
 // --- Rich ADE Streaming, Subagent, Approval, Workspace, Browser, Artifact, Skills & MCP Types ---
@@ -302,6 +303,7 @@ export type WorkspaceTabKind =
   | "artifact"
   | "terminal"
   | "processes"
+  | "pr"
 
 export type WorkspaceTab = {
   id: string

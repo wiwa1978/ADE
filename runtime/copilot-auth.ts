@@ -1,6 +1,6 @@
-import { execFile } from "node:child_process";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { createSecretProtector, CredentialBackendError, type SecretProtector } from "./secret-store.ts";
 
 export const copilotId = "github-copilot";
 export const apiKeyEnvironment = Object.freeze({
@@ -15,34 +15,20 @@ export function isValidApiKey(key) {
 		![...key].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
 }
 
-function protect(input: string, decrypt: boolean): Promise<string> {
-	const command = decrypt
-		? "$data = [Convert]::FromBase64String([Console]::In.ReadToEnd()); [Console]::Write([Text.Encoding]::UTF8.GetString([Security.Cryptography.ProtectedData]::Unprotect($data, $null, 'CurrentUser')))"
-		: "$data = [Text.Encoding]::UTF8.GetBytes([Console]::In.ReadToEnd()); [Console]::Write([Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Protect($data, $null, 'CurrentUser')))";
-	const loadAssembly = "[void][Reflection.Assembly]::Load('System.Security, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a')";
-	return new Promise<string>((resolve, reject) => {
-		const child = execFile(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
-			["-NoProfile", "-NonInteractive", "-Command", `$ErrorActionPreference = 'Stop'; ${loadAssembly}; ${command}`],
-			{ windowsHide: true, timeout: 10000, maxBuffer: 128 * 1024 }, (error, stdout) => {
-				if (error || !stdout) reject(new Error("Could not access a Windows-protected credential."));
-				else resolve(stdout);
-			});
-		child.stdin?.on("error", reject);
-		child.stdin?.end(input);
-	});
-}
-
-function createProtectedStore(path, description, valid) {
+function createProtectedStore(protector: SecretProtector, path: string, description: string, valid: (value: any) => boolean) {
 	let cached;
 	let loaded = false;
 	let chain: Promise<any> = Promise.resolve(undefined);
 	async function load() {
 		if (!loaded) {
 			try {
-				cached = JSON.parse(await protect(await readFile(path, "utf8"), true));
+				cached = JSON.parse(await protector.unprotect(await readFile(path, "utf8")));
 				if (!valid(cached)) throw new Error("Invalid credential.");
 			} catch (error) {
-				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error(`Could not read the Windows-protected ${description} credential.`);
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+					if (error instanceof CredentialBackendError) throw error;
+					throw new Error(`Could not read the saved ${description} credential. Remove it and save it again.`);
+				}
 				cached = undefined;
 			}
 			loaded = true;
@@ -63,7 +49,7 @@ function createProtectedStore(path, description, valid) {
 				if (!valid(next)) throw new Error(`Invalid ${description} credential.`);
 				if (next !== cached) {
 					const text = String(JSON.stringify(next)).replace(/[^\u0020-\u007e]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
-					await writeFile(`${path}.tmp`, await protect(text, false), { encoding: "utf8", mode: 0o600 });
+					await writeFile(`${path}.tmp`, await protector.protect(text), { encoding: "utf8", mode: 0o600 });
 					await rename(`${path}.tmp`, path);
 					cached = next;
 				}
@@ -82,8 +68,13 @@ function createProtectedStore(path, description, valid) {
 }
 
 // The ADE state-directory owner lock makes these the only writers across processes.
-export function createCopilotStore(directory) {
-	const store = createProtectedStore(join(directory, "copilot-auth.dpapi"), "Copilot", value =>
+export function credentialFilePath(directory: string, base: string, environment: NodeJS.ProcessEnv = process.env) {
+	return join(directory, `${base}${createSecretProtector(directory, environment).fileSuffix}`);
+}
+
+export function createCopilotStore(directory, environment: NodeJS.ProcessEnv = process.env) {
+	const protector = createSecretProtector(directory, environment);
+	const store = createProtectedStore(protector, join(directory, `copilot-auth${protector.fileSuffix}`), "Copilot", value =>
 		value?.type === "oauth" && typeof value.access === "string" &&
 		typeof value.refresh === "string" && Number.isFinite(value.expires));
 	return {
@@ -100,10 +91,11 @@ export function createCopilotStore(directory) {
 	};
 }
 
-export function createApiKeyStore(directory) {
+export function createApiKeyStore(directory, environment: NodeJS.ProcessEnv = process.env) {
+	const protector = createSecretProtector(directory, environment);
 	const stores = new Map(Object.keys(apiKeyEnvironment).map(id => [
 		id,
-		createProtectedStore(join(directory, `provider-${id}-auth.dpapi`), id, value =>
+		createProtectedStore(protector, join(directory, `provider-${id}-auth${protector.fileSuffix}`), id, value =>
 			value?.type === "api_key" && isValidApiKey(value.key)),
 	]));
 	return {

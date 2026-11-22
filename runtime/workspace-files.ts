@@ -213,7 +213,7 @@ export async function getWorkspaceFileDiff(workspace: string, filePath: string, 
 		const full = workspacePath(workspace, filePath, { mustExist: true });
 		const stat = statSync(full);
 		if (stat.isFile() && stat.size < 500_000) {
-			const lines = readFileSync(full, "utf8").split("\n");
+			const lines = readFileSync(full, "utf8").replace(/\n$/, "").split("\n");
 			return [
 				`diff --git a/${filePath} b/${filePath}`,
 				"new file mode 100644",

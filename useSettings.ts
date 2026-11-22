@@ -18,6 +18,19 @@ export type Settings = {
   codeSize: number
   contentWidth: number
   highlightTheme: "auto" | "github" | "monochrome"
+  /** Workspace type preselected when starting a session in a project with a local checkout. */
+  defaultWorkspaceKind: "worktree" | "checkout" | "none"
+  /** Remove a session's ADE worktree when it is archived (the branch is always kept). */
+  archiveRemovesWorktree: boolean
+  /** Start a shell automatically when the terminal pane opens. */
+  terminalAutoStart: boolean
+  /** Open pull requests as drafts by default. */
+  prDraft: boolean
+  /** Desktop notifications. */
+  notifyOnFinish: boolean
+  notifyOnApproval: boolean
+  /** Reopen the last project or session after a reload. */
+  restoreLastView: boolean
 }
 
 const storageKey = "ade-settings-v1"
@@ -38,6 +51,13 @@ const defaults: Settings = {
   codeSize: 12,
   contentWidth: 820,
   highlightTheme: "auto",
+  defaultWorkspaceKind: "worktree",
+  archiveRemovesWorktree: true,
+  terminalAutoStart: true,
+  prDraft: true,
+  notifyOnFinish: false,
+  notifyOnApproval: false,
+  restoreLastView: true,
 }
 
 function readSettings(): { settings: Settings; error: string } {
@@ -65,6 +85,13 @@ function readSettings(): { settings: Settings; error: string } {
         codeSize: typeof value.codeSize === "number" && Number.isInteger(value.codeSize) && value.codeSize >= 10 && value.codeSize <= 18 ? value.codeSize : defaults.codeSize,
         contentWidth: typeof value.contentWidth === "number" && Number.isInteger(value.contentWidth) && value.contentWidth >= 640 && value.contentWidth <= 1200 ? value.contentWidth : defaults.contentWidth,
         highlightTheme: value.highlightTheme === "github" || value.highlightTheme === "monochrome" ? value.highlightTheme : "auto",
+        defaultWorkspaceKind: value.defaultWorkspaceKind === "checkout" || value.defaultWorkspaceKind === "none" ? value.defaultWorkspaceKind : defaults.defaultWorkspaceKind,
+        archiveRemovesWorktree: typeof value.archiveRemovesWorktree === "boolean" ? value.archiveRemovesWorktree : defaults.archiveRemovesWorktree,
+        terminalAutoStart: typeof value.terminalAutoStart === "boolean" ? value.terminalAutoStart : defaults.terminalAutoStart,
+        prDraft: typeof value.prDraft === "boolean" ? value.prDraft : defaults.prDraft,
+        notifyOnFinish: typeof value.notifyOnFinish === "boolean" ? value.notifyOnFinish : defaults.notifyOnFinish,
+        notifyOnApproval: typeof value.notifyOnApproval === "boolean" ? value.notifyOnApproval : defaults.notifyOnApproval,
+        restoreLastView: typeof value.restoreLastView === "boolean" ? value.restoreLastView : defaults.restoreLastView,
       },
       error: "",
     }
@@ -93,7 +120,7 @@ export function useSettings() {
     root.style.colorScheme = resolved
     const interfaceFont = settings.interfaceFont.trim()
       ? settings.interfaceFont
-      : '"Segoe UI Variable","Segoe UI",system-ui,sans-serif'
+      : 'system-ui,-apple-system,"Segoe UI Variable","Segoe UI",sans-serif'
     const codeFont = settings.codeFont.trim()
       ? settings.codeFont
       : '"SFMono-Regular",Menlo,Monaco,Consolas,"Liberation Mono",monospace'

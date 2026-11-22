@@ -14,6 +14,7 @@ export type Project = {
   euOnlyMode?: boolean
   cloudActFree?: boolean
   stageOverrides?: Record<string, { provider: string; model: string }>
+  archivedAt?: number | null
 }
 export type ProjectInput = {
   id: string

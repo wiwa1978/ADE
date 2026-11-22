@@ -5,10 +5,14 @@ and optional SSH-connected ADE runtimes. The active runtime provides independent
 persistent coding tasks, additional
 coding and personal chats, and a project-free personal conversation. Projects
 group coding sessions and show their subagent assignments and reports. A coding
-session may use a Git checkout or an automatically created worktree, with
-workspace file tools. GitHub links are references; a coding session can also
-load a public issue from its project's linked repository as session context.
-An interactive terminal is available to the user, but no shell tool is connected to agents. GitHub write actions, MCP, and skills are not connected.
+session may use a Git checkout or an automatically created worktree (on its own
+readable branch, such as `ade/fix-login-1a2b3c4d`). Agents in a workspace session
+have file, search, and shell tools (subject to the approval policy), subagents,
+the built-in browser, MCP servers, and skills. From a session you can review
+changes, commit, push, open a pull request, follow its checks, and merge it.
+Projects list their GitHub issues and pull requests; any issue can start a session.
+
+See `docs/DESIGN_REVIEW.md` for the current design review and roadmap.
 
 Use the **+** beside Projects to create a project with an automatic name.
 Creating or selecting a project opens **Project settings** in the right pane,
@@ -22,7 +26,7 @@ use the Send button on compact screens. Sessions take their initial name from
 the first message and can be renamed from the left-pane ellipsis or right-click
 menu.
 
-In **Settings → App → Integrations**, ADE automatically detects and links the active
+In **Settings → Git & GitHub**, ADE automatically detects and links the active
 `github.com` account in the local GitHub CLI. In **Project settings**, type
 in **GitHub repository**, choose a matching repository from the dropdown, and
 save. You can also enter an `owner/repository` or URL manually. Install GitHub CLI and run
@@ -64,15 +68,38 @@ development startup. Native Tauri builds still require the Windows Rust, MSVC,
 and WebView2 prerequisites. The terminal uses the native `node-pty` package; on
 Windows, installing it may also require the MSVC C++ build tools.
 
-A user-operated terminal is available in the bottom panel for coding sessions
-with a ready checkout or worktree. Click **Start terminal** to spawn the active
-host's system shell in that workspace. Commands run with the host OS user's
-permissions and are not exposed to the model as a tool. Terminal font size and
-scrollback are in **Settings → App → Terminal**.
+To run a second copy beside another one (for example from a git worktree), set
+`ADE_UI_PORT`, `ADE_RUNTIME_PORT`, and `ADE_STATE_DIR` before `npm run dev`:
+
+```sh
+ADE_UI_PORT=1520 ADE_RUNTIME_PORT=4419 ADE_STATE_DIR=/tmp/ade-dev-state npm run dev
+```
+
+## Sessions, review, and pull requests
+
+Open a session and use the tools at the top right:
+
+- **Terminal** starts the host's shell in the session's workspace (automatically,
+  unless turned off in **Settings → Terminal**). Use **+** for more terminals.
+  Terminals keep running while you switch tabs. They are yours: agents run their
+  own commands separately.
+- **Changes** shows **Uncommitted** changes (stage, discard, commit; committing
+  with nothing staged commits everything) or **All branch changes** since the
+  session started.
+- **Pull request** shows the branch status, pushes, opens a pull request (draft by
+  default, see **Settings → Git & GitHub**), lists its checks and review state,
+  marks it ready, and merges it. GitHub actions use the host's GitHub CLI account.
+- **Browser** is a real Chrome window that you and agents can drive.
+
+**Archiving** (right-click a session or project → Archive) stops the agent, closes
+the session's terminals, and, by default, removes its worktree while keeping the
+branch and conversation. Worktrees with uncommitted changes are never removed.
+Archived items appear under **Archived** in the sidebar; **Restore** recreates the
+worktree from its branch. Archive state is stored on the host.
 
 ## SSH environments
 
-Open **Settings → Host → Connections** to add an SSH host. Enter a display name, an
+Open **Settings → Environments** to add an SSH host. Enter a display name, an
 OpenSSH host or alias (for example `ade-build` from `~/.ssh/config`), and the
 SSH and ADE runtime ports. ADE uses the system OpenSSH client with key/agent
 authentication, `BatchMode=yes`, and strict known-host checking. It does not
@@ -102,29 +129,31 @@ remain saved after ADE exits, but SSH tunnels are closed and remote hosts must
 be reconnected. On startup, ADE selects **This computer**. Direct network
 connections and pairing/relay connections are not implemented yet.
 
-In **Settings → App → Integrations**, sign in to Copilot. Save API keys for
-OpenAI, Anthropic, Radius, or an OpenAI-compatible provider in **Settings →
-Host → Providers**. In **Settings → App → Chat**, choose the model provider,
-model, harness, and reasoning level. Pi Durable
-remains the harness for both conversations. Switching providers does not reset
+Everything about models is in **Settings → Models**: API keys for OpenAI,
+Anthropic, Radius, and an OpenAI-compatible endpoint (its URL and model too),
+GitHub Copilot sign-in, and the default provider, model, and reasoning level.
+Only providers that are set up can be chosen. When nothing is set up, sessions
+still open (with terminal, browser, and review tools); the message waits in the
+composer until a provider is ready. CLI coding agents installed on the host
+(Claude Code, Codex, …) are listed for information; ADE can't run them as its
+harness yet. Pi Durable remains the harness for all conversations. Switching providers does not reset
 the conversation: the new provider receives its context on the next turn.
 The composer also lets you change the model and reasoning for the next turn;
 these choices stay in sync with Settings. The conversation composer's harness
 dropdown shows Pi Durable as active and the Copilot SDK as unavailable.
 
-**GitHub Copilot:** In **Settings → App → Integrations**, click **Sign in to GitHub
+**GitHub Copilot:** In **Settings → Models**, click **Sign in to GitHub
 Copilot**. Follow the new device link and code shown in ADE, then select GitHub
 Copilot as the model provider. This uses the
 pinned Pi SDK's Copilot OAuth flow, not the credential from `copilot login`.
 Pi can enable eligible models as part of sign-in, subject to your account and
 organization policy. ADE lists the account models known to this version of
-Pi. Windows encrypts the credential for the current OS user using DPAPI,
-separately from chat data. **Sign out of ADE** removes that local credential
+Pi. The credential is encrypted on the host (see below), separately from chat data. **Sign out of ADE** removes that local credential
 without signing you out of the Copilot CLI. Model calls may use Copilot quota.
 
 **Radius (Pi):** Radius is Pi's hosted model gateway, not the Pi Durable
-harness. Save a Radius API key (not a Copilot credential) in Connections.
-Select **Radius (Pi)** under Agent defaults. ADE loads that account's Radius
+harness. Save a Radius API key (not a Copilot credential) in **Settings → Models** and
+select **Radius (Pi)** as the provider. ADE loads that account's Radius
 model catalog on first selection and refreshes it when the saved key changes.
 Alternatively, supply a key when launching ADE:
 
@@ -135,8 +164,8 @@ $env:RADIUS_API_KEY = [System.Net.NetworkCredential]::new("", (Read-Host "Radius
 try { npm run dev } finally { Remove-Item Env:\RADIUS_API_KEY -ErrorAction SilentlyContinue }
 ```
 
-**OpenAI and Anthropic:** Save the relevant key in Connections and select the
-provider in Agent defaults. Alternatively, supply keys when launching ADE:
+**OpenAI and Anthropic:** Save the relevant key in **Settings → Models** and select
+the provider. Alternatively, supply keys when launching ADE:
 
 ```powershell
 $env:ADE_PROVIDER = "openai"
@@ -146,8 +175,9 @@ npm run dev
 ```
 
 For Anthropic, use `ADE_PROVIDER = "anthropic"`, set `ADE_MODEL` to an available
-model ID, and provide `ANTHROPIC_API_KEY`. For a local OpenAI-compatible server,
-configure its endpoint and model in the launch environment:
+model ID, and provide `ANTHROPIC_API_KEY`. For a local OpenAI-compatible server
+(for example Ollama), enter its endpoint URL and model in **Settings → Models**, or
+set them in the launch environment (which takes precedence):
 
 ```powershell
 $env:ADE_PROVIDER = "compatible"
@@ -157,11 +187,12 @@ npm run dev
 ```
 
 Compatible non-loopback endpoints must use HTTPS and require a key, either saved
-in Connections or supplied as `ADE_COMPATIBLE_KEY`. Saved API keys take precedence
-over launch environment keys; removing one falls back to any environment key.
-On Windows, saved keys are encrypted with DPAPI for the current OS user, are
-never returned to the UI after saving, and are not stored in browser preferences
-or ADE's turn database. Saving a key does not verify it with the provider.
+in **Settings → Models** or supplied as `ADE_COMPATIBLE_KEY`. Saved API keys take
+precedence over launch environment keys; removing one falls back to any
+environment key. Saved keys are encrypted for the current OS user: with DPAPI on
+Windows, and with a key held in the macOS Keychain or, on Linux, in libsecret
+(`secret-tool`). They are never returned to the UI after saving and are not
+stored in browser preferences or ADE's turn database. Saving a key does not verify it with the provider.
 Real provider calls send conversation content to that provider and may incur charges.
 
 ## Durable state and current boundaries

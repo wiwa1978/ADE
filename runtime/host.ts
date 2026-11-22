@@ -43,6 +43,12 @@ const modes = {
 
 const execFileAsync = promisify(execFile);
 
+/** Readable, unique branch name for a session, e.g. "ade/fix-login-redirect-1a2b3c4d". */
+export function sessionBranchName(title: string, id: string): string {
+	const slug = title.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
+	return `ade/${slug ? `${slug}-` : ""}${id.replace(/-/g, "").slice(0, 8)}`;
+}
+
 export async function detectGitHubRemoteFromCheckout(repoPath: string): Promise<string | null> {
 	try {
 		const { stdout } = await execFileAsync("git", ["remote", "get-url", "origin"], {
@@ -198,6 +204,14 @@ export class LocalAgentHost {
 				this.#db.exec(`ALTER TABLE coding_tasks ADD COLUMN ${name} ${type}`);
 			}
 		}
+		for (const table of ["projects", "coding_tasks", "chat_threads"]) {
+			if (!this.#db.prepare(`PRAGMA table_info(${table})`).all().some(column => column.name === "archivedAt")) {
+				this.#db.exec(`ALTER TABLE ${table} ADD COLUMN archivedAt INTEGER`);
+			}
+		}
+		if (!this.#db.prepare("PRAGMA table_info(coding_tasks)").all().some(column => column.name === "worktreeRemoved")) {
+			this.#db.exec("ALTER TABLE coding_tasks ADD COLUMN worktreeRemoved INTEGER NOT NULL DEFAULT 0");
+		}
 		const projectColumns = this.#db.prepare("PRAGMA table_info(projects)").all();
 		for (const [name, ddl] of [
 			["blueprintId", "TEXT DEFAULT 'automated-factory'"],
@@ -232,6 +246,7 @@ export class LocalAgentHost {
 			euOnlyMode: Boolean(row.euOnlyMode),
 			cloudActFree: Boolean(row.cloudActFree),
 			...(stageOverrides ? { stageOverrides } : {}),
+			archivedAt: row.archivedAt ?? null,
 			createdAt: row.createdAt,
 			updatedAt: row.updatedAt,
 		};
@@ -319,6 +334,54 @@ export class LocalAgentHost {
 		const result = this.#db.prepare("DELETE FROM coding_tasks WHERE id=?").run(id);
 		if (!result.changes) throw Object.assign(new Error("Session not found."), { statusCode: 404 });
 		return { deleted: true, id };
+	}
+
+	/**
+	 * Archive or restore a coding session or chat thread. Archiving stops a running turn; the caller closes
+	 * terminals and (optionally) removes the worktree. The branch and conversation are always kept.
+	 */
+	async setSessionArchived(id: string, archived: boolean): Promise<{ id: string; archivedAt: number | null; workspace: string | null; repository: string | null; kind: string | null }> {
+		if (Object.hasOwn(modes, id)) throw Object.assign(new Error("Built-in chats cannot be archived."), { statusCode: 400 });
+		const task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(id) as any;
+		const chat = task ? null : this.#db.prepare("SELECT * FROM chat_threads WHERE id=?").get(id);
+		if (!task && !chat) throw Object.assign(new Error("Session not found."), { statusCode: 404 });
+		if (archived && (this.#active.has(id) || this.#recovering.has(id))) await this.abortSession(id).catch(() => ({ ok: false }));
+		const archivedAt = archived ? Date.now() : null;
+		this.#db.prepare(`UPDATE ${task ? "coding_tasks" : "chat_threads"} SET archivedAt=? WHERE id=?`).run(archivedAt, id);
+		this.events.emit("sessions.changed", { id, archivedAt });
+		return { id, archivedAt, workspace: task?.workspace ?? null, repository: task?.repository ?? null, kind: task?.kind ?? null };
+	}
+
+	/** Mark a session's worktree as removed after the caller deleted it from disk. */
+	markWorktreeRemoved(id: string) {
+		this.#db.prepare("UPDATE coding_tasks SET worktreeRemoved=1 WHERE id=?").run(id);
+	}
+
+	/** Details needed to recreate a removed worktree, or null when the session's worktree is still present. */
+	removedWorktree(id: string): { path: string; repository: string; branch: string } | null {
+		const task = this.#db.prepare("SELECT workspace, repository, branch, worktreeRemoved, kind FROM coding_tasks WHERE id=?").get(id) as any;
+		if (!task?.worktreeRemoved || task.kind !== "worktree" || !task.workspace || !task.branch) return null;
+		return { path: task.workspace, repository: task.repository, branch: task.branch };
+	}
+
+	/** Record that a removed worktree was recreated on disk, refreshing its identity checks. */
+	markWorktreeRestored(id: string) {
+		const task = this.#db.prepare("SELECT workspace FROM coding_tasks WHERE id=?").get(id) as any;
+		const info = statSync(task.workspace, { bigint: true });
+		this.#db.prepare("UPDATE coding_tasks SET worktreeRemoved=0, workspaceDev=?, workspaceIno=? WHERE id=?").run(String(info.dev), String(info.ino), id);
+	}
+
+	/** Archive or restore a project. Archiving a project also archives its sessions; restoring leaves them archived. */
+	async setProjectArchived(id: string, archived: boolean) {
+		const project = this.#db.prepare("SELECT * FROM projects WHERE id=?").get(id);
+		if (!project) throw Object.assign(new Error("Project not found."), { statusCode: 404 });
+		const sessions = [];
+		if (archived) {
+			const tasks = this.#db.prepare("SELECT id FROM coding_tasks WHERE projectId=? AND archivedAt IS NULL").all(id) as any[];
+			for (const task of tasks) sessions.push(await this.setSessionArchived(task.id, true));
+		}
+		this.#db.prepare("UPDATE projects SET archivedAt=? WHERE id=?").run(archived ? Date.now() : null, id);
+		return { project: this.#serializeProject(this.#db.prepare("SELECT * FROM projects WHERE id=?").get(id)), sessions };
 	}
 
 	forkSession(sourceId: string) {
@@ -502,9 +565,15 @@ export class LocalAgentHost {
 	}
 
 	getWorkspacePath(sessionId: string): string | null {
-		const task = this.#db.prepare("SELECT workspace, status, kind FROM coding_tasks WHERE id=?").get(sessionId) as any;
-		if (!task || task.kind === "none" || task.status !== "ready" || !task.workspace) return null;
+		const task = this.#db.prepare("SELECT workspace, status, kind, worktreeRemoved FROM coding_tasks WHERE id=?").get(sessionId) as any;
+		if (!task || task.kind === "none" || task.status !== "ready" || !task.workspace || task.worktreeRemoved) return null;
 		return task.workspace;
+	}
+
+	/** The commit a session's branch started from (recorded at creation), or null for checkout/none sessions. */
+	getWorkspaceBase(sessionId: string): string | null {
+		const task = this.#db.prepare("SELECT base, kind FROM coding_tasks WHERE id=?").get(sessionId) as any;
+		return task?.kind === "worktree" && task.base && task.base !== "HEAD" ? task.base : null;
 	}
 
 	#sessionDbPath(sessionId: string): string | null {
@@ -723,39 +792,31 @@ export class LocalAgentHost {
 		return this.#runtimeModels?.config(provider) ?? this.#modelConfigFactory(this.#environment, provider);
 	}
 
+	/**
+	 * Providers the Pi Durable harness can run. Installed CLI agents (claude, codex, …) are reported by
+	 * providerTools() for information only; they are not selectable until a CLI harness exists.
+	 */
 	async modelCatalog() {
-		const scanned = await this.providerTools({});
-		const apiConfigs = new Map<string, any>();
 		const runtimeProviders = this.#runtimeModels?.providers ?? [];
-		for (const p of runtimeProviders) {
-			try {
-				apiConfigs.set(p.id, await this.#modelConfig(p.id));
-			} catch {
-				// ignore unconfigured provider
-			}
-		}
-
 		const results = [];
-		for (const tool of scanned.providers) {
-			if (!tool.enabled) continue;
-			const apiCfg = apiConfigs.get(tool.id);
-			const models = apiCfg?.availableModels?.length
-				? apiCfg.availableModels
-				: Array.isArray(tool.models) ? tool.models : [];
-			const defaultModel = apiCfg?.defaultModel || models[0]?.id || "default";
+		for (const p of runtimeProviders) {
+			let config: any;
+			try {
+				config = await this.#modelConfig(p.id);
+			} catch (error) {
+				config = { configured: false, availableModels: [], defaultModel: "", setupMessage: this.safeErrorMessage(error) };
+			}
 			results.push({
-				id: tool.id,
-				name: tool.name,
-				kind: tool.kind,
-				configured: Boolean(apiCfg ? apiCfg.configured : tool.available),
-				enabled: Boolean(tool.enabled),
-				defaultModel,
-				setupMessage: apiCfg?.setupMessage ?? (tool.available ? "" : tool.install ?? ""),
-				models,
+				id: p.id,
+				name: p.name,
+				kind: "api",
+				configured: Boolean(config.configured),
+				enabled: true,
+				defaultModel: config.defaultModel ?? "",
+				setupMessage: config.setupMessage ?? "",
+				models: config.configured ? config.availableModels ?? [] : [],
 			});
 		}
-
-		// If nothing was enabled in preferences yet, fall back to active model config
 		if (!results.length) {
 			const single = await this.#modelConfig(undefined);
 			results.push({
@@ -769,7 +830,8 @@ export class LocalAgentHost {
 				models: single.availableModels ?? [],
 			});
 		}
-		return { providers: results };
+		const defaultProvider = await this.#runtimeModels?.defaultProvider?.();
+		return { providers: results, defaultProvider: defaultProvider ?? results[0]?.id };
 	}
 
 	async health(provider) {
@@ -806,7 +868,11 @@ export class LocalAgentHost {
 
 	async modelCredentials(input) {
 		if (!this.#runtimeModels) throw Object.assign(new Error("Model credentials are unavailable."), { statusCode: 404 });
-		if (input?.action === "status") return { credentials: await this.#runtimeModels.credentialStatus() };
+		if (input?.action === "status") return { credentials: await this.#runtimeModels.credentialStatus(), compatible: this.#runtimeModels.compatibleStatus() };
+		if (input?.action === "configure-compatible") {
+			if (this.#active.size || this.#recovering.size) throw Object.assign(new Error("Wait for active work to finish before changing providers."), { statusCode: 409 });
+			return { credentials: await this.#runtimeModels.credentialStatus(), compatible: this.#runtimeModels.configureCompatible(input) };
+		}
 		if (this.#credentialChangeBusy || this.#active.size || this.#recovering.size || this.#provisioning.size) {
 			throw Object.assign(new Error("Wait for active work to finish before changing model credentials."), { statusCode: 409 });
 		}
@@ -922,7 +988,8 @@ export class LocalAgentHost {
 				...(chat ? { chatThread: true } : {}),
 				...(task ? { projectId: task.projectId } : {}),
 				status: busy ? "working" : "idle",
-				...(task ? { workspace: { kind: task.kind, path: task.workspace, repository: task.repository, branch: task.branch, status: task.status, message: task.message } } : {}),
+				archivedAt: (task ?? chat)?.archivedAt ?? null,
+				...(task ? { workspace: { kind: task.kind, path: task.worktreeRemoved ? null : task.workspace, repository: task.repository, branch: task.branch, status: task.worktreeRemoved ? "archived" : task.status, message: task.message, removed: Boolean(task.worktreeRemoved) } } : {}),
 				...(task?.issueUrl ? { githubIssue: { url: task.issueUrl, repository: task.issueRepository, number: task.issueNumber, title: task.issueTitle, state: task.issueState } } : {}),
 				messages,
 			};
@@ -961,7 +1028,7 @@ export class LocalAgentHost {
 		let task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(input.id);
 		if (task) this.#verifyTaskInputs(task, input, repository, initial);
 		if (!task) {
-			const branch = input.kind === "worktree" ? `ade/task-${input.id}` : null;
+			const branch = input.kind === "worktree" ? sessionBranchName(input.title, input.id) : null;
 			const base = input.kind === "worktree" ? await resolveBaseCommit(repository, "HEAD") : "HEAD";
 			if (initial) {
 				config = await this.#modelConfig(initial.provider);
@@ -1092,6 +1159,8 @@ export class LocalAgentHost {
 		if (!Object.hasOwn(modes, mode)) throw Object.assign(new Error("Unknown conversation"), { statusCode: 404 });
 		const task = taskId ? this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(taskId) : null;
 		if (taskId && (mode !== "coding" || !task || task.status !== "ready")) throw Object.assign(new Error("This coding task has no ready workspace."), { statusCode: 409 });
+		if (task?.archivedAt) throw Object.assign(new Error("This session is archived. Restore it to continue."), { statusCode: 409 });
+		if (task?.worktreeRemoved) throw Object.assign(new Error("This session's worktree was removed when it was archived."), { statusCode: 409 });
 		const chat = chatId ? this.#db.prepare("SELECT * FROM chat_threads WHERE id=?").get(chatId) : null;
 		if (chatId && (!chat || chat.mode !== mode || taskId)) throw Object.assign(new Error("This chat thread is unavailable."), { statusCode: 404 });
 		const key = chatId ?? taskId ?? mode;

@@ -3,7 +3,7 @@ import { ExternalLink, GitPullRequest, Play, RefreshCw, Settings2 } from "lucide
 import { request } from "../../api"
 import type { Project } from "../../ProjectsView"
 
-type ProjectGitHubIssue = {
+export type ProjectGitHubIssue = {
   repository: string
   number: number
   title: string
@@ -18,10 +18,13 @@ export function FactoryIssuesList({
   project,
   onOpenProjectSettings,
   onStartFromIssue,
+  onStartSessionFromIssue,
 }: {
   project: Project | null
   onOpenProjectSettings: () => void
   onStartFromIssue: (issue: ProjectGitHubIssue) => Promise<void>
+  /** Start a regular agent session (worktree + chat) for the issue. */
+  onStartSessionFromIssue?: (issue: ProjectGitHubIssue) => Promise<void>
 }) {
   const [issues, setIssues] = useState<ProjectGitHubIssue[]>([])
   const [loading, setLoading] = useState(false)
@@ -124,22 +127,45 @@ export function FactoryIssuesList({
                 ) : null}
               </div>
 
-              <button
-                type="button"
-                className="sf-btn-primary shrink-0"
-                disabled={startingNumber !== null}
-                onClick={async () => {
-                  setStartingNumber(issue.number)
-                  try {
-                    await onStartFromIssue(issue)
-                  } finally {
-                    setStartingNumber(null)
-                  }
-                }}
-              >
-                <Play className="size-3.5" />
-                {startingNumber === issue.number ? "Starting…" : "Start Factory"}
-              </button>
+              <div className="flex shrink-0 gap-2">
+                {onStartSessionFromIssue ? (
+                  <button
+                    type="button"
+                    className="sf-btn-primary"
+                    disabled={startingNumber !== null}
+                    onClick={async () => {
+                      setStartingNumber(issue.number)
+                      setError("")
+                      try {
+                        await onStartSessionFromIssue(issue)
+                      } catch (err) {
+                        setError(err instanceof Error ? err.message : "Could not start a session for this issue.")
+                      } finally {
+                        setStartingNumber(null)
+                      }
+                    }}
+                  >
+                    <Play className="size-3.5" />
+                    {startingNumber === issue.number ? "Starting…" : "Start session"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className={onStartSessionFromIssue ? "sf-btn-secondary" : "sf-btn-primary"}
+                  disabled={startingNumber !== null}
+                  onClick={async () => {
+                    setStartingNumber(issue.number)
+                    try {
+                      await onStartFromIssue(issue)
+                    } finally {
+                      setStartingNumber(null)
+                    }
+                  }}
+                >
+                  {onStartSessionFromIssue ? null : <Play className="size-3.5" />}
+                  Factory run
+                </button>
+              </div>
             </div>
           ))
         )}

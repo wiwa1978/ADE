@@ -9,6 +9,7 @@ import {
   FileText,
   FolderTree,
   GitBranch,
+  GitPullRequest,
   Globe,
   PanelRightClose,
   Plus,
@@ -41,6 +42,7 @@ import { DiffPanel } from "../panels/DiffPanel"
 import { BrowserPanel } from "../panels/BrowserPanel"
 import { ArtifactPanel } from "../panels/ArtifactPanel"
 import { ProcessesPanel } from "../panels/ProcessesPanel"
+import { PullRequestPanel, type PullRequestInfo } from "../panels/PullRequestPanel"
 
 export function SplitWorkspace({
   session,
@@ -83,6 +85,8 @@ export function SplitWorkspace({
   onReviewArtifact,
   terminalFontSize,
   terminalScrollback,
+  terminalAutoStart = true,
+  prDraftDefault = true,
   environmentId,
   externalOpenRequest,
   onClearExternalOpenRequest,
@@ -128,6 +132,8 @@ export function SplitWorkspace({
   onReviewArtifact: (artifact: SessionArtifact, decision: "approved" | "changes_requested", feedback?: string) => Promise<void>
   terminalFontSize: number
   terminalScrollback: number
+  terminalAutoStart?: boolean
+  prDraftDefault?: boolean
   environmentId: string
   externalOpenRequest: WorkspaceTab | null
   onClearExternalOpenRequest: () => void
@@ -251,9 +257,22 @@ export function SplitWorkspace({
     openBeside({ id: "artifact", kind: "artifact", title: art?.title || "Artifacts", artifactId: art?.id })
   }, [artifacts, openBeside])
 
-  const openTerminal = useCallback(() => {
-    openBeside({ id: "terminal", kind: "terminal", title: "Terminal" })
+  const openTerminal = useCallback((another = false) => {
+    if (!another) {
+      // Focus the most recent terminal tab if one exists, otherwise open the first.
+      const existing = [...besideTabs].reverse().find(t => t.kind === "terminal")
+      openBeside(existing ?? { id: "terminal", kind: "terminal", title: "Terminal" })
+      return
+    }
+    const count = besideTabs.filter(t => t.kind === "terminal").length
+    openBeside({ id: `terminal:${Date.now()}`, kind: "terminal", title: `Terminal ${count + 1}` })
+  }, [besideTabs, openBeside])
+
+  const openPullRequest = useCallback(() => {
+    openBeside({ id: "pr", kind: "pr", title: "Pull request" })
   }, [openBeside])
+  const [pullRequest, setPullRequest] = useState<PullRequestInfo | null>(null)
+  useEffect(() => { setPullRequest(null) }, [session.id])
 
   const openProcesses = useCallback(() => {
     openBeside({ id: "processes", kind: "processes", title: "Processes" })
@@ -278,6 +297,7 @@ export function SplitWorkspace({
       case "artifact": return <FileText className="size-3.5" />
       case "terminal": return <Terminal className="size-3.5" />
       case "processes": return <Activity className="size-3.5" />
+      case "pr": return <GitPullRequest className="size-3.5" />
       default: return <Columns2 className="size-3.5" />
     }
   }
@@ -349,12 +369,26 @@ export function SplitWorkspace({
               <button
                 type="button"
                 className={`ade-header-tool-btn ${activeBesideTab?.kind === "terminal" ? "is-active" : ""}`}
-                onClick={openTerminal}
+                onClick={() => openTerminal()}
                 title="Interactive Terminal"
               >
                 <Terminal className="size-3.5" />
                 <span>Terminal</span>
               </button>
+              {session.workspace?.kind !== "none" ? (
+                <button
+                  type="button"
+                  className={`ade-header-tool-btn ${activeBesideTab?.kind === "pr" ? "is-active" : ""}`}
+                  onClick={openPullRequest}
+                  title="Push, open and merge a pull request"
+                >
+                  <GitPullRequest className="size-3.5" />
+                  <span>{pullRequest ? `PR #${pullRequest.number}` : "Pull request"}</span>
+                  {pullRequest ? (
+                    <span className={`ade-pr-dot is-${pullRequest.state === "OPEN" ? (pullRequest.checksSummary === "failure" ? "failure" : pullRequest.checksSummary === "pending" ? "pending" : pullRequest.isDraft ? "draft" : "open") : pullRequest.state.toLowerCase()}`} aria-hidden="true" />
+                  ) : null}
+                </button>
+              ) : null}
             </>
           ) : null}
 
@@ -467,6 +501,7 @@ export function SplitWorkspace({
                 else if (panel === "diff") openDiff()
                 else if (panel === "browser") openBrowser()
                 else if (panel === "terminal") openTerminal()
+                else if (panel === "pr") openPullRequest()
               }}
               textareaRef={textareaRef}
             />
@@ -509,6 +544,11 @@ export function SplitWorkspace({
                       </button>
                     </div>
                   ))}
+                  {activeBesideTab.kind === "terminal" && workspacePath ? (
+                    <button type="button" className="ade-tab-add" title="New terminal" aria-label="New terminal" onClick={() => openTerminal(true)}>
+                      <Plus className="size-3.5" />
+                    </button>
+                  ) : null}
                   {subagents.some(s => !besideTabs.some(t => t.subagentId === s.id)) ? (
                     <button
                       type="button"
@@ -604,18 +644,33 @@ export function SplitWorkspace({
                   />
                 ) : null}
 
-                {activeBesideTab.kind === "terminal" && workspacePath ? (
-                  <div className="ade-terminal-pane-wrap">
+                {activeBesideTab.kind === "pr" ? (
+                  <PullRequestPanel
+                    sessionId={session.id}
+                    sessionLabel={session.label}
+                    issue={session.githubIssue ?? null}
+                    draftDefault={prDraftDefault}
+                    refreshKey={gitSummary}
+                    onOpenExternal={url => void onOpenExternalBrowser(url)}
+                    onOpenChanges={openDiff}
+                    onPullRequestChange={setPullRequest}
+                  />
+                ) : null}
+
+                {/* Terminals stay mounted while hidden so the shell view and keystrokes are never lost when switching tabs. */}
+                {workspacePath ? besideTabs.filter(tab => tab.kind === "terminal").map(tab => (
+                  <div key={tab.id} className="ade-terminal-pane-wrap" hidden={tab.id !== activeBesideTab.id}>
                     <TerminalPanel
                       environmentId={environmentId}
-                      workspaceKey={session.id}
+                      workspaceKey={tab.id === "terminal" ? session.id : `${session.id}:${tab.id}`}
                       cwd={workspacePath}
                       visible={true}
+                      autoStart={terminalAutoStart}
                       fontSize={terminalFontSize}
                       scrollback={terminalScrollback}
                     />
                   </div>
-                ) : null}
+                )) : null}
               </div>
             </section>
           </>

@@ -1,3 +1,5 @@
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { createModels, createProvider } from "@earendil-works/pi-ai/models";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
@@ -74,7 +76,7 @@ export function createModelConfig(environment = process.env, { hasStoredCompatib
 	} else if (requestedProvider === "compatible") {
 		provider = compatibleProvider(environment, hasStoredCompatibleKey) ?? undefined;
 		configured = Boolean(provider);
-		setupMessage = configured ? "" : "Set ADE_COMPATIBLE_URL and ADE_COMPATIBLE_MODEL in the terminal that launches ADE.";
+		setupMessage = configured ? "" : "Set the endpoint URL and model for the OpenAI-compatible provider in Settings → Models.";
 	} else {
 		throw new Error("ADE_PROVIDER must be openai, anthropic, or compatible");
 	}
@@ -100,10 +102,27 @@ export function createModelConfig(environment = process.env, { hasStoredCompatib
 	};
 }
 
+/** Non-secret provider settings saved on the host (the compatible endpoint URL and model). */
+function readProviderSettings(stateDirectory: string): { compatible?: { url?: string; model?: string } } {
+	try {
+		const value = JSON.parse(readFileSync(join(stateDirectory, "provider-settings.json"), "utf8"));
+		return value && typeof value === "object" ? value : {};
+	} catch {
+		return {};
+	}
+}
+
 export function createRuntimeModels(environment, stateDirectory) {
 	const fallback = environment.ADE_PROVIDER ?? "openai";
-	const copilotCredentials = createCopilotStore(stateDirectory);
-	const apiKeys = createApiKeyStore(stateDirectory);
+	let providerSettings = readProviderSettings(stateDirectory);
+	/** Environment variables win; saved settings fill in what the launch environment leaves out. */
+	const compatibleEnvironment = () => ({
+		...environment,
+		...(environment.ADE_COMPATIBLE_URL || !providerSettings.compatible?.url ? {} : { ADE_COMPATIBLE_URL: providerSettings.compatible.url }),
+		...(environment.ADE_COMPATIBLE_MODEL || !providerSettings.compatible?.model ? {} : { ADE_COMPATIBLE_MODEL: providerSettings.compatible.model }),
+	});
+	const copilotCredentials = createCopilotStore(stateDirectory, environment);
+	const apiKeys = createApiKeyStore(stateDirectory, environment);
 	const sensitiveKeys = new Map();
 	const remember = (id, value) => {
 		if (value?.type === "api_key" && value.key) sensitiveKeys.set(id, value.key);
@@ -163,7 +182,7 @@ export function createRuntimeModels(environment, stateDirectory) {
 		const provider = "radius";
 		const key = await credentials.read(provider);
 		if (!key?.key && !environment.RADIUS_API_KEY) {
-			return { provider, configured: false, availableModels: [], setupMessage: "Add a Radius API key in Settings → Connections." };
+			return { provider, configured: false, availableModels: [], setupMessage: "Add a Radius API key in Settings → Models." };
 		}
 		radiusCatalog ??= (async () => {
 			try {
@@ -212,15 +231,56 @@ export function createRuntimeModels(environment, stateDirectory) {
 		}
 		return credentialStatus();
 	}
+	function compatibleStatus() {
+		return {
+			url: environment.ADE_COMPATIBLE_URL ?? providerSettings.compatible?.url ?? "",
+			model: environment.ADE_COMPATIBLE_MODEL ?? providerSettings.compatible?.model ?? "",
+			fromEnvironment: Boolean(environment.ADE_COMPATIBLE_URL || environment.ADE_COMPATIBLE_MODEL),
+		};
+	}
+	function configureCompatible(input: { url?: unknown; model?: unknown }) {
+		const url = typeof input?.url === "string" ? input.url.trim() : "";
+		const model = typeof input?.model === "string" ? input.model.trim() : "";
+		if (url) {
+			let parsed: URL;
+			try {
+				parsed = new URL(url);
+			} catch {
+				throw Object.assign(new Error("Enter an absolute endpoint URL, for example http://127.0.0.1:11434/v1."), { statusCode: 400 });
+			}
+			if (!["http:", "https:"].includes(parsed.protocol)) throw Object.assign(new Error("The endpoint must use http or https."), { statusCode: 400 });
+		}
+		if (model.length > 200) throw Object.assign(new Error("The model name is too long."), { statusCode: 400 });
+		providerSettings = { ...providerSettings, compatible: url || model ? { url, model } : undefined };
+		const path = join(stateDirectory, "provider-settings.json");
+		writeFileSync(`${path}.tmp`, JSON.stringify(providerSettings, null, 2), { mode: 0o600 });
+		renameSync(`${path}.tmp`, path);
+		return compatibleStatus();
+	}
 	return {
 		fallback,
 		providers,
 		credentialStatus,
 		changeCredential,
+		compatibleStatus,
+		configureCompatible,
 		safeErrorMessage: redact,
 		signIn: createCopilotSignIn(models),
-		async config(id = fallback) {
+		/** The provider to use when none is chosen: ADE_PROVIDER, else the first provider with a working setup. */
+		async defaultProvider() {
+			if (environment.ADE_PROVIDER) return environment.ADE_PROVIDER;
+			for (const { id } of providers) {
+				try {
+					if ((await this.config(id)).configured) return id;
+				} catch {
+					// try the next provider
+				}
+			}
+			return fallback;
+		},
+		async config(id?: string) {
 			if (credentialChange) await credentialChange;
+			id ??= await this.defaultProvider();
 			if (!providers.some(provider => provider.id === id)) {
 				throw Object.assign(new Error("Unknown model provider."), { statusCode: 400 });
 			}
@@ -233,13 +293,13 @@ export function createRuntimeModels(environment, stateDirectory) {
 					...config, configured,
 					setupMessage: configured
 						? invalidDefault ? `Model "${config.defaultModel}" is not available from the configured ${id} provider.` : ""
-						: `Add an ${id === "openai" ? "OpenAI" : "Anthropic"} API key in Settings → Connections.`,
+						: `Add an ${id === "openai" ? "OpenAI" : "Anthropic"} API key in Settings → Models.`,
 				};
 			}
 			if (id === "compatible") {
 				const stored = await credentials.read(id);
 				try {
-					config = createModelConfig({ ...environment, ADE_PROVIDER: id, ADE_MODEL: fallback === id ? environment.ADE_MODEL : undefined },
+					config = createModelConfig({ ...compatibleEnvironment(), ADE_PROVIDER: id, ADE_MODEL: fallback === id ? environment.ADE_MODEL : undefined },
 						{ hasStoredCompatibleKey: Boolean(stored?.key) });
 					const provider = config.models.getProvider(id);
 					if (provider && !models.getProvider(id)) models.setProvider(provider);
@@ -260,7 +320,7 @@ export function createRuntimeModels(environment, stateDirectory) {
 						setupMessage = availableModels.length ? "" : "No Copilot chat models match this account and Pi version. Try signing in again.";
 					}
 				} catch {
-					setupMessage = "Could not read the Windows-protected Copilot credential. Sign out in ADE and reconnect.";
+					setupMessage = "Could not read the saved Copilot credential. Sign out in ADE and reconnect.";
 				}
 				config = { provider: id, configured: signedIn && availableModels.length > 0, signedIn, availableModels, setupMessage };
 			}

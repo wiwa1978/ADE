@@ -1,6 +1,6 @@
 import { spawn as spawnPty } from "node-pty";
 import { realpathSync, statSync } from "node:fs";
-import { basename, isAbsolute } from "node:path";
+import { basename, isAbsolute, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 
 const MAX_INPUT_BYTES = 8_192;
@@ -121,6 +121,22 @@ export class TerminalManager {
 		this.#terminals.delete(id);
 		if (!terminal.exited) terminal.pty.kill();
 		return { closed: true };
+	}
+
+	/** Close every terminal whose working directory is `directory` or inside it. Returns how many were closed. */
+	closeUnder(directory: string) {
+		const root = resolve(directory);
+		let closed = 0;
+		for (const [id, terminal] of this.#terminals) {
+			const cwd = resolve(terminal.cwd);
+			if (cwd !== root && !cwd.startsWith(`${root}${sep}`)) continue;
+			if (!terminal.exited) {
+				try { terminal.pty.kill(); } catch { /* The process may already have exited. */ }
+			}
+			this.#terminals.delete(id);
+			closed++;
+		}
+		return closed;
 	}
 
 	closeAll() {

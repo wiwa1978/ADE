@@ -6,7 +6,8 @@ import { pathToFileURL } from "node:url";
 import type { AddressInfo } from "node:net";
 import { detectGitHubRemoteFromCheckout, LocalAgentHost } from "./host.ts";
 import { safeErrorMessage } from "./models.ts";
-import { inspectWorktrees, resolveCheckout, WorktreeManager } from "./worktrees.ts";
+import { createSessionGit } from "./session-git.ts";
+import { inspectWorktrees, removeWorktree, resolveCheckout, restoreWorktree, WorktreeManager } from "./worktrees.ts";
 import { createGitHubRepositories } from "./github-repositories.ts";
 import { EnvironmentManager } from "./environments.ts";
 import { TerminalManager } from "./terminals.ts";
@@ -102,13 +103,32 @@ async function proxyRemoteRequest(request, response, target) {
 	});
 }
 
-export function createRuntimeServer({ host, worktreeManager, environments, terminals, githubRepositories = createGitHubRepositories(), origins = [
-	"http://127.0.0.1:1420",
-	"http://localhost:1420",
+export function createRuntimeServer({ host, worktreeManager, environments, terminals, githubRepositories = createGitHubRepositories(), sessionGit = createSessionGit(), origins = [
+	`http://127.0.0.1:${process.env.ADE_UI_PORT ?? 1420}`,
+	`http://localhost:${process.env.ADE_UI_PORT ?? 1420}`,
 	"http://tauri.localhost",
 	"https://tauri.localhost",
 ] }) {
 	let githubConnectionRevision = 0;
+	/** Close terminals in an archived session's workspace and optionally remove its ADE worktree (keeping the branch). */
+	async function cleanUpArchivedWorkspace(session: { id: string; workspace: string | null; repository: string | null; kind: string | null }, removeWorktreeRequested: boolean) {
+		let terminalsClosed = 0;
+		let worktreeRemoved = false;
+		let worktreeError: string | undefined;
+		if (session.workspace && terminals) terminalsClosed = terminals.closeUnder(session.workspace);
+		if (removeWorktreeRequested && session.kind === "worktree" && session.workspace && session.repository && worktreeManager?.root) {
+			try {
+				const summary = await getWorkspaceGitSummary(session.workspace);
+				if (summary.files.length) throw new Error(`${summary.files.length} uncommitted change(s) would be lost. Commit or discard them, then archive again to remove the worktree.`);
+				await removeWorktree({ repository: session.repository, path: session.workspace, allowedRoot: worktreeManager.root });
+				host.markWorktreeRemoved(session.id);
+				worktreeRemoved = true;
+			} catch (error) {
+				worktreeError = safeErrorMessage(error);
+			}
+		}
+		return { terminalsClosed, worktreeRemoved, ...(worktreeError ? { worktreeError } : {}) };
+	}
 	const server = createServer((request, response) => {
 		void (async () => {
 			const port = (server.address() as AddressInfo | null)?.port;
@@ -343,6 +363,65 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 				if (action === "takeover") {
 					return json(response, 200, { run: await host.factoryRunner.takeOverRun(runId, Boolean(input?.enable ?? true)) });
 				}
+			}
+			const archiveSession = /^\/api\/sessions\/([^/]+)\/archive$/.exec(path);
+			if (request.method === "POST" && archiveSession) {
+				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to archive sessions." });
+				const input = await readBody(request);
+				const archived = input?.archived !== false;
+				const sessionId = decodeURIComponent(archiveSession[1]);
+				const removed = archived ? null : host.removedWorktree(sessionId);
+				if (removed && worktreeManager?.root) {
+					await restoreWorktree({ ...removed, allowedRoot: worktreeManager.root });
+					host.markWorktreeRestored(sessionId);
+				}
+				const result = await host.setSessionArchived(sessionId, archived);
+				const cleanup = archived ? await cleanUpArchivedWorkspace(result, input?.removeWorktree === true) : { terminalsClosed: 0, worktreeRemoved: false };
+				return json(response, 200, { ...result, ...cleanup });
+			}
+			const archiveProject = /^\/api\/projects\/([0-9a-f-]{36})\/archive$/i.exec(path);
+			if (request.method === "POST" && archiveProject) {
+				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to archive projects." });
+				const input = await readBody(request);
+				const archived = input?.archived !== false;
+				const result = await host.setProjectArchived(archiveProject[1], archived);
+				const cleanups = [];
+				for (const session of result.sessions) cleanups.push(await cleanUpArchivedWorkspace(session, input?.removeWorktrees === true));
+				return json(response, 200, { project: result.project, sessions: result.sessions.map((session, index) => ({ ...session, ...cleanups[index] })) });
+			}
+			// --- Session branch, push and pull requests (GitHub CLI) ---
+			const sessionGitRoute = /^\/api\/sessions\/([^/]+)\/(branch|branch-diff|branch-diff\/file|push|pr|pr\/ready|pr\/merge)$/.exec(path);
+			if (sessionGitRoute) {
+				const sessionId = decodeURIComponent(sessionGitRoute[1]);
+				const action = sessionGitRoute[2];
+				const workspace = host.getWorkspacePath(sessionId);
+				if (!workspace) return json(response, 404, { error: "Session has no ready workspace." });
+				const base = host.getWorkspaceBase(sessionId);
+				if (request.method === "GET") {
+					if (action === "branch") return json(response, 200, await sessionGit.status(workspace, base));
+					if (action === "branch-diff") return json(response, 200, await sessionGit.branchDiffFiles(workspace, base));
+					if (action === "branch-diff/file") return json(response, 200, { diff: await sessionGit.branchDiffFile(workspace, base, url.searchParams.get("path") ?? "") });
+					if (action === "pr") return json(response, 200, { pullRequest: await sessionGit.pullRequest(workspace) });
+				}
+				if (request.method === "POST") {
+					if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to change the branch or pull request." });
+					const input = await readBody(request);
+					if (action === "push") return json(response, 200, { ...(await sessionGit.push(workspace)), status: await sessionGit.status(workspace, base) });
+					if (action === "pr") return json(response, 200, { pullRequest: await sessionGit.createPullRequest(workspace, input ?? {}) });
+					if (action === "pr/ready") return json(response, 200, { pullRequest: await sessionGit.markReady(workspace) });
+					if (action === "pr/merge") return json(response, 200, { pullRequest: await sessionGit.merge(workspace, input?.method) });
+				}
+				return json(response, 405, { error: "Method not allowed." });
+			}
+			const projectPulls = /^\/api\/projects\/([^/]+)\/pulls$/.exec(path);
+			if (request.method === "GET" && projectPulls) {
+				const project = host.projects().find((p: any) => p.id === decodeURIComponent(projectPulls[1]));
+				if (!project) return json(response, 404, { error: "Project not found." });
+				if (!project.githubUrl) return json(response, 200, { pullRequests: [], unlinked: true });
+				const slug = project.githubUrl.replace(/^https:\/\/github\.com\//i, "").replace(/\/$/, "").replace(/\.git$/, "");
+				const stateParam = url.searchParams.get("state");
+				const state = stateParam === "closed" || stateParam === "merged" || stateParam === "all" ? stateParam : "open";
+				return json(response, 200, { pullRequests: await sessionGit.listPullRequests(project.repository || process.cwd(), slug, state) });
 			}
 			if (request.method === "GET" && path === "/api/models/catalog") return json(response, 200, await host.modelCatalog());
 			if (request.method === "GET" && path === "/api/sessions") return json(response, 200, { sessions: host.sessions() });
@@ -838,7 +917,10 @@ export async function startRuntime({ stateDirectory = process.env.ADE_STATE_DIR 
 			url: `http://127.0.0.1:${address.port}`,
 			async close() {
 				terminals.closeAll();
-				await new Promise<void>((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
+				const closed = new Promise<void>((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
+				// Long-lived event streams (SSE) and keep-alive sockets would otherwise block shutdown forever.
+				server.closeAllConnections();
+				await closed;
 				try {
 					await recovery;
 					await host.close();

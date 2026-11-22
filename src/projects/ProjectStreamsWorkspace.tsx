@@ -8,6 +8,7 @@ import {
   Columns2,
   FolderGit2,
   GitBranch,
+  GitPullRequest,
   KanbanSquare,
   LayoutGrid,
   ListTodo,
@@ -33,6 +34,8 @@ import type { Project, ProjectActivity } from "../../ProjectsView"
 import { DiffPanel } from "../panels/DiffPanel"
 import { FactoryKanban } from "../factory/FactoryKanban"
 import { FactoryIssuesList } from "../factory/FactoryIssuesList"
+import { ProjectPullRequests } from "./ProjectPullRequests"
+import type { ProjectGitHubIssue } from "../factory/FactoryIssuesList"
 import type { FactoryRunDetail } from "../factory/types"
 
 const EMPTY_GIT: WorkspaceGitSummary = {
@@ -45,7 +48,7 @@ const EMPTY_GIT: WorkspaceGitSummary = {
   files: [],
 }
 
-type ProjectTab = "sessions" | "kanban" | "issues" | "subagents"
+type ProjectTab = "sessions" | "kanban" | "issues" | "pulls" | "subagents"
 type StreamLayout = "single" | "split" | "grid"
 
 function LiveSessionPane({
@@ -465,6 +468,8 @@ export function ProjectStreamsWorkspace({
   onUnarchiveSession,
   onDeleteSession,
   onOpenAgent,
+  onStartSessionFromIssue,
+  onOpenExternal,
 }: {
   project: Project
   sessions: Conversation[]
@@ -488,6 +493,8 @@ export function ProjectStreamsWorkspace({
   onUnarchiveSession: (sessionId: string) => void
   onDeleteSession: (session: Conversation) => void
   onOpenAgent: (sessionId: string, agent: FeatureAgent) => void
+  onStartSessionFromIssue?: (issue: ProjectGitHubIssue) => Promise<void>
+  onOpenExternal?: (url: string) => void
 }) {
   const [activeTab, setActiveTab] = useState<ProjectTab>("sessions")
   const [layout, setLayout] = useState<StreamLayout>("split")
@@ -620,6 +627,17 @@ export function ProjectStreamsWorkspace({
           >
             <ListTodo className="size-3.5" />
             <span>GitHub Issues</span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "pulls"}
+            className={`ade-project-tab ${activeTab === "pulls" ? "is-active" : ""}`}
+            onClick={() => setActiveTab("pulls")}
+          >
+            <GitPullRequest className="size-3.5" />
+            <span>Pull Requests</span>
           </button>
 
           <button
@@ -842,6 +860,19 @@ export function ProjectStreamsWorkspace({
               })
               setActiveTab("kanban")
             }}
+            onStartSessionFromIssue={onStartSessionFromIssue}
+            onOpenProjectSettings={onToggleSettings}
+          />
+        </div>
+      ) : null}
+
+      {activeTab === "pulls" ? (
+        <div className="flex-1 min-h-0 flex flex-col overflow-auto">
+          <ProjectPullRequests
+            project={project}
+            sessionBranches={Object.fromEntries([...sessions, ...archivedSessions].filter(s => s.workspace?.branch).map(s => [s.workspace!.branch!, s.id]))}
+            onOpenExternal={url => onOpenExternal ? onOpenExternal(url) : void window.open(url, "_blank", "noopener")}
+            onOpenSession={onMaximizeSession}
             onOpenProjectSettings={onToggleSettings}
           />
         </div>

@@ -26,7 +26,6 @@ import type {
   EnvironmentDirectory,
   GitHubIssue,
   ProviderCatalogEntry,
-  ProviderTool,
   RuntimeHealth,
   Screen,
   SessionArtifact,
@@ -50,6 +49,21 @@ import { AddProjectWizard } from "./src/projects/AddProjectWizard"
 import { ProjectStreamsWorkspace } from "./src/projects/ProjectStreamsWorkspace"
 import { FactoryView } from "./src/factory/FactoryView"
 import type { FactoryRunDetail } from "./src/factory/types"
+
+type LastView = { screen?: Screen; activeSessionId?: string; selectedProjectId?: string | null; expandedProjects?: string[] }
+
+/** The view to reopen after a reload, unless "Reopen last view" is turned off in Settings → General. */
+function readLastView(): LastView {
+  try {
+    const settings = JSON.parse(localStorage.getItem("ade-settings-v1") ?? "{}")
+    if (settings?.restoreLastView === false) return {}
+    const saved = JSON.parse(localStorage.getItem("ade.last-view") ?? "{}")
+    return saved && typeof saved === "object" ? saved : {}
+  } catch {
+    return {}
+  }
+}
+const lastView = readLastView()
 
 function readStoredIds(key: string): string[] {
   try {
@@ -80,18 +94,18 @@ function searchGitHubRepositories(login: string, query: string, page: number, si
 
 export default function App() {
   const { settings, error: settingsError, resolved, update } = useSettings()
-  const [screen, setScreen] = useState<Screen>("work")
+  const [screen, setScreen] = useState<Screen>(() => lastView.screen === "project" || lastView.screen === "factory" ? lastView.screen : "work")
   const [newSessionOpen, setNewSessionOpen] = useState(false)
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
     try {
       const param = new URLSearchParams(window.location.search).get("session")
-      return param || "coding"
+      return param || (typeof lastView.activeSessionId === "string" ? lastView.activeSessionId : "") || "coding"
     } catch {
       return "coding"
     }
   })
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
-  const [expandedProjects, setExpandedProjects] = useState<string[]>([])
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => typeof lastView.selectedProjectId === "string" ? lastView.selectedProjectId : null)
+  const [expandedProjects, setExpandedProjects] = useState<string[]>(() => Array.isArray(lastView.expandedProjects) ? lastView.expandedProjects.filter(id => typeof id === "string") : [])
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false)
   const [projectDrafts, setProjectDrafts] = useState<Record<string, ProjectInput>>({})
   const [projectActivity, setProjectActivity] = useState<ProjectActivity | null>(null)
@@ -100,18 +114,16 @@ export default function App() {
   const [openStreamIdsByProject, setOpenStreamIdsByProject] = useState<Record<string, string[]>>({})
   const [focusedStreamId, setFocusedStreamId] = useState<string | null>(null)
 
-  const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>("app-general")
+  const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>("general")
   const [settingsAutoOpenAddEnv, setSettingsAutoOpenAddEnv] = useState(false)
 
   const [pinnedIds, setPinnedIds] = useState<string[]>(() => readStoredIds("ade.pinned-ids"))
   const [unreadIds, setUnreadIds] = useState<string[]>(() => readStoredIds("ade.unread-ids"))
-  const [archivedIds, setArchivedIds] = useState<string[]>(() => readStoredIds("ade.archived-ids"))
-  const [archivedChatsExpanded, setArchivedChatsExpanded] = useState(false)
+  const [archivedExpanded, setArchivedExpanded] = useState(false)
   const [contextMenu, setContextMenu] = useState<ContextMenuTarget | null>(null)
 
   const [runtime, setRuntime] = useState<RuntimeHealth | null>(null)
   const [modelCatalog, setModelCatalog] = useState<ProviderCatalogEntry[]>([])
-  const [scannedProviders, setScannedProviders] = useState<ProviderTool[]>([])
   const [runtimeError, setRuntimeError] = useState("")
   const [environmentVersion, setEnvironmentVersion] = useState(0)
   const [activeEnvironmentId, setActiveEnvironmentId] = useState("local")
@@ -148,6 +160,20 @@ export default function App() {
 
   const connections = useConnections(screen, setRuntime, environmentVersion)
   const worktrees = useWorktrees()
+
+  // Remember where the user was so a reload or restart reopens the same project or session.
+  useEffect(() => {
+    try {
+      if (!settings.restoreLastView) {
+        localStorage.removeItem("ade.last-view")
+        return
+      }
+      const view: LastView = { screen, activeSessionId, selectedProjectId, expandedProjects }
+      localStorage.setItem("ade.last-view", JSON.stringify(view))
+    } catch {
+      // Storage can be unavailable (private mode); restoring the view is a convenience only.
+    }
+  }, [settings.restoreLastView, screen, activeSessionId, selectedProjectId, expandedProjects])
 
   const activeSession = sessions.find(s => s.id === activeSessionId) ?? sessions[0] ?? {
     id: "coding",
@@ -241,19 +267,11 @@ export default function App() {
   }, [])
 
   const loadModelCatalog = useCallback(async () => {
-    const [catalogRes, toolsRes] = await Promise.allSettled([
-      request<{ providers: ProviderCatalogEntry[] }>("/api/models/catalog"),
-      request<{ providers: ProviderTool[] }>("/api/provider-tools", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "list" }),
-      }),
-    ])
-    if (catalogRes.status === "fulfilled" && Array.isArray(catalogRes.value?.providers)) {
-      setModelCatalog(catalogRes.value.providers)
-    }
-    if (toolsRes.status === "fulfilled" && Array.isArray(toolsRes.value?.providers)) {
-      setScannedProviders(toolsRes.value.providers)
+    try {
+      const catalog = await request<{ providers: ProviderCatalogEntry[] }>("/api/models/catalog")
+      if (Array.isArray(catalog?.providers)) setModelCatalog(catalog.providers)
+    } catch {
+      // The runtime may still be starting; health polling surfaces connection errors.
     }
   }, [])
 
@@ -303,6 +321,32 @@ export default function App() {
     },
   })
 
+  // Desktop notifications (Settings → Notifications). Only shown when ADE isn't the focused window.
+  const previousStatuses = useRef<Map<string, string>>(new Map())
+  const notifiedApprovals = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    const canNotify = typeof Notification !== "undefined" && Notification.permission === "granted" && !document.hasFocus()
+    for (const sess of sessions) {
+      const before = previousStatuses.current.get(sess.id)
+      if (canNotify && settings.notifyOnFinish && before === "working" && sess.status === "idle") {
+        const last = [...sess.messages].reverse().find(m => m.role !== "user")
+        const notification = new Notification(`${sess.label} finished`, { body: last?.role === "error" ? `Error: ${last.content.slice(0, 140)}` : "The agent is waiting for your next message.", tag: `finish-${sess.id}` })
+        notification.onclick = () => { window.focus(); setActiveSessionId(sess.id); setNewSessionOpen(false); setScreen("work") }
+      }
+      previousStatuses.current.set(sess.id, sess.status)
+    }
+  }, [sessions, settings.notifyOnFinish])
+  useEffect(() => {
+    for (const approval of stream.approvals) {
+      if (notifiedApprovals.current.has(approval.id)) continue
+      notifiedApprovals.current.add(approval.id)
+      if (!settings.notifyOnApproval || typeof Notification === "undefined" || Notification.permission !== "granted" || document.hasFocus()) continue
+      const label = sessions.find(s => s.id === approval.sessionId)?.label
+      const notification = new Notification(label ? `${label} needs approval` : "An agent needs approval", { body: approval.command ?? approval.summary ?? "Open ADE to allow or deny the request.", tag: `approval-${approval.id}` })
+      notification.onclick = () => { window.focus(); setActiveSessionId(approval.sessionId); setNewSessionOpen(false); setScreen("work") }
+    }
+  }, [stream.approvals, settings.notifyOnApproval, sessions])
+
   // Load project activity when viewing a project
   useEffect(() => {
     if (screen !== "project" || !selectedProjectId) return
@@ -348,29 +392,8 @@ export default function App() {
   }, [])
 
   const matchingRuntime = runtime && (!settings.provider || runtime.provider === settings.provider) ? runtime : null
-  const effectiveProvider = settings.provider || runtime?.provider || "openai"
-  const activeToolsList = connections.providerTools ?? scannedProviders
   const effectiveCatalog: ProviderCatalogEntry[] = (() => {
     if (modelCatalog.length > 0) return modelCatalog
-    const enabledTools = activeToolsList.filter(p => p.enabled)
-    if (enabledTools.length > 0) {
-      return enabledTools.map(tool => {
-        const isRuntimeProvider = runtime?.provider === tool.id
-        const models = isRuntimeProvider && runtime?.models?.length
-          ? runtime.models
-          : (tool.models ?? [])
-        return {
-          id: tool.id,
-          name: tool.name,
-          kind: tool.kind,
-          configured: tool.available,
-          enabled: tool.enabled,
-          defaultModel: (isRuntimeProvider ? runtime?.defaultModel : undefined) || models[0]?.id || "default",
-          setupMessage: tool.available ? "" : tool.install ?? "",
-          models,
-        }
-      })
-    }
     if (!runtime) return []
     return (runtime.providers?.length ? runtime.providers : [{ id: runtime.provider, name: runtime.provider }]).map(p => ({
       id: p.id,
@@ -383,6 +406,10 @@ export default function App() {
       models: p.id === runtime.provider ? runtime.models : [],
     }))
   })()
+  // A saved provider that the harness can no longer run (e.g. an old CLI-tool choice) falls back to the runtime default.
+  const effectiveProvider = (settings.provider && (!effectiveCatalog.length || effectiveCatalog.some(p => p.id === settings.provider)))
+    ? settings.provider
+    : runtime?.provider || effectiveCatalog.find(p => p.configured)?.id || effectiveCatalog[0]?.id || "anthropic"
   const activeCatalogProvider = effectiveCatalog.find(p => p.id === effectiveProvider) ?? effectiveCatalog[0]
   const availableModels = activeCatalogProvider?.models?.length
     ? activeCatalogProvider.models
@@ -390,6 +417,8 @@ export default function App() {
   const selectedModel = availableModels.some(m => m.id === settings.model)
     ? settings.model
     : (settings.model || activeCatalogProvider?.defaultModel || matchingRuntime?.defaultModel || runtime?.defaultModel || "")
+  const modelReady = Boolean(activeCatalogProvider?.configured && selectedModel)
+  const modelSetupMessage = activeCatalogProvider?.setupMessage || "Set up a model provider in Settings → Models."
   const providerName = activeCatalogProvider?.name ?? runtime?.providers.find(p => p.id === effectiveProvider)?.name ?? effectiveProvider
 
   const handleAttachFiles = async (fileList: FileList | null) => {
@@ -499,13 +528,15 @@ export default function App() {
       environmentId: activeEnvironmentId,
       projectId: input.projectId,
       githubIssue: input.githubIssue,
-      initialMessage: {
-        id: crypto.randomUUID(),
-        content: input.prompt,
-        provider: effectiveProvider,
-        model: selectedModel,
-        reasoning: settings.reasoning,
-      },
+      ...(modelReady && input.prompt.trim() ? {
+        initialMessage: {
+          id: crypto.randomUUID(),
+          content: input.prompt,
+          provider: effectiveProvider,
+          model: selectedModel,
+          reasoning: settings.reasoning,
+        },
+      } : {}),
     }
     storePendingStart(start)
     try {
@@ -516,6 +547,11 @@ export default function App() {
       })
       clearPendingStart(taskId)
       await loadSessions()
+      if (!start.initialMessage && input.prompt.trim()) {
+        // No model is ready: keep the prompt in the composer so it can be sent once a provider is set up.
+        setDraft(input.prompt)
+        setRuntimeError(`${modelSetupMessage} Your message is waiting in the composer.`)
+      }
       setActiveSessionId(res.session.id)
       setNewSessionOpen(false)
       setScreen("work")
@@ -621,13 +657,54 @@ export default function App() {
     })
   }, [])
 
-  const toggleArchive = useCallback((id: string) => {
-    setArchivedIds(prev => {
-      const next = prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-      writeStoredIds("ade.archived-ids", next)
-      return next
-    })
-  }, [])
+  // Archive state lives on the host so it survives reloads and is shared by every client of that host.
+  const archivedIds = [
+    ...sessions.filter(s => s.archivedAt).map(s => s.id),
+    ...projects.filter(p => p.archivedAt).map(p => `project:${p.id}`),
+  ]
+  const toggleArchive = useCallback(async (id: string, archivedNow?: boolean) => {
+    const isProject = id.startsWith("project:")
+    const targetId = isProject ? id.slice("project:".length) : id
+    const currentlyArchived = archivedNow ?? (isProject
+      ? Boolean(projects.find(p => p.id === targetId)?.archivedAt)
+      : Boolean(sessions.find(s => s.id === targetId)?.archivedAt))
+    try {
+      const result = await request<{ worktreeError?: string; sessions?: { worktreeError?: string }[] }>(
+        isProject ? `/api/projects/${encodeURIComponent(targetId)}/archive` : `/api/sessions/${encodeURIComponent(targetId)}/archive`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(isProject
+            ? { archived: !currentlyArchived, removeWorktrees: settings.archiveRemovesWorktree }
+            : { archived: !currentlyArchived, removeWorktree: settings.archiveRemovesWorktree }),
+        },
+      )
+      const kept = [result.worktreeError, ...(result.sessions ?? []).map(s => s.worktreeError)].filter(Boolean)
+      if (kept.length) setRuntimeError(`Archived, but a worktree was kept: ${kept[0]}`)
+      if (!currentlyArchived && !isProject && activeSessionId === targetId) setActiveSessionId("coding")
+      if (!currentlyArchived && isProject && selectedProjectId === targetId) {
+        setSelectedProjectId(null)
+        setScreen("work")
+      }
+    } catch (err: any) {
+      setRuntimeError(err?.message || "Could not change the archive state.")
+    } finally {
+      await Promise.all([loadSessions(), loadProjects()])
+    }
+  }, [projects, sessions, settings.archiveRemovesWorktree, activeSessionId, selectedProjectId, loadSessions, loadProjects])
+
+  // One-time migration of the old browser-only archive list to the host.
+  useEffect(() => {
+    const legacy = readStoredIds("ade.archived-ids")
+    if (!legacy.length || (!sessions.length && !projects.length)) return
+    localStorage.removeItem("ade.archived-ids")
+    for (const id of legacy) {
+      const known = id.startsWith("project:")
+        ? projects.some(p => `project:${p.id}` === id && !p.archivedAt)
+        : sessions.some(s => s.id === id && !s.archivedAt && s.id !== "coding" && s.id !== "personal")
+      if (known) void toggleArchive(id, false)
+    }
+  }, [sessions, projects, toggleArchive])
 
   const openProject = useCallback((projectId: string, openSettings = false) => {
     setProjectsError("")
@@ -807,7 +884,8 @@ export default function App() {
   const codingTasks = sessions.filter(s => s.id !== "coding" && s.id !== "personal" && !s.chatThread)
   const personalChats = sortPinnedFirst(sessions.filter(s => s.mode === "personal" && !archivedIds.includes(s.id)))
   const generalChats = sortPinnedFirst(sessions.filter(s => (s.id === "coding" || (s.chatThread && s.mode === "coding")) && !archivedIds.includes(s.id)))
-  const archivedChats = sessions.filter(s => (s.chatThread || s.id === "coding" || s.id === "personal") && archivedIds.includes(s.id))
+  const archivedProjects = projects.filter(p => p.archivedAt)
+  const archivedSessions = sessions.filter(s => s.archivedAt)
   const ungroupedTasks = sortPinnedFirst(codingTasks.filter(s => !s.projectId && !archivedIds.includes(s.id)))
   const selectedProject = projects.find(p => p.id === selectedProjectId) ?? null
 
@@ -1176,37 +1254,52 @@ export default function App() {
                     )
                   })}
 
-                  {archivedChats.length > 0 ? (
-                    <div className="mt-1">
+                  {archivedProjects.length + archivedSessions.length > 0 ? (
+                    <div className="mt-1 ade-archived-section">
                       <button
                         type="button"
                         className="ade-nav-row opacity-60 hover:opacity-100 !text-[11.5px]"
-                        onClick={() => setArchivedChatsExpanded(v => !v)}
+                        aria-expanded={archivedExpanded}
+                        onClick={() => setArchivedExpanded(v => !v)}
                       >
                         <Archive className="size-3 shrink-0" />
-                        <span className="flex-1">Archived ({archivedChats.length})</span>
-                        {archivedChatsExpanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+                        <span className="flex-1">Archived ({archivedProjects.length + archivedSessions.length})</span>
+                        {archivedExpanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
                       </button>
-                      {archivedChatsExpanded ? archivedChats.map(sess => (
-                        <div
-                          key={sess.id}
-                          role="button"
-                          tabIndex={0}
-                          className="ade-nav-row ade-nav-row-child opacity-70"
-                          onClick={() => {
-                            setActiveSessionId(sess.id)
-                            setNewSessionOpen(false)
-                            setScreen("work")
-                          }}
-                          onContextMenu={e => {
-                            e.preventDefault()
-                            setContextMenu({ kind: "session", session: sess, x: e.clientX, y: e.clientY })
-                          }}
-                        >
-                          <MessageSquare className="size-3 shrink-0 opacity-60" />
-                          <span className="ade-truncate flex-1">{sess.label}</span>
-                        </div>
-                      )) : null}
+                      {archivedExpanded ? <>
+                        {archivedProjects.map(project => (
+                          <div key={project.id} className="ade-nav-row ade-nav-row-child ade-archived-row">
+                            <FolderGit2 className="size-3 shrink-0 opacity-60" />
+                            <span className="ade-truncate flex-1 opacity-70">{project.name}</span>
+                            <button type="button" className="ade-archived-restore" aria-label={`Restore project ${project.name}`} onClick={() => void toggleArchive(`project:${project.id}`, true)}>Restore</button>
+                          </div>
+                        ))}
+                        {archivedSessions.map(sess => {
+                          const projectName = projects.find(p => p.id === sess.projectId)?.name
+                          return (
+                            <div
+                              key={sess.id}
+                              role="button"
+                              tabIndex={0}
+                              className="ade-nav-row ade-nav-row-child ade-archived-row"
+                              title={sess.workspace?.removed ? "Worktree removed — restoring recreates it from its branch" : undefined}
+                              onClick={() => {
+                                setActiveSessionId(sess.id)
+                                setNewSessionOpen(false)
+                                setScreen("work")
+                              }}
+                              onContextMenu={e => {
+                                e.preventDefault()
+                                setContextMenu({ kind: "session", session: sess, x: e.clientX, y: e.clientY })
+                              }}
+                            >
+                              {sess.chatThread ? <MessageSquare className="size-3 shrink-0 opacity-60" /> : <GitBranch className="size-3 shrink-0 opacity-60" />}
+                              <span className="ade-truncate flex-1 opacity-70">{sess.label}{projectName ? <small className="opacity-60"> · {projectName}</small> : null}</span>
+                              <button type="button" className="ade-archived-restore" aria-label={`Restore ${sess.label}`} onClick={event => { event.stopPropagation(); void toggleArchive(sess.id, true) }}>Restore</button>
+                            </div>
+                          )
+                        })}
+                      </> : null}
                     </div>
                   ) : null}
                 </div>
@@ -1317,6 +1410,9 @@ export default function App() {
             matchingRuntime={matchingRuntime}
             providerName={providerName}
             selectedModel={selectedModel}
+            selectedProvider={effectiveProvider}
+            modelCatalog={effectiveCatalog}
+            onModelsChanged={() => { void loadModelCatalog(); void loadHealth() }}
             sending={sending}
             credentialChangesBlocked={sessions.some(s => s.status === "working")}
             connections={connections}
@@ -1412,13 +1508,15 @@ export default function App() {
                   kind: selectedProject.repository ? "worktree" : "none",
                   environmentId: activeEnvironmentId,
                   projectId: selectedProject.id,
-                  initialMessage: {
-                    id: crypto.randomUUID(),
-                    content: prompt,
-                    provider: effectiveProvider,
-                    model: selectedModel,
-                    reasoning: settings.reasoning,
-                  },
+                  ...(modelReady ? {
+                    initialMessage: {
+                      id: crypto.randomUUID(),
+                      content: prompt,
+                      provider: effectiveProvider,
+                      model: selectedModel,
+                      reasoning: settings.reasoning,
+                    },
+                  } : {}),
                 }
                 const res = await request<{ session: Conversation }>("/api/coding-tasks", {
                   method: "POST",
@@ -1426,6 +1524,7 @@ export default function App() {
                   body: JSON.stringify(start),
                 })
                 await loadSessions()
+                if (!start.initialMessage) setRuntimeError(`${modelSetupMessage} The session was created without sending your message.`)
                 if (res?.session?.id) {
                   openStreamPane(selectedProject.id, res.session.id)
                 }
@@ -1433,7 +1532,18 @@ export default function App() {
               onSendQuickMessage={handleSendQuickStreamMessage}
               onStartFactoryRun={opts => handleStartFactoryRunForProject(selectedProject, opts)}
               onFactoryRunAction={handleFactoryRunAction}
-              onUnarchiveSession={id => toggleArchive(id)}
+              onUnarchiveSession={id => void toggleArchive(id, true)}
+              onOpenExternal={url => void stream.openExternalBrowser(url)}
+              onStartSessionFromIssue={async issue => {
+                const kind = selectedProject.repository ? settings.defaultWorkspaceKind : "none"
+                await handleStartNewSession({
+                  projectId: selectedProject.id,
+                  kind,
+                  repository: kind === "none" ? "" : selectedProject.repository || "",
+                  prompt: `Work on GitHub issue #${issue.number}: ${issue.title}\n\n${(issue.body ?? "").slice(0, 6000)}`.trim(),
+                  githubIssue: { url: issue.url, repository: issue.repository, number: issue.number, title: issue.title.slice(0, 300), state: issue.state, body: (issue.body ?? "").slice(0, 5000), truncated: (issue.body ?? "").length > 5000 },
+                })
+              }}
               onDeleteSession={sess => void handleDeleteSession(sess)}
               onOpenAgent={(sessionId, agent) => {
                 setActiveSessionId(sessionId)
@@ -1452,7 +1562,7 @@ export default function App() {
               githubStatusError={connections.githubStatusError}
               onOpenSettings={(draftInput) => {
                 setProjectDrafts(prev => ({ ...prev, [selectedProject.id]: draftInput }))
-                openSettingsSection("app-integrations", false)
+                openSettingsSection("github", false)
               }}
               onSearchRepositories={searchGitHubRepositories}
               onClose={() => setProjectSettingsOpen(false)}
@@ -1495,7 +1605,7 @@ export default function App() {
             onSelectReasoning={level => update({ reasoning: level })}
             approvalPolicy={stream.approvalPolicy}
             onChangeApprovalPolicy={p => void stream.setApprovalPolicy(p)}
-            onOpenSettings={() => { previousScreen.current = screen; setScreen("settings") }}
+            onOpenSettings={() => openSettingsSection("models")}
             starting={creatingSession}
             error={launchError}
             onStart={handleStartNewSession}
@@ -1529,7 +1639,7 @@ export default function App() {
             onSelectModel={(provider, id) => update({ provider, model: id })}
             reasoning={settings.reasoning}
             onSelectReasoning={level => update({ reasoning: level })}
-            onOpenSettings={() => { previousScreen.current = screen; setScreen("settings") }}
+            onOpenSettings={() => openSettingsSection("models")}
             draft={draft}
             onDraftChange={setDraft}
             attachments={attachments}
@@ -1550,6 +1660,8 @@ export default function App() {
             onReviewArtifact={handleReviewArtifact}
             terminalFontSize={settings.terminalFontSize}
             terminalScrollback={settings.terminalScrollback}
+            terminalAutoStart={settings.terminalAutoStart}
+            prDraftDefault={settings.prDraft}
             environmentId={activeEnvironmentId}
             externalOpenRequest={externalOpenRequest}
             onClearExternalOpenRequest={() => setExternalOpenRequest(null)}
@@ -1608,8 +1720,8 @@ export default function App() {
           setActiveEnvironmentName(dir.environments.find(e => e.id === dir.activeId)?.name ?? env.name)
           setEnvironmentVersion(v => v + 1)
         }}
-        onManageEnvironments={() => openSettingsSection("host-connections", false)}
-        onAddHost={() => openSettingsSection("host-connections", true)}
+        onManageEnvironments={() => openSettingsSection("environments", false)}
+        onAddHost={() => openSettingsSection("environments", true)}
         onClose={() => setEnvPaletteOpen(false)}
       />
 
@@ -1637,7 +1749,7 @@ export default function App() {
           window.open(url, "_blank", "noopener")
         }}
         onOpenExternalApp={(app, path) => void handleOpenExternalApp(app, path)}
-        onContinueInCloud={() => openSettingsSection("host-connections", true)}
+        onContinueInCloud={() => openSettingsSection("environments", true)}
         onTogglePin={togglePin}
         onToggleUnread={toggleUnread}
         onRenameSession={sess => {

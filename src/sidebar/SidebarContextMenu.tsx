@@ -109,7 +109,7 @@ export function SidebarContextMenu({
       else if (key === "u") { e.preventDefault(); onToggleUnread(sess.id); onClose() }
       else if (key === "r") { e.preventDefault(); onRenameSession(sess); onClose() }
       else if (key === "f") { e.preventDefault(); onForkSession(sess); onClose() }
-      else if (key === "a") { e.preventDefault(); onToggleArchiveSession(sess.id); onClose() }
+      else if (key === "a" && sess.id !== "coding" && sess.id !== "personal") { e.preventDefault(); onToggleArchiveSession(sess.id); onClose() }
       else if (key === "d") { e.preventDefault(); onDeleteSession(sess); onClose() }
     }
     window.addEventListener("mousedown", onMouseDown)
@@ -210,7 +210,7 @@ export function SidebarContextMenu({
           role="menuitem"
           onClick={() => { onToggleArchiveProject(project); onClose() }}
         >
-          <span>{archived ? "Unarchive" : "Archive"}</span>
+          <span>{archived ? "Restore" : "Archive"}</span>
           <span className="ade-ctx-shortcut">A</span>
         </button>
 
@@ -450,16 +450,16 @@ export function SidebarContextMenu({
 
       <div className="ade-ctx-divider" />
 
-      <button
+      {sess.id !== "coding" && sess.id !== "personal" ? <button
         type="button"
         className="ade-ctx-item"
         role="menuitem"
         onMouseEnter={() => setSubmenu(null)}
         onClick={() => { onToggleArchiveSession(sess.id); onClose() }}
       >
-        <span>{archived ? "Unarchive" : "Archive"}</span>
+        <span>{archived ? "Restore" : "Archive"}</span>
         <span className="ade-ctx-shortcut">A</span>
-      </button>
+      </button> : null}
 
       <button
         type="button"

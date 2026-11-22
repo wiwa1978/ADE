@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, join, normalize, resolve } from "node:path";
+import { isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 
@@ -94,11 +94,37 @@ export async function resolveBaseCommit(repository, base) {
 	return commit;
 }
 
+/**
+ * Remove an ADE-created worktree directory while keeping its branch. Only paths inside `allowedRoot`
+ * (ADE's own worktree directory) are removed, so user checkouts are never touched.
+ */
+export async function removeWorktree({ repository, path, allowedRoot }: { repository: string; path: string; allowedRoot: string }) {
+	const root = resolve(allowedRoot);
+	const target = resolve(path);
+	if (!target.startsWith(`${root}${sep}`)) throw Object.assign(new Error("Only worktrees created by ADE can be removed."), { statusCode: 400 });
+	await execFileAsync("git", ["worktree", "remove", "--force", target], { cwd: repository, timeout: 30000, windowsHide: true, env: gitEnvironment() });
+	await execFileAsync("git", ["worktree", "prune"], { cwd: repository, timeout: 30000, windowsHide: true }).catch(() => undefined);
+}
+
+/** Recreate an ADE worktree from its kept branch (used when restoring an archived session). */
+export async function restoreWorktree({ repository, path, branch, allowedRoot }: { repository: string; path: string; branch: string; allowedRoot: string }) {
+	const root = resolve(allowedRoot);
+	const target = resolve(path);
+	if (!target.startsWith(`${root}${sep}`)) throw Object.assign(new Error("Only worktrees created by ADE can be restored."), { statusCode: 400 });
+	if (existsSync(target)) throw Object.assign(new Error("The worktree folder already exists."), { statusCode: 409 });
+	await execFileAsync("git", ["worktree", "add", target, branch], { cwd: repository, timeout: 60000, windowsHide: true, env: gitEnvironment() });
+}
+
 export class WorktreeManager {
 	#db;
 	#stateDirectory;
 	#active = new Map();
 	#busyRepositories = new Set();
+
+	/** Directory that holds worktrees created by ADE. */
+	get root(): string {
+		return join(this.#stateDirectory, "worktrees");
+	}
 
 	constructor(stateDirectory) {
 		this.#stateDirectory = stateDirectory;

@@ -1,88 +1,52 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useState, type FormEvent, type ReactNode } from "react"
 import {
-  ArrowLeft, Bell, Bot, ChevronRight, CircleHelp, Code2, FileText, FolderGit2, Gauge, Globe2, History,
-  Keyboard, MessageSquare, Mic, Palette, PanelLeft, Plug, Search, Server, Settings2,
-  Shield, Smartphone, Sparkles, Terminal, type LucideIcon,
+  ArrowLeft, Bell, Bot, ChevronRight, GitPullRequest, History, Palette, Server, Settings2,
+  Sparkles, Terminal, type LucideIcon,
 } from "lucide-react"
 import { EnvironmentSettings } from "./EnvironmentSettings"
 import { colorPalettes, paletteVariables, type Theme } from "./appearance-palettes"
-import type { ApprovalPolicy, ApprovalRule, BrowserState, EnvironmentDirectory, McpServerStatus, RuntimeHealth, SkillsAndRulesCatalog } from "./app-types"
+import type { ApprovalPolicy, ApprovalRule, BrowserState, EnvironmentDirectory, McpServerStatus, ProviderCatalogEntry, RuntimeHealth, SkillsAndRulesCatalog } from "./app-types"
 import type { Project } from "./ProjectsView"
 import type { Settings } from "./useSettings"
 import { modelCredentialProviders, type useConnections } from "./useConnections"
 import { Input } from "@/components/ui/input"
 import { McpAndSecuritySettings } from "./src/panels/McpSettingsSection"
+import { request } from "./api"
 
+/** Settings categories. Every category here changes something real; nothing is a placeholder. */
 export type SettingsCategory =
-  | "app-general" | "app-appearance" | "app-sidebar" | "app-chat" | "app-terminal" | "app-browser"
-  | "app-editor" | "app-files" | "app-shortcuts" | "app-integrations" | "app-notifications"
-  | "app-permissions" | "app-diagnostics" | "app-about"
-  | "host-overview" | "host-projects" | "host-connections" | "host-pair-device" | "host-agents"
-  | "host-metadata" | "host-voice" | "host-workspaces" | "host-providers" | "host-usage"
-  | "host-terminals" | "host-plugins"
+  | "general" | "appearance" | "models" | "agents" | "github" | "terminal" | "notifications" | "environments"
 
-type SettingsItem = { id: SettingsCategory; label: string; icon: LucideIcon }
+type SettingsItem = { id: SettingsCategory; label: string; icon: LucideIcon; description: string }
 
-const appItems: SettingsItem[] = [
-  { id: "app-general", label: "General", icon: Settings2 },
-  { id: "app-appearance", label: "Appearance", icon: Palette },
-  { id: "app-sidebar", label: "Sidebar", icon: PanelLeft },
-  { id: "app-chat", label: "Chat", icon: MessageSquare },
-  { id: "app-terminal", label: "Terminal", icon: Terminal },
-  { id: "app-browser", label: "Browser", icon: Globe2 },
-  { id: "app-editor", label: "Editor", icon: Code2 },
-  { id: "app-files", label: "Files", icon: FileText },
-  { id: "app-shortcuts", label: "Shortcuts", icon: Keyboard },
-  { id: "app-integrations", label: "Integrations", icon: Plug },
-  { id: "app-notifications", label: "Notifications", icon: Bell },
-  { id: "app-permissions", label: "Permissions", icon: Shield },
-  { id: "app-diagnostics", label: "Diagnostics", icon: History },
-  { id: "app-about", label: "About", icon: CircleHelp },
+const items: SettingsItem[] = [
+  { id: "general", label: "General", icon: Settings2, description: "Session defaults, archiving, and keyboard shortcuts." },
+  { id: "appearance", label: "Appearance", icon: Palette, description: "Theme, color palette, fonts, and layout." },
+  { id: "models", label: "Models", icon: Sparkles, description: "Model providers, API keys, and the default model for new messages." },
+  { id: "agents", label: "Agents & permissions", icon: Bot, description: "Command approvals, MCP servers, and skills available to agents." },
+  { id: "github", label: "Git & GitHub", icon: GitPullRequest, description: "GitHub account and pull request defaults." },
+  { id: "terminal", label: "Terminal", icon: Terminal, description: "The interactive terminal in coding sessions." },
+  { id: "notifications", label: "Notifications", icon: Bell, description: "Desktop notifications when agents need you." },
+  { id: "environments", label: "Environments", icon: Server, description: "This computer and SSH hosts, runtime diagnostics, and version information." },
 ]
 
-const hostItems: SettingsItem[] = [
-  { id: "host-overview", label: "Overview", icon: Server },
-  { id: "host-projects", label: "Projects", icon: FolderGit2 },
-  { id: "host-connections", label: "Connections", icon: Plug },
-  { id: "host-pair-device", label: "Pair device", icon: Smartphone },
-  { id: "host-agents", label: "Agents", icon: Bot },
-  { id: "host-metadata", label: "Metadata", icon: FileText },
-  { id: "host-voice", label: "Voice", icon: Mic },
-  { id: "host-workspaces", label: "Workspaces", icon: FolderGit2 },
-  { id: "host-providers", label: "Providers", icon: Sparkles },
-  { id: "host-usage", label: "Usage", icon: Gauge },
-  { id: "host-terminals", label: "Terminals", icon: Terminal },
-  { id: "host-plugins", label: "Plugins", icon: Plug },
+const reasoningLevels = [
+  { id: "none", label: "None" },
+  { id: "low", label: "Low" },
+  { id: "medium", label: "Medium" },
+  { id: "high", label: "High" },
+  { id: "xhigh", label: "Extra high" },
+  { id: "max", label: "Max" },
 ]
 
-const categoryDescriptions: Record<SettingsCategory, string> = {
-  "app-general": "ADE’s local app behavior and data boundaries.",
-  "app-appearance": "Choose the visual theme and color palette.",
-  "app-sidebar": "Navigation and sidebar preferences.",
-  "app-chat": "Default model, harness, and reasoning options.",
-  "app-terminal": "Terminal integration preferences.",
-  "app-browser": "Browser integration preferences.",
-  "app-editor": "Editor integration preferences.",
-  "app-files": "File attachments and workspace file access.",
-  "app-shortcuts": "Keyboard shortcuts available in ADE.",
-  "app-integrations": "Accounts connected to the active ADE host.",
-  "app-notifications": "Notification preferences.",
-  "app-permissions": "Workspace and host security boundaries.",
-  "app-diagnostics": "Runtime health and local worktree diagnostics.",
-  "app-about": "ADE version and project information.",
-  "host-overview": "Status and identity for the active environment.",
-  "host-projects": "Projects stored on the active environment.",
-  "host-connections": "Manage local and SSH-connected environments.",
-  "host-pair-device": "Connect another device to this environment.",
-  "host-agents": "Agent capabilities available on this host.",
-  "host-metadata": "Project and session metadata conventions.",
-  "host-voice": "Voice input and output for this host.",
-  "host-workspaces": "Workspace setup and Git worktree diagnostics.",
-  "host-providers": "Model providers and credentials for this host.",
-  "host-usage": "Usage information for this host.",
-  "host-terminals": "Terminal sessions on this host.",
-  "host-plugins": "Plugins installed for this host.",
-}
+const shortcuts: [string, string][] = [
+  ["Search projects and sessions", "⌘ K"],
+  ["Focus the message box", "⌥ L"],
+  ["Send message", "Enter"],
+  ["New line in a message", "Shift Enter"],
+  ["Commit in Changes", "Enter in the commit message"],
+  ["Session menu: pin, rename, fork, archive, delete", "P, R, F, A, D while the menu is open"],
+]
 
 type SettingsViewProps = {
   settings: Settings
@@ -93,6 +57,8 @@ type SettingsViewProps = {
   matchingRuntime: RuntimeHealth | null
   providerName: string | undefined
   selectedModel: string
+  selectedProvider: string
+  modelCatalog: ProviderCatalogEntry[]
   sending: boolean
   credentialChangesBlocked: boolean
   connections: ReturnType<typeof useConnections>
@@ -103,6 +69,7 @@ type SettingsViewProps = {
   onOpenProjects: () => void
   onWorktreeDiagnostics: () => void
   onEnvironmentChanged: (activeId: string, activeName: string, directory: EnvironmentDirectory) => void
+  onModelsChanged?: () => void
   mcpServers?: McpServerStatus[]
   approvalPolicy?: ApprovalPolicy
   approvalRules?: ApprovalRule[]
@@ -115,32 +82,109 @@ type SettingsViewProps = {
   autoOpenAddEnvironment?: boolean
 }
 
-function InformationCard({ title, children }: { title: string; children: ReactNode }) {
-  return <section className="settings-card"><h2>{title}</h2>{children}</section>
+function Card({ title, children, description }: { title: string; description?: string; children: ReactNode }) {
+  return <section className="settings-card">
+    <h2>{title}</h2>
+    {description ? <p className="hint">{description}</p> : null}
+    {children}
+  </section>
 }
 
-function NotAvailable({ feature }: { feature: string }) {
-  return <InformationCard title={`${feature} isn’t connected yet`}>
-    <p className="hint">This category is reserved for the ADE settings layout. The corresponding {feature.toLowerCase()} functionality is not implemented in this app yet.</p>
-  </InformationCard>
+function Toggle({ label, description, checked, onChange, disabled }: { label: string; description?: string; checked: boolean; onChange: (value: boolean) => void; disabled?: boolean }) {
+  return <label className="settings-toggle">
+    <span><strong>{label}</strong>{description ? <small>{description}</small> : null}</span>
+    <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled} className={`provider-toggle ${checked ? "on" : ""}`} onClick={() => onChange(!checked)}><span /></button>
+  </label>
 }
 
-export function SettingsView({ settings, resolved, error, runtimeError, runtime, matchingRuntime, providerName, selectedModel, sending, credentialChangesBlocked, connections, projects, activeEnvironmentName, update, onBack, onOpenProjects, onWorktreeDiagnostics, onEnvironmentChanged, mcpServers = [], approvalPolicy = "auto-safe", approvalRules = [], browserState, skillsCatalog, onRefreshMcp, onChangeApprovalPolicy, onDeleteApprovalRule, initialCategory, autoOpenAddEnvironment = false }: SettingsViewProps) {
-  const [selectedCategory, setSelectedCategory] = useState<SettingsCategory>(initialCategory ?? "app-general")
-  const [providerQuery, setProviderQuery] = useState("")
+function notificationPermission(): NotificationPermission | "unsupported" {
+  return typeof Notification === "undefined" ? "unsupported" : Notification.permission
+}
+
+export function SettingsView({
+  settings, resolved, error, runtimeError, runtime, providerName, selectedModel, selectedProvider, modelCatalog,
+  sending, credentialChangesBlocked, connections, activeEnvironmentName, update, onBack, onWorktreeDiagnostics,
+  onEnvironmentChanged, onModelsChanged, mcpServers = [], approvalPolicy = "auto-safe", approvalRules = [], browserState,
+  skillsCatalog, onRefreshMcp, onChangeApprovalPolicy, onDeleteApprovalRule, initialCategory, autoOpenAddEnvironment = false,
+}: SettingsViewProps) {
+  const [selectedCategory, setSelectedCategory] = useState<SettingsCategory>(initialCategory ?? "general")
+  const [permission, setPermission] = useState(notificationPermission)
+  const [compatible, setCompatible] = useState<{ url: string; model: string; fromEnvironment: boolean } | null>(null)
+  const [compatibleDraft, setCompatibleDraft] = useState({ url: "", model: "" })
+  const [compatibleBusy, setCompatibleBusy] = useState(false)
+  const [compatibleMessage, setCompatibleMessage] = useState("")
 
   useEffect(() => {
     if (initialCategory) setSelectedCategory(initialCategory)
   }, [initialCategory])
+
+  useEffect(() => {
+    if (selectedCategory !== "models") return
+    void request<{ compatible?: { url: string; model: string; fromEnvironment: boolean } }>("/api/model-credentials", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "status" }),
+    }).then(result => {
+      if (!result.compatible) return
+      setCompatible(result.compatible)
+      setCompatibleDraft({ url: result.compatible.url, model: result.compatible.model })
+    }).catch(() => undefined)
+  }, [selectedCategory])
+
   const {
     githubConnection, githubStatusError, githubCliError, githubActionError, githubConnectionBusy, changeGitHubConnection,
     copilotHealth, copilotStatusError, copilotActionError, copilotSignIn, copilotWaiting, authBusy, changeCopilotAuth,
     modelCredentials, modelCredentialStatusError, modelCredentialActionError, modelCredentialBusy, saveModelCredential, changeModelCredential,
-    providerTools, providerToolsError, providerToolsBusy, setProviderEnabled,
+    providerTools,
   } = connections
-  const items = [...appItems, ...hostItems]
-  const selected = items.find(item => item.id === selectedCategory) ?? appItems[0]
+  const selected = items.find(item => item.id === selectedCategory) ?? items[0]
   const disabled = sending || credentialChangesBlocked || authBusy || githubConnectionBusy || Boolean(modelCredentialBusy)
+
+  const saveCompatible = async (event: FormEvent) => {
+    event.preventDefault()
+    setCompatibleBusy(true)
+    setCompatibleMessage("")
+    try {
+      const result = await request<{ compatible: { url: string; model: string; fromEnvironment: boolean } }>("/api/model-credentials", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "configure-compatible", url: compatibleDraft.url, model: compatibleDraft.model }),
+      })
+      setCompatible(result.compatible)
+      setCompatibleMessage("Saved.")
+      onModelsChanged?.()
+    } catch (cause) {
+      setCompatibleMessage(cause instanceof Error ? cause.message : "Could not save the endpoint.")
+    } finally {
+      setCompatibleBusy(false)
+    }
+  }
+
+  const general = <>
+    <Card title="New sessions" description="Used when you start a session in a project that has a local checkout.">
+      <div className="settings-grid">
+        <label>Default workspace
+          <select value={settings.defaultWorkspaceKind} onChange={event => update({ defaultWorkspaceKind: event.target.value as Settings["defaultWorkspaceKind"] })}>
+            <option value="worktree">Worktree — own branch, isolated (recommended)</option>
+            <option value="checkout">Checkout — work directly in the project folder</option>
+            <option value="none">Chat only — no files</option>
+          </select>
+          <small>Worktree sessions get a readable branch such as <code>ade/fix-login-1a2b3c4d</code>.</small>
+        </label>
+      </div>
+    </Card>
+    <Card title="Archiving">
+      <Toggle
+        label="Remove the worktree when a session is archived"
+        description="Frees disk space. The branch and conversation are kept, and restoring recreates the worktree. Worktrees with uncommitted changes are never removed."
+        checked={settings.archiveRemovesWorktree}
+        onChange={value => update({ archiveRemovesWorktree: value })}
+      />
+    </Card>
+    <Card title="Startup">
+      <Toggle label="Reopen the last project or session" description="After a reload or restart, ADE returns to where you were." checked={settings.restoreLastView} onChange={value => update({ restoreLastView: value })} />
+    </Card>
+    <Card title="Keyboard shortcuts">
+      <div className="settings-facts">{shortcuts.map(([label, keys]) => <><span key={`${label}-l`}>{label}</span><strong key={`${label}-k`}><kbd>{keys}</kbd></strong></>)}</div>
+    </Card>
+  </>
 
   const appearance = <>
     <fieldset><legend>Display mode</legend><div className="segmented">
@@ -171,217 +215,191 @@ export function SettingsView({ settings, resolved, error, runtimeError, runtime,
     </fieldset>
   </>
 
-  const chatDefaults = <>
-    <p className={`runtime-notice ${runtime?.configured ? "ready" : ""}`} role="status">
-      {matchingRuntime?.online ? matchingRuntime.configured
-        ? `Active host is ready with ${providerName}.`
-        : matchingRuntime.message || "The runtime is online, but its model provider is not configured."
-        : runtimeError || "Waiting for the active ADE runtime."}
-    </p>
-    <div className="settings-grid">
-      <label>Harness<select value={settings.harness} onChange={event => update({ harness: event.target.value })}><option value="pi">Pi Durable · active</option><option value="copilot" disabled>GitHub Copilot SDK · not available yet</option></select><small>Pi Durable runs both conversations and coding sessions.</small></label>
-      <label>Model provider<select value={settings.provider || runtime?.provider || ""} disabled={!runtime?.providers?.length} onChange={event => update({ provider: event.target.value, model: "" })}>{!runtime?.providers?.length && <option value={settings.provider || runtime?.provider || ""}>Waiting for runtime</option>}{runtime?.providers?.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-      <label>Model<select value={selectedModel} disabled={!matchingRuntime?.configured} onChange={event => update({ model: event.target.value })}>{!selectedModel && <option value="">No model available</option>}{matchingRuntime?.models.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-      <label>Reasoning level<select value={settings.reasoning} onChange={event => update({ reasoning: event.target.value })}><option value="none">None</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select><small>Support varies by model.</small></label>
-    </div>
-  </>
+  const configuredProviders = modelCatalog.filter(provider => provider.configured)
+  const activeProvider = modelCatalog.find(provider => provider.id === selectedProvider)
+  const detectedAgents = (providerTools ?? []).filter(tool => tool.kind === "cli" && tool.installed)
 
-  const integrations = <div className="settings-card-list">
-    <section className="connection-item">
-      <h2>GitHub repositories</h2>
-      <p className="hint">Uses the active host’s GitHub CLI account and existing permissions. ADE saves the selected account name, not its credential.</p>
-      {githubStatusError ? <p className="error" role="alert">GitHub connection unavailable: {githubStatusError}</p>
-        : <p className="connection-status" role="status">{githubConnection ? githubConnection.login ? `Linked account: ${githubConnection.login}` : "Not connected to ADE" : "Checking connection…"}</p>}
-      {githubActionError && <p className="error" role="alert">{githubActionError}</p>}
-      {!githubConnection?.login && githubCliError && <p className="hint" role="status">{githubCliError}</p>}
-      {!githubConnection?.login && <p className="hint">If needed, install GitHub CLI and sign in first with <code>gh auth login --hostname github.com --web</code>.</p>}
-      <div className="form-actions">
-        <button type="button" className="quiet-button" disabled={githubConnectionBusy || !githubConnection || Boolean(githubStatusError)} onClick={() => void changeGitHubConnection("connect")}>{githubConnectionBusy ? "Working…" : githubConnection?.login ? "Check GitHub account" : "Connect GitHub CLI"}</button>
-        {githubConnection?.login && <button type="button" className="quiet-button" disabled={githubConnectionBusy} onClick={() => void changeGitHubConnection("disconnect")}>Disconnect from ADE</button>}
+  const models = <>
+    <Card title="Default model" description="Used for new messages. You can also change the model per message in the composer.">
+      <p className={`runtime-notice ${activeProvider?.configured ? "ready" : ""}`} role="status">
+        {!runtime?.online ? runtimeError || "Waiting for the active ADE runtime."
+          : activeProvider?.configured ? `Ready · ${providerName} · ${selectedModel}`
+            : configuredProviders.length ? `${activeProvider?.name ?? selectedProvider} isn’t set up. Pick a provider that is ready, or add its key below.`
+              : "No model provider is set up yet. Add an API key or sign in to GitHub Copilot below."}
+      </p>
+      <div className="settings-grid">
+        <label>Provider
+          <select value={selectedProvider} onChange={event => update({ provider: event.target.value, model: "" })}>
+            {modelCatalog.map(provider => <option key={provider.id} value={provider.id}>{provider.name}{provider.configured ? "" : " — not set up"}</option>)}
+          </select>
+        </label>
+        <label>Model
+          <select value={activeProvider?.configured ? selectedModel : ""} disabled={!activeProvider?.configured} onChange={event => update({ model: event.target.value })}>
+            {!activeProvider?.configured ? <option value="">Set up this provider first</option> : null}
+            {activeProvider?.models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
+          </select>
+        </label>
+        <label>Reasoning
+          <select value={settings.reasoning === "off" ? "none" : settings.reasoning} onChange={event => update({ reasoning: event.target.value })}>
+            {reasoningLevels.map(level => <option key={level.id} value={level.id}>{level.label}</option>)}
+          </select>
+          <small>Support varies by model.</small>
+        </label>
       </div>
-      {githubConnection?.login && <p className="hint">Disconnecting in ADE does not sign out of GitHub CLI.</p>}
-    </section>
-    <section className="connection-item">
-      <h2>GitHub Copilot</h2>
-      <p className="hint">Authorize the Pi model provider separately from GitHub CLI. Eligible models depend on your account and organization policy.</p>
-      {copilotStatusError ? <p className="error" role="alert">Copilot status unavailable: {copilotStatusError}</p>
-        : <p className="connection-status" role="status">{copilotHealth ? copilotHealth.copilotSignedIn ? "Signed in to ADE" : "Not signed in to ADE" : "Checking sign-in…"}</p>}
-      {copilotWaiting && <p className="hint" role="status">{copilotSignIn?.code && copilotSignIn.url
-        ? <>Open <a href={copilotSignIn.url} target="_blank" rel="noreferrer">GitHub device verification</a> and enter <strong>{copilotSignIn.code}</strong>.</>
-        : "Waiting for GitHub’s device code…"}</p>}
-      {copilotSignIn?.message && <p className="error" role="alert">{copilotSignIn.message}</p>}
-      {copilotActionError && <p className="error" role="alert">{copilotActionError}</p>}
-      <div className="form-actions">
-        <button type="button" className="quiet-button" disabled={authBusy || !copilotHealth || Boolean(copilotStatusError) || sending} onClick={() => void changeCopilotAuth(copilotWaiting ? "cancel" : "start")}>{copilotWaiting ? "Cancel sign-in" : copilotHealth?.copilotSignedIn ? "Reconnect GitHub Copilot" : "Sign in to GitHub Copilot"}</button>
-        {!copilotWaiting && copilotHealth?.copilotSignedIn && <button type="button" className="quiet-button" disabled={authBusy || sending} onClick={() => void changeCopilotAuth("sign-out")}>Sign out of ADE</button>}
-      </div>
-    </section>
-    <section className="connection-item">
-      <h2>Anthropic Claude</h2>
-      <p className="hint">Connect Claude models through Anthropic. The API key is stored on the active host and is never shown after it is saved.</p>
-      {modelCredentialStatusError ? <p className="error" role="alert">Anthropic credential status unavailable: {modelCredentialStatusError}</p>
-        : <p className="connection-status" role="status">{modelCredentials?.find(item => item.provider === "anthropic")?.source === "saved" ? "API key saved on this host"
-          : modelCredentials?.find(item => item.provider === "anthropic")?.source === "environment" ? "Using ANTHROPIC_API_KEY"
-          : modelCredentials ? "No API key saved" : "Checking credential…"}</p>}
-      {modelCredentialActionError && <p className="error" role="alert">{modelCredentialActionError}</p>}
-      <form className="provider-key-form" onSubmit={event => saveModelCredential(event, "anthropic")}>
-        <label htmlFor="api-key-anthropic-integration">Anthropic API key</label>
-        <div className="provider-key-actions">
-          <input id="api-key-anthropic-integration" name="apiKey" type="password" autoComplete="new-password" maxLength={4096} placeholder="sk-ant-..." required disabled={Boolean(modelCredentialBusy) || credentialChangesBlocked} />
-          <button className="quiet-button" disabled={Boolean(modelCredentialBusy) || credentialChangesBlocked}>{modelCredentialBusy?.provider === "anthropic" && modelCredentialBusy.action === "save" ? "Saving…" : "Save key"}</button>
-          {modelCredentials?.find(item => item.provider === "anthropic")?.source === "saved" && <button type="button" className="quiet-button" disabled={Boolean(modelCredentialBusy) || credentialChangesBlocked} onClick={() => void changeModelCredential("remove", "anthropic")}>{modelCredentialBusy?.provider === "anthropic" && modelCredentialBusy.action === "remove" ? "Removing…" : "Remove key"}</button>}
-        </div>
-      </form>
-    </section>
-  </div>
+      <p className="hint">Agents run on the Pi Durable harness, which keeps conversations durable across restarts.</p>
+    </Card>
 
-  const providers = <>
-    <p className="hint">ADE scans this host for installed CLI tools and connected model providers.</p>
-    {providerToolsError && <p className="error" role="alert">{providerToolsError}</p>}
-    <div className="provider-search"><Search size={14} /><input aria-label="Search providers" placeholder="Search providers" value={providerQuery} onChange={event => setProviderQuery(event.target.value)} /></div>
-    {!providerTools && <p className="hint" role="status">Scanning providers…</p>}
-    {providerTools && <div className="provider-catalog">{providerTools.filter(provider => provider.name.toLowerCase().includes(providerQuery.trim().toLowerCase())).map(provider => <div className="provider-row" key={provider.id}>
-      <details>
-        <summary><ChevronRight className="provider-chevron" size={14} /><Sparkles size={14} /><strong>{provider.name}</strong><span className={provider.available ? "provider-state available" : "provider-state disabled"}>{provider.available ? provider.modelCount ? `Available · ${provider.modelCount} models` : "Available" : "Disabled"}</span></summary>
-        <div className="provider-detail">
-          {provider.kind === "cli"
-            ? provider.installed
-              ? <p>CLI <code>{provider.command}</code> is installed on this host.</p>
-              : <p>{provider.install}. ADE will enable it after the CLI is available.</p>
-            : <p>{provider.available ? "Connected through credentials or environment configuration." : "Add credentials below to enable this provider."}</p>}
-        </div>
-      </details>
-      <button type="button" className={`provider-toggle ${provider.enabled ? "on" : ""}`} role="switch" aria-label={`${provider.enabled ? "Disable" : "Enable"} ${provider.name}`} aria-checked={provider.enabled} disabled={!provider.available || providerToolsBusy === provider.id} onClick={() => void setProviderEnabled(provider.id, !provider.enabled)}><span /></button>
-    </div>)}</div>}
-
-    <div className="provider-credentials-heading"><strong>API credentials</strong><span>Stored on this host</span></div>
-    {modelCredentialStatusError && <p className="error" role="alert">Model credential status unavailable: {modelCredentialStatusError}</p>}
-    {modelCredentialActionError && <p className="error" role="alert">{modelCredentialActionError}</p>}
-    <div className="provider-credentials">{modelCredentialProviders.map(provider => {
-      const source = modelCredentials?.find(item => item.provider === provider.id)?.source
-      const working = modelCredentialBusy?.provider === provider.id
-      const credentialDisabled = Boolean(modelCredentialBusy) || credentialChangesBlocked
-      return <div className="provider-credential" key={provider.id}>
-        <div className="provider-credential-heading"><strong>{provider.name}</strong><span role="status">{modelCredentialStatusError ? "Status unavailable" : !source ? "Checking…" : source === "saved" ? "Saved on this host" : source === "environment" ? "Using environment key" : "No key saved"}</span></div>
-        <form className="provider-key-form" onSubmit={event => saveModelCredential(event, provider.id)}>
-          <label htmlFor={`api-key-${provider.id}`}>API key</label>
-          <div className="provider-key-actions">
-            <input id={`api-key-${provider.id}`} name="apiKey" type="password" autoComplete="new-password" maxLength={4096} placeholder="Enter a new key" required disabled={credentialDisabled} />
-            <button className="quiet-button" disabled={credentialDisabled}>{working && modelCredentialBusy?.action === "save" ? "Saving…" : "Save key"}</button>
-            {(source === "saved" || Boolean(modelCredentialStatusError)) && <button type="button" className="quiet-button" disabled={credentialDisabled} onClick={() => void changeModelCredential("remove", provider.id)}>{working && modelCredentialBusy?.action === "remove" ? "Removing…" : "Remove saved key"}</button>}
-          </div>
-        </form>
-      </div>
-    })}</div>
-  </>
-
-  const content = (() => {
-    switch (selectedCategory) {
-      case "app-general":
-        return <InformationCard title="ADE workspace">
-          <p className="hint">ADE keeps each coding session, personal chat, and project conversation separate. Choose a host in the Host → Connections category to switch where new sessions and project data live.</p>
-          <div className="settings-facts"><span>Active environment</span><strong>{activeEnvironmentName}</strong><span>Runtime</span><strong>{runtime?.online ? "Online" : "Waiting for runtime"}</strong></div>
-        </InformationCard>
-      case "app-appearance": return appearance
-      case "app-chat": return chatDefaults
-      case "app-terminal":
-        return <><InformationCard title="Terminal preferences"><div className="settings-grid">
-          <label>Font size<select value={settings.terminalFontSize} onChange={event => update({ terminalFontSize: Number(event.target.value) })}>{[11, 12, 13, 14, 15, 16, 18, 20].map(size => <option key={size} value={size}>{size}px</option>)}</select></label>
-          <label>Scrollback<select value={settings.terminalScrollback} onChange={event => update({ terminalScrollback: Number(event.target.value) })}>{[1000, 5000, 10000, 20000].map(lines => <option key={lines} value={lines}>{lines.toLocaleString()} lines</option>)}</select></label>
-        </div></InformationCard><InformationCard title="Shell access"><p className="hint">A terminal starts only after you click Start terminal in a coding workspace. Commands run as the active host’s OS user. Terminal input is user-operated and is not exposed as an agent tool.</p></InformationCard></>
-      case "app-integrations": return integrations
-      case "app-files":
-        return <InformationCard title="Attachments and workspace files">
-          <p className="hint">Use the composer + or Inspector → Workspace → Add files to attach small UTF-8 text files to a message. Attachments are copied into the message; this does not connect a workspace or edit the original file.</p>
-        </InformationCard>
-      case "app-shortcuts":
-        return <InformationCard title="Keyboard shortcuts"><div className="settings-facts"><span>Search projects and sessions</span><strong><kbd>⌘ K</kbd> / <kbd>Ctrl K</kbd></strong><span>More shortcuts</span><strong>Not customizable yet</strong></div></InformationCard>
-      case "app-permissions":
-        return <>
-          <InformationCard title="Workspace & command boundaries"><p className="hint">Coding sessions can read/edit files, search code, and run shell commands in their bound checkout or worktree. Command approvals pause tool execution using durable Pi signals until you allow or deny them.</p></InformationCard>
-          {onChangeApprovalPolicy && onDeleteApprovalRule && onRefreshMcp ? (
-            <McpAndSecuritySettings
-              mcpServers={mcpServers}
-              approvalPolicy={approvalPolicy}
-              approvalRules={approvalRules}
-              onRefreshMcp={onRefreshMcp}
-              onChangeApprovalPolicy={onChangeApprovalPolicy}
-              onDeleteApprovalRule={onDeleteApprovalRule}
-            />
-          ) : null}
-        </>
-      case "app-browser":
-        return <InformationCard title="Built-in & External Browser">
-          <div className="settings-facts">
-            <span>Chrome CDP engine</span><strong>{browserState?.available ? "Detected" : "Not detected (iframe & external available)"}</strong>
-            <span>Binary path</span><strong>{browserState?.chromePath ?? "Set ADE_CHROME_PATH to override"}</strong>
-            <span>External launch</span><strong>System default browser</strong>
-          </div>
-          <p className="hint">Open the Browser pane inside any session to preview localhost servers or external sites interactively, let agents drive the page via CDP, or click External to open in your default browser.</p>
-        </InformationCard>
-      case "app-diagnostics":
-        return <><InformationCard title="Runtime status"><p className="connection-status" role="status">{runtime?.online ? runtime.configured ? `Online · ${providerName} · ${selectedModel || runtime.defaultModel}` : runtime.message || "Online · model setup required" : runtimeError || "Waiting for the active ADE runtime."}</p></InformationCard><InformationCard title="Workspace diagnostics"><p className="hint">Inspect registered Git worktrees when a workspace needs attention.</p><button className="quiet-button" onClick={onWorktreeDiagnostics}><History size={14} /> Open worktree diagnostics</button></InformationCard></>
-      case "app-about":
-        return <InformationCard title="ADE"><p className="hint">A Paseo-inspired Agentic Development Environment built on Tauri 2, React, and Pi Durable with split panes, multi-subagent orchestration, interactive approvals, built-in Chrome CDP browser, artifacts, skills, and MCP.</p></InformationCard>
-      case "host-overview":
-        return <><InformationCard title={activeEnvironmentName}><p className="connection-status" role="status"><span className={`status-dot ${runtime?.online ? "online" : "offline"}`} /> {runtime?.online ? runtime.configured ? `Online · ${providerName}` : "Online · model setup required" : runtimeError || "Waiting for host"}</p><p className="hint">Conversation and project data are stored on this environment. Switching environments changes the active host; it does not copy data between hosts.</p></InformationCard><InformationCard title="Runtime capabilities"><div className="settings-facts"><span>Harness</span><strong>{runtime?.harness ?? "Pi Durable"}</strong><span>Workspace tools</span><strong>Files, Search, Shell + Approvals</strong><span>Orchestration</span><strong>Multi-subagents (readonly, workspace, worktree)</strong><span>Browser &amp; MCP</span><strong>Chrome CDP + {mcpServers.filter(s => s.status === "connected").length} connected MCP</strong></div></InformationCard></>
-      case "host-projects":
-        return <InformationCard title="Projects on this host"><p className="hint">Project settings and default checkouts are managed from the Projects view.</p>{projects.length ? <ul className="settings-project-list">{projects.map(project => <li key={project.id}><FolderGit2 size={14} /> {project.name}</li>)}</ul> : <p className="hint">No projects on this environment yet.</p>}<button className="quiet-button" onClick={onOpenProjects}>Open projects</button></InformationCard>
-      case "host-connections": return <EnvironmentSettings onEnvironmentChanged={onEnvironmentChanged} disabled={disabled} autoOpenAdd={autoOpenAddEnvironment} />
-      case "host-agents":
-        return <InformationCard title="Pi Durable multi-agent orchestration">
-          <p className="hint">Session leads can spawn 1 or more parallel subagents (read-only, shared workspace, or isolated Git worktrees), steer or message them mid-run, write plans/artifacts, and load workspace/global skills.</p>
-          {skillsCatalog ? (
-            <div className="settings-facts">
-              <span>Discovered skills</span><strong>{skillsCatalog.skills.length}</strong>
-              <span>Rules files</span><strong>{skillsCatalog.rules.length}</strong>
-              <span>Slash commands</span><strong>{skillsCatalog.commands.length}</strong>
+    <Card title="API keys" description="Stored on the active host, encrypted with the operating system’s keychain. A key is never shown again after it is saved.">
+      {modelCredentialStatusError ? <p className="error" role="alert">Credential status unavailable: {modelCredentialStatusError}</p> : null}
+      {modelCredentialActionError ? <p className="error" role="alert">{modelCredentialActionError}</p> : null}
+      <div className="provider-credentials">{modelCredentialProviders.map(provider => {
+        const source = modelCredentials?.find(item => item.provider === provider.id)?.source
+        const working = modelCredentialBusy?.provider === provider.id
+        const credentialDisabled = Boolean(modelCredentialBusy) || credentialChangesBlocked
+        return <div className="provider-credential" key={provider.id}>
+          <div className="provider-credential-heading"><strong>{provider.name}</strong><span role="status">{modelCredentialStatusError ? "Status unavailable" : !source ? "Checking…" : source === "saved" ? "Key saved" : source === "environment" ? "Using environment variable" : "No key"}</span></div>
+          <form className="provider-key-form" onSubmit={async event => { await saveModelCredential(event, provider.id); onModelsChanged?.() }}>
+            <label htmlFor={`api-key-${provider.id}`}>API key</label>
+            <div className="provider-key-actions">
+              <input id={`api-key-${provider.id}`} name="apiKey" type="password" autoComplete="new-password" maxLength={4096} placeholder={source === "saved" ? "Enter a new key to replace it" : "Paste an API key"} required disabled={credentialDisabled} />
+              <button className="quiet-button" disabled={credentialDisabled}>{working && modelCredentialBusy?.action === "save" ? "Saving…" : "Save key"}</button>
+              {source === "saved" ? <button type="button" className="quiet-button" disabled={credentialDisabled} onClick={async () => { await changeModelCredential("remove", provider.id); onModelsChanged?.() }}>{working && modelCredentialBusy?.action === "remove" ? "Removing…" : "Remove"}</button> : null}
             </div>
+          </form>
+          {provider.id === "compatible" ? (
+            <form className="provider-key-form" onSubmit={event => void saveCompatible(event)}>
+              <label htmlFor="compatible-url">Endpoint URL and model</label>
+              <div className="provider-key-actions">
+                <input id="compatible-url" value={compatibleDraft.url} onChange={event => setCompatibleDraft(draft => ({ ...draft, url: event.target.value }))} placeholder="http://127.0.0.1:11434/v1" disabled={compatible?.fromEnvironment || compatibleBusy} />
+                <input aria-label="Compatible model" value={compatibleDraft.model} onChange={event => setCompatibleDraft(draft => ({ ...draft, model: event.target.value }))} placeholder="llama3.1" disabled={compatible?.fromEnvironment || compatibleBusy} />
+                <button className="quiet-button" disabled={compatible?.fromEnvironment || compatibleBusy}>{compatibleBusy ? "Saving…" : "Save"}</button>
+              </div>
+              {compatible?.fromEnvironment ? <small className="hint">Set by ADE_COMPATIBLE_URL / ADE_COMPATIBLE_MODEL in the launch environment.</small> : null}
+              {compatibleMessage ? <small className="hint" role="status">{compatibleMessage}</small> : null}
+              <small className="hint">Local endpoints (127.0.0.1, localhost) don’t need a key. Remote endpoints must use HTTPS and a key.</small>
+            </form>
           ) : null}
-        </InformationCard>
-      case "host-workspaces":
-        return <><InformationCard title="Coding workspaces"><p className="hint">Each coding session can use no workspace, a current checkout, or an isolated Git worktree. The selected host opens and edits its own filesystem paths.</p><button className="quiet-button" onClick={onWorktreeDiagnostics}><History size={14} /> Inspect Git worktrees</button></InformationCard></>
-      case "host-providers": return providers
-      case "app-sidebar": return <NotAvailable feature="Sidebar customization" />
-      case "app-editor": return <InformationCard title="Workspace editor"><p className="hint">Open any file from the Files pane or tool call cards to view or edit it inline with Cmd+S save.</p></InformationCard>
-      case "app-notifications": return <NotAvailable feature="Notifications" />
-      case "host-pair-device": return <NotAvailable feature="Device pairing" />
-      case "host-metadata": return <NotAvailable feature="Metadata rules" />
-      case "host-voice": return <NotAvailable feature="Voice" />
-      case "host-usage": return <NotAvailable feature="Usage reporting" />
-      case "host-terminals": return <InformationCard title="Interactive & Agent terminals"><p className="hint">Open a user terminal pane in any coding session, or inspect agent-run background commands via the Processes pane.</p></InformationCard>
-      case "host-plugins":
-        return onChangeApprovalPolicy && onDeleteApprovalRule && onRefreshMcp ? (
-          <McpAndSecuritySettings
-            mcpServers={mcpServers}
-            approvalPolicy={approvalPolicy}
-            approvalRules={approvalRules}
-            onRefreshMcp={onRefreshMcp}
-            onChangeApprovalPolicy={onChangeApprovalPolicy}
-            onDeleteApprovalRule={onDeleteApprovalRule}
-          />
-        ) : <NotAvailable feature="MCP & Plugins" />
-    }
-  })()
+        </div>
+      })}</div>
+    </Card>
+
+    <Card title="GitHub Copilot" description="Use your Copilot subscription’s models. This sign-in is separate from the GitHub CLI account used for repositories.">
+      {copilotStatusError ? <p className="error" role="alert">Copilot status unavailable: {copilotStatusError}</p>
+        : <p className="connection-status" role="status">{copilotHealth ? copilotHealth.copilotSignedIn ? "Signed in" : "Not signed in" : "Checking sign-in…"}</p>}
+      {copilotWaiting ? <p className="hint" role="status">{copilotSignIn?.code && copilotSignIn.url
+        ? <>Open <a href={copilotSignIn.url} target="_blank" rel="noreferrer">GitHub device verification</a> and enter <strong>{copilotSignIn.code}</strong>.</>
+        : "Waiting for GitHub’s device code…"}</p> : null}
+      {copilotSignIn?.message ? <p className="error" role="alert">{copilotSignIn.message}</p> : null}
+      {copilotActionError ? <p className="error" role="alert">{copilotActionError}</p> : null}
+      <div className="form-actions">
+        <button type="button" className="quiet-button" disabled={authBusy || !copilotHealth || Boolean(copilotStatusError) || sending} onClick={() => void changeCopilotAuth(copilotWaiting ? "cancel" : "start")}>{copilotWaiting ? "Cancel sign-in" : copilotHealth?.copilotSignedIn ? "Reconnect" : "Sign in to GitHub Copilot"}</button>
+        {!copilotWaiting && copilotHealth?.copilotSignedIn ? <button type="button" className="quiet-button" disabled={authBusy || sending} onClick={() => void changeCopilotAuth("sign-out")}>Sign out</button> : null}
+      </div>
+    </Card>
+
+    {detectedAgents.length ? (
+      <Card title="Coding agents found on this host" description="These CLI agents are installed here. ADE can’t run them as its agent harness yet, so they aren’t offered in the model picker.">
+        <ul className="settings-project-list">{detectedAgents.map(agent => <li key={agent.id}><Sparkles size={14} /> {agent.name} <code>{agent.command}</code></li>)}</ul>
+      </Card>
+    ) : null}
+  </>
+
+  const agents = <>
+    <Card title="What agents can do" description="Coding sessions with a workspace can read and edit files, search code, and run commands in their checkout or worktree. They can also start subagents, drive the built-in browser, and write plans and artifacts.">
+      <div className="settings-facts">
+        <span>Built-in browser</span><strong>{browserState?.available ? "Chrome found" : "Chrome not found — set ADE_CHROME_PATH"}</strong>
+        <span>Skills found</span><strong>{skillsCatalog?.skills.length ?? 0}</strong>
+        <span>Rules files</span><strong>{skillsCatalog?.rules.length ?? 0}</strong>
+        <span>Slash commands</span><strong>{skillsCatalog?.commands.length ?? 0}</strong>
+      </div>
+    </Card>
+    {onChangeApprovalPolicy && onDeleteApprovalRule && onRefreshMcp ? (
+      <McpAndSecuritySettings
+        mcpServers={mcpServers}
+        approvalPolicy={approvalPolicy}
+        approvalRules={approvalRules}
+        onRefreshMcp={onRefreshMcp}
+        onChangeApprovalPolicy={onChangeApprovalPolicy}
+        onDeleteApprovalRule={onDeleteApprovalRule}
+      />
+    ) : null}
+  </>
+
+  const github = <>
+    <Card title="GitHub account" description="ADE uses the GitHub CLI (gh) on the active host for issues, pushes, and pull requests, with that account’s existing permissions. ADE saves the account name, not a token.">
+      {githubStatusError ? <p className="error" role="alert">GitHub connection unavailable: {githubStatusError}</p>
+        : <p className="connection-status" role="status">{githubConnection ? githubConnection.login ? `Connected as ${githubConnection.login}` : "Not connected" : "Checking connection…"}</p>}
+      {githubActionError ? <p className="error" role="alert">{githubActionError}</p> : null}
+      {!githubConnection?.login && githubCliError ? <p className="hint" role="status">{githubCliError}</p> : null}
+      {!githubConnection?.login ? <p className="hint">If needed, install GitHub CLI and sign in first with <code>gh auth login --hostname github.com --web</code>.</p> : null}
+      <div className="form-actions">
+        <button type="button" className="quiet-button" disabled={githubConnectionBusy || !githubConnection || Boolean(githubStatusError)} onClick={() => void changeGitHubConnection("connect")}>{githubConnectionBusy ? "Working…" : githubConnection?.login ? "Check account" : "Connect GitHub CLI"}</button>
+        {githubConnection?.login ? <button type="button" className="quiet-button" disabled={githubConnectionBusy} onClick={() => void changeGitHubConnection("disconnect")}>Disconnect</button> : null}
+      </div>
+      {githubConnection?.login ? <p className="hint">Disconnecting here doesn’t sign out of GitHub CLI.</p> : null}
+    </Card>
+    <Card title="Pull requests">
+      <Toggle label="Open pull requests as drafts" description="You can still choose per pull request in the session’s Pull request panel." checked={settings.prDraft} onChange={value => update({ prDraft: value })} />
+    </Card>
+  </>
+
+  const terminal = <Card title="Terminal">
+    <Toggle label="Start a shell automatically" description="Opening the Terminal panel starts a shell in the session’s workspace right away." checked={settings.terminalAutoStart} onChange={value => update({ terminalAutoStart: value })} />
+    <div className="settings-grid">
+      <label>Font size<select value={settings.terminalFontSize} onChange={event => update({ terminalFontSize: Number(event.target.value) })}>{[11, 12, 13, 14, 15, 16, 18, 20].map(size => <option key={size} value={size}>{size}px</option>)}</select></label>
+      <label>Scrollback<select value={settings.terminalScrollback} onChange={event => update({ terminalScrollback: Number(event.target.value) })}>{[1000, 5000, 10000, 20000].map(lines => <option key={lines} value={lines}>{lines.toLocaleString()} lines</option>)}</select></label>
+    </div>
+    <p className="hint">Commands run as the active host’s OS user. The terminal is yours; agents run their own commands separately, subject to the approval policy.</p>
+  </Card>
+
+  const requestPermission = async () => {
+    if (typeof Notification === "undefined") return
+    setPermission(await Notification.requestPermission())
+  }
+  const notifications = <Card title="Desktop notifications" description="Get notified when you’re in another window or app.">
+    {permission === "unsupported" ? <p className="hint">This window can’t show desktop notifications.</p>
+      : permission === "denied" ? <p className="error">Notifications are blocked for ADE. Allow them in your system or browser settings.</p>
+        : permission === "default" ? <div className="form-actions"><button type="button" className="quiet-button" onClick={() => void requestPermission()}>Allow notifications</button></div> : null}
+    <Toggle label="When an agent finishes" description="A session goes from working to idle." checked={settings.notifyOnFinish} disabled={permission !== "granted"} onChange={value => update({ notifyOnFinish: value })} />
+    <Toggle label="When an agent needs approval" description="A command is waiting for you to allow or deny it." checked={settings.notifyOnApproval} disabled={permission !== "granted"} onChange={value => update({ notifyOnApproval: value })} />
+    {permission === "granted" ? <div className="form-actions"><button type="button" className="quiet-button" onClick={() => new Notification("ADE", { body: "Notifications are working." })}>Send a test notification</button></div> : null}
+  </Card>
+
+  const environments = <>
+    <EnvironmentSettings onEnvironmentChanged={onEnvironmentChanged} disabled={disabled} autoOpenAdd={autoOpenAddEnvironment} />
+    <Card title="Diagnostics">
+      <div className="settings-facts">
+        <span>Active environment</span><strong>{activeEnvironmentName}</strong>
+        <span>Runtime</span><strong>{runtime?.online ? "Online" : runtimeError || "Waiting for runtime"}</strong>
+        <span>Harness</span><strong>{runtime?.harness ?? "Pi Durable"}</strong>
+        <span>MCP servers connected</span><strong>{mcpServers.filter(server => server.status === "connected").length}</strong>
+      </div>
+      <div className="form-actions"><button type="button" className="quiet-button" onClick={onWorktreeDiagnostics}><History size={14} /> Inspect Git worktrees</button></div>
+    </Card>
+    <Card title="About ADE">
+      <p className="hint">ADE is an agentic development environment: projects, isolated agent sessions on their own branches, review, and pull requests in one app. Built with Tauri, React, and Pi Durable.</p>
+    </Card>
+  </>
+
+  const content = {
+    general, appearance, models, agents, github, terminal, notifications, environments,
+  }[selectedCategory]
 
   return <main className="settings-layout">
     <aside className="settings-nav" aria-label="Settings navigation">
       <button type="button" className="settings-back" onClick={onBack}><ArrowLeft size={14} /> Back</button>
-      <div className="settings-nav-group"><span className="settings-nav-label">App</span>{appItems.map(item => {
-        const Icon = item.icon
-        return <button type="button" key={item.id} className={`settings-nav-item${selectedCategory === item.id ? " active" : ""}`} aria-current={selectedCategory === item.id ? "page" : undefined} onClick={() => setSelectedCategory(item.id)}><Icon size={15} /><span>{item.label}</span></button>
-      })}</div>
-      <div className="settings-nav-group"><span className="settings-nav-label">Host</span><div className="settings-host-name"><span className={`status-dot ${runtime?.online ? "online" : "offline"}`} />{activeEnvironmentName}</div>{hostItems.map(item => {
-        const Icon = item.icon
-        return <button type="button" key={item.id} className={`settings-nav-item${selectedCategory === item.id ? " active" : ""}`} aria-current={selectedCategory === item.id ? "page" : undefined} onClick={() => setSelectedCategory(item.id)}><Icon size={15} /><span>{item.label}</span></button>
-      })}</div>
+      <div className="settings-nav-group">
+        <div className="settings-host-name"><span className={`status-dot ${runtime?.online ? "online" : "offline"}`} />{activeEnvironmentName}</div>
+        {items.map(item => {
+          const Icon = item.icon
+          return <button type="button" key={item.id} className={`settings-nav-item${selectedCategory === item.id ? " active" : ""}`} aria-current={selectedCategory === item.id ? "page" : undefined} onClick={() => setSelectedCategory(item.id)}><Icon size={15} /><span>{item.label}</span><ChevronRight size={13} className="settings-nav-chevron" /></button>
+        })}
+      </div>
     </aside>
     <section className="settings-main">
-      <header className="settings-heading"><h1>{selected.label}</h1><p>{categoryDescriptions[selectedCategory]}</p></header>
-      {(error || runtimeError) && <div className="settings-global-errors">{error && <p className="error" role="alert">{error}</p>}{runtimeError && selectedCategory !== "app-diagnostics" && <p className="error" role="alert">{runtimeError}</p>}</div>}
-      <div className="settings-content">
-        {content}
-      </div>
+      <header className="settings-heading"><h1>{selected.label}</h1><p>{selected.description}</p></header>
+      {(error || runtimeError) ? <div className="settings-global-errors">{error ? <p className="error" role="alert">{error}</p> : null}{runtimeError && selectedCategory !== "environments" ? <p className="error" role="alert">{runtimeError}</p> : null}</div> : null}
+      <div className="settings-content">{content}</div>
     </section>
   </main>
 }
