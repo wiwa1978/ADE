@@ -1,6 +1,7 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 
 export const copilotId = "github-copilot";
 export const apiKeyEnvironment = Object.freeze({
@@ -15,34 +16,275 @@ export function isValidApiKey(key) {
 		![...key].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
 }
 
-function protect(input: string, decrypt: boolean): Promise<string> {
+const KEYCHAIN_SERVICE = "com.ade.credentials";
+
+export interface SecretStore {
+	readonly backend: "windows-dpapi" | "macos-keychain" | "linux-libsecret" | "unsupported";
+	write(path: string, plaintext: string): Promise<void>;
+	read(path: string): Promise<string>;
+	delete(path: string): Promise<void>;
+}
+
+function accountKeyForPath(filePath: string): string {
+	return createHash("sha256").update(resolvePath(filePath)).digest("hex");
+}
+
+async function writeAtomicFile(filePath: string, contents: string): Promise<void> {
+	await writeFile(`${filePath}.tmp`, contents, { encoding: "utf8", mode: 0o600 });
+	await rename(`${filePath}.tmp`, filePath);
+}
+
+function runCommandWithStdin(
+	binary: string,
+	args: string[],
+	stdinData?: string,
+): Promise<string> {
+	return new Promise<string>((resolve, reject) => {
+		const child = execFile(
+			binary,
+			args,
+			{ windowsHide: true, timeout: 10000, maxBuffer: 256 * 1024 },
+			(error, stdout, stderr) => {
+				if (error) {
+					const detail = stderr?.trim() || error.message;
+					reject(Object.assign(new Error(detail), { code: (error as NodeJS.ErrnoException).code }));
+				} else {
+					resolve(stdout);
+				}
+			},
+		);
+		child.stdin?.on("error", reject);
+		if (stdinData !== undefined) {
+			child.stdin?.end(stdinData);
+		} else {
+			child.stdin?.end();
+		}
+	});
+}
+
+function protectDpapi(input: string, decrypt: boolean): Promise<string> {
 	const command = decrypt
 		? "$data = [Convert]::FromBase64String([Console]::In.ReadToEnd()); [Console]::Write([Text.Encoding]::UTF8.GetString([Security.Cryptography.ProtectedData]::Unprotect($data, $null, 'CurrentUser')))"
 		: "$data = [Text.Encoding]::UTF8.GetBytes([Console]::In.ReadToEnd()); [Console]::Write([Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Protect($data, $null, 'CurrentUser')))";
 	const loadAssembly = "[void][Reflection.Assembly]::Load('System.Security, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a')";
 	return new Promise<string>((resolve, reject) => {
-		const child = execFile(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+		const child = execFile(
+			join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
 			["-NoProfile", "-NonInteractive", "-Command", `$ErrorActionPreference = 'Stop'; ${loadAssembly}; ${command}`],
-			{ windowsHide: true, timeout: 10000, maxBuffer: 128 * 1024 }, (error, stdout) => {
-				if (error || !stdout) reject(new Error("Could not access a Windows-protected credential."));
+			{ windowsHide: true, timeout: 10000, maxBuffer: 128 * 1024 },
+			(error, stdout) => {
+				if (error || !stdout) reject(new Error("Could not access protected credential storage."));
 				else resolve(stdout);
-			});
+			},
+		);
 		child.stdin?.on("error", reject);
 		child.stdin?.end(input);
 	});
 }
 
-function createProtectedStore(path, description, valid) {
+function createWindowsDpapiSecretStore(): SecretStore {
+	return {
+		backend: "windows-dpapi",
+		async write(path, plaintext) {
+			const protectedData = await protectDpapi(plaintext, false);
+			await writeAtomicFile(path, protectedData);
+		},
+		async read(path) {
+			const raw = await readFile(path, "utf8");
+			return protectDpapi(raw, true);
+		},
+		async delete(path) {
+			await rm(path, { force: true });
+			await rm(`${path}.tmp`, { force: true });
+		},
+	};
+}
+
+function parsePointerAccount(raw: string, expectedBackend: string, fallbackPath: string): string {
+	try {
+		const parsed = JSON.parse(raw) as { backend?: string; account?: string };
+		if (parsed?.backend === expectedBackend && typeof parsed.account === "string" && /^[0-9a-f]{64}$/.test(parsed.account)) {
+			return parsed.account;
+		}
+	} catch {
+		// Fall through to validation error
+	}
+	throw new Error(`Invalid credential pointer for ${fallbackPath}.`);
+}
+
+function createMacOsKeychainSecretStore(): SecretStore {
+	const securityBin = "/usr/bin/security";
+	return {
+		backend: "macos-keychain",
+		async write(path, plaintext) {
+			const account = accountKeyForPath(path);
+			// Encode as base64 then hex so `/usr/bin/security -i` receives the secret on stdin (never argv)
+			// and `find-generic-password -w` always returns unambiguous single-line ASCII base64.
+			const b64 = Buffer.from(plaintext, "utf8").toString("base64");
+			const hexPayload = Buffer.from(b64, "ascii").toString("hex");
+			const stdinCmd = `add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${account} -X ${hexPayload}\n`;
+			try {
+				await runCommandWithStdin(securityBin, ["-i"], stdinCmd);
+			} catch {
+				throw new Error("Could not save credential to macOS Keychain.");
+			}
+			const marker = JSON.stringify({ backend: "macos-keychain", version: 1, account });
+			await writeAtomicFile(path, marker);
+		},
+		async read(path) {
+			const raw = await readFile(path, "utf8");
+			const account = parsePointerAccount(raw, "macos-keychain", path);
+			try {
+				const stdout = await runCommandWithStdin(securityBin, [
+					"find-generic-password",
+					"-w",
+					"-s",
+					KEYCHAIN_SERVICE,
+					"-a",
+					account,
+				]);
+				const trimmed = stdout.trim();
+				if (!trimmed) throw new Error("Empty credential.");
+				return Buffer.from(trimmed, "base64").toString("utf8");
+			} catch {
+				throw new Error("Could not read credential from macOS Keychain.");
+			}
+		},
+		async delete(path) {
+			const account = accountKeyForPath(path);
+			try {
+				await runCommandWithStdin(securityBin, [
+					"delete-generic-password",
+					"-s",
+					KEYCHAIN_SERVICE,
+					"-a",
+					account,
+				]);
+			} catch {
+				// Ignore if the keychain item does not exist
+			}
+			await rm(path, { force: true });
+			await rm(`${path}.tmp`, { force: true });
+		},
+	};
+}
+
+function createLinuxLibsecretSecretStore(): SecretStore {
+	return {
+		backend: "linux-libsecret",
+		async write(path, plaintext) {
+			const account = accountKeyForPath(path);
+			try {
+				await runCommandWithStdin(
+					"secret-tool",
+					["store", "--label=ADE Credential", "service", KEYCHAIN_SERVICE, "account", account],
+					plaintext,
+				);
+			} catch (err) {
+				const code = (err as NodeJS.ErrnoException)?.code;
+				if (code === "ENOENT") {
+					throw new Error("Linux credential storage requires secret-tool (libsecret), which is not installed.");
+				}
+				throw new Error("Could not save credential via libsecret (secret-tool).");
+			}
+			const marker = JSON.stringify({ backend: "linux-libsecret", version: 1, account });
+			await writeAtomicFile(path, marker);
+		},
+		async read(path) {
+			const raw = await readFile(path, "utf8");
+			const account = parsePointerAccount(raw, "linux-libsecret", path);
+			try {
+				const stdout = await runCommandWithStdin("secret-tool", [
+					"lookup",
+					"service",
+					KEYCHAIN_SERVICE,
+					"account",
+					account,
+				]);
+				if (!stdout) throw new Error("Empty credential.");
+				return stdout;
+			} catch (err) {
+				const code = (err as NodeJS.ErrnoException)?.code;
+				if (code === "ENOENT") {
+					throw new Error("Linux credential storage requires secret-tool (libsecret), which is not installed.");
+				}
+				throw new Error("Could not read credential via libsecret (secret-tool).");
+			}
+		},
+		async delete(path) {
+			const account = accountKeyForPath(path);
+			try {
+				await runCommandWithStdin("secret-tool", [
+					"clear",
+					"service",
+					KEYCHAIN_SERVICE,
+					"account",
+					account,
+				]);
+			} catch {
+				// Ignore missing entry or unavailable keyring on delete
+			}
+			await rm(path, { force: true });
+			await rm(`${path}.tmp`, { force: true });
+		},
+	};
+}
+
+function createUnsupportedSecretStore(platform: string): SecretStore {
+	const fail = () => Promise.reject(new Error(`Protected credential storage is not supported on platform "${platform}".`));
+	return {
+		backend: "unsupported",
+		write: fail,
+		read: fail,
+		async delete(path) {
+			await rm(path, { force: true });
+			await rm(`${path}.tmp`, { force: true });
+		},
+	};
+}
+
+export function createSecretStore(platform: NodeJS.Platform = process.platform): SecretStore {
+	if (platform === "win32") return createWindowsDpapiSecretStore();
+	if (platform === "darwin") return createMacOsKeychainSecretStore();
+	if (platform === "linux") return createLinuxLibsecretSecretStore();
+	return createUnsupportedSecretStore(platform);
+}
+
+export function isSecretStoreAvailable(platform: NodeJS.Platform = process.platform): boolean {
+	if (platform === "win32") return true;
+	if (platform === "darwin") {
+		try {
+			execFileSync("/usr/bin/security", ["default-keychain"], { stdio: "ignore", timeout: 3000 });
+			return true;
+		} catch {
+			return false;
+		}
+	}
+	if (platform === "linux") {
+		if (!process.env.DBUS_SESSION_BUS_ADDRESS) return false;
+		try {
+			execFileSync("secret-tool", ["--version"], { stdio: "ignore", timeout: 3000 });
+			return true;
+		} catch {
+			return false;
+		}
+	}
+	return false;
+}
+
+function createProtectedStore(path, description, valid, secretStore: SecretStore = createSecretStore()) {
 	let cached;
 	let loaded = false;
 	let chain: Promise<any> = Promise.resolve(undefined);
 	async function load() {
 		if (!loaded) {
 			try {
-				cached = JSON.parse(await protect(await readFile(path, "utf8"), true));
+				cached = JSON.parse(await secretStore.read(path));
 				if (!valid(cached)) throw new Error("Invalid credential.");
 			} catch (error) {
-				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error(`Could not read the Windows-protected ${description} credential.`);
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+					throw new Error(`Could not read the protected ${description} credential.`);
+				}
 				cached = undefined;
 			}
 			loaded = true;
@@ -63,8 +305,7 @@ function createProtectedStore(path, description, valid) {
 				if (!valid(next)) throw new Error(`Invalid ${description} credential.`);
 				if (next !== cached) {
 					const text = String(JSON.stringify(next)).replace(/[^\u0020-\u007e]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
-					await writeFile(`${path}.tmp`, await protect(text, false), { encoding: "utf8", mode: 0o600 });
-					await rename(`${path}.tmp`, path);
+					await secretStore.write(path, text);
 					cached = next;
 				}
 				return cached;
@@ -72,8 +313,7 @@ function createProtectedStore(path, description, valid) {
 		},
 		delete() {
 			return serialize(async () => {
-				await rm(path, { force: true });
-				await rm(`${path}.tmp`, { force: true });
+				await secretStore.delete(path);
 				cached = undefined;
 				loaded = true;
 			});

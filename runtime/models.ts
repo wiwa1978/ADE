@@ -260,7 +260,7 @@ export function createRuntimeModels(environment, stateDirectory) {
 						setupMessage = availableModels.length ? "" : "No Copilot chat models match this account and Pi version. Try signing in again.";
 					}
 				} catch {
-					setupMessage = "Could not read the Windows-protected Copilot credential. Sign out in ADE and reconnect.";
+					setupMessage = "Could not read the protected Copilot credential. Sign out in ADE and reconnect.";
 				}
 				config = { provider: id, configured: signedIn && availableModels.length > 0, signedIn, availableModels, setupMessage };
 			}
