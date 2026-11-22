@@ -5,6 +5,7 @@
     { "path": "./packages/blueprints/tsconfig.json" },
     { "path": "./packages/captain-core/tsconfig.json" },
     { "path": "./tsconfig.app.json" },
-    { "path": "./tsconfig.node.json" }
+    { "path": "./tsconfig.node.json" },
+    { "path": "./tsconfig.test.json" }
   ]
 }

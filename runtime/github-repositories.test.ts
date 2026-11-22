@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
+import type { Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -8,11 +10,11 @@ import { LocalAgentHost } from "./host.ts";
 import { createRuntimeServer } from "./server.ts";
 
 test("GitHub repository search checks the account and finds matching public and private repositories across pages", async () => {
-	const requests = [];
+	const requests: string[][] = [];
 	const service = createGitHubRepositories(async (args) => {
 		requests.push(args);
 		if (args.includes("user")) return "fixture-user\n";
-		const endpoint = args.at(-1);
+		const endpoint = args.at(-1) ?? "";
 		if (endpoint.endsWith("page=1")) {
 			return JSON.stringify(Array.from({ length: 100 }, (_, i) => ({ full_name: `team/other-${i}`, private: false })));
 		}
@@ -23,7 +25,7 @@ test("GitHub repository search checks the account and finds matching public and 
 		repositories: [{ fullName: "team/Example", private: true }, { fullName: "fixture-user/example-public", private: false }],
 		nextPage: null,
 	});
-	assert.ok(requests.some(args => args.at(-1).endsWith("page=2")));
+	assert.ok(requests.some(args => (args.at(-1) ?? "").endsWith("page=2")));
 });
 
 test("repository search rejects account changes and invalid GitHub responses", async () => {
@@ -40,27 +42,27 @@ test("repository search rejects account changes and invalid GitHub responses", a
 
 test("GitHub connection persists, protects its identity, and can be disconnected without signing out of CLI", async () => {
 	const directory = mkdtempSync(join(tmpdir(), "ade-github-connection-"));
-	let host;
-	let server;
+	let host: LocalAgentHost | null = null;
+	let server: Server | null = null;
 	let account = "fixture-user";
 	let searches = 0;
 	const githubRepositories = {
 		connect: async () => ({ login: account }),
 		search: async () => { searches++; return { repositories: [{ fullName: "fixture-user/repo", private: true }], nextPage: null }; },
-	};
+	} as unknown as ReturnType<typeof createGitHubRepositories>;
 	const start = async () => {
-		host = new LocalAgentHost({ stateDirectory: directory, modelConfigFactory: () => ({}) });
-		server = createRuntimeServer({ host, worktreeManager: {}, githubRepositories });
-		await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+		host = new LocalAgentHost({ stateDirectory: directory, modelConfigFactory: () => ({}) as never });
+		server = createRuntimeServer({ host, worktreeManager: {} as never, githubRepositories });
+		await new Promise<void>(resolve => server!.listen(0, "127.0.0.1", resolve));
 	};
 	const stop = async () => {
-		await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+		await new Promise<void>((resolve, reject) => server!.close(error => error ? reject(error) : resolve()));
 		server = null;
-		await host.close();
+		await host!.close();
 		host = null;
 	};
-	const post = (path, body = {}, origin = "http://127.0.0.1:1420") => fetch(
-		`http://127.0.0.1:${server.address().port}${path}`,
+	const post = (path: string, body: Record<string, unknown> = {}, origin: string | null = "http://127.0.0.1:1420") => fetch(
+		`http://127.0.0.1:${(server!.address() as AddressInfo).port}${path}`,
 		{ method: "POST", headers: { ...(origin ? { origin } : {}), "content-type": "application/json" }, body: JSON.stringify(body) },
 	);
 	try {
@@ -78,7 +80,7 @@ test("GitHub connection persists, protects its identity, and can be disconnected
 		assert.deepEqual(await (await post("/api/github/connection")).json(), { login: "fixture-user" });
 		const result = await post("/api/github/repositories", { login: "fixture-user" });
 		assert.equal(result.status, 200);
-		assert.equal((await result.json()).repositories[0].fullName, "fixture-user/repo");
+		assert.equal(((await result.json()) as { repositories: { fullName: string }[] }).repositories[0].fullName, "fixture-user/repo");
 		account = "another-user";
 		assert.equal((await post("/api/github/connect")).status, 409);
 		assert.deepEqual(await (await post("/api/github/connection")).json(), { login: "fixture-user" });
@@ -86,29 +88,31 @@ test("GitHub connection persists, protects its identity, and can be disconnected
 		assert.equal((await post("/api/github/repositories", { login: "fixture-user" })).status, 409);
 		assert.deepEqual(await (await post("/api/github/connect")).json(), { login: "another-user" });
 	} finally {
-		if (server) await new Promise(resolve => server.close(resolve));
-		if (host) await host.close();
+		const activeServer = server as Server | null;
+		const activeHost = host as LocalAgentHost | null;
+		if (activeServer) await new Promise<void>(resolve => activeServer.close(() => resolve()));
+		if (activeHost) await activeHost.close();
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
 
 test("disconnecting while a repository search is running does not return stale results", async () => {
 	const directory = mkdtempSync(join(tmpdir(), "ade-github-search-"));
-	const host = new LocalAgentHost({ stateDirectory: directory, modelConfigFactory: () => ({}) });
+	const host = new LocalAgentHost({ stateDirectory: directory, modelConfigFactory: () => ({}) as never });
 	host.connectGitHub("fixture-user");
-	let finishSearch;
-	let searchStarted;
-	const started = new Promise(resolve => { searchStarted = resolve; });
+	let finishSearch: ((value: unknown) => void) | undefined;
+	let searchStarted: (() => void) | undefined;
+	const started = new Promise<void>(resolve => { searchStarted = resolve; });
 	const server = createRuntimeServer({
 		host,
-		worktreeManager: {},
+		worktreeManager: {} as never,
 		githubRepositories: {
-			search: () => new Promise(resolve => { finishSearch = resolve; searchStarted(); }),
-		},
+			search: () => new Promise(resolve => { finishSearch = resolve; searchStarted?.(); }),
+		} as unknown as ReturnType<typeof createGitHubRepositories>,
 	});
 
-	await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-	const post = (path, body) => fetch(`http://127.0.0.1:${server.address().port}${path}`, {
+	await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+	const post = (path: string, body: Record<string, unknown>) => fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}${path}`, {
 		method: "POST", headers: { origin: "http://127.0.0.1:1420", "content-type": "application/json" }, body: JSON.stringify(body),
 	});
 
@@ -116,10 +120,10 @@ test("disconnecting while a repository search is running does not return stale r
 		const search = post("/api/github/repositories", { login: "fixture-user" });
 		await started;
 		assert.equal((await post("/api/github/disconnect", {})).status, 200);
-		finishSearch({ repositories: [{ fullName: "fixture-user/repo", private: true }], nextPage: null });
+		finishSearch?.({ repositories: [{ fullName: "fixture-user/repo", private: true }], nextPage: null });
 		assert.equal((await search).status, 409);
 	} finally {
-		await new Promise(resolve => server.close(resolve));
+		await new Promise<void>(resolve => server.close(() => resolve()));
 		await host.close();
 		rmSync(directory, { recursive: true, force: true });
 	}
@@ -127,8 +131,8 @@ test("disconnecting while a repository search is running does not return stale r
 
 test("CLI sign-in is detected automatically and an explicit disconnect remains disconnected after restart", async () => {
 		const directory = mkdtempSync(join(tmpdir(), "ade-github-auto-"));
-		let host;
-		let server;
+		let host: LocalAgentHost | null = null;
+		let server: Server | null = null;
 		let signedIn = false;
 		let calls = 0;
 		const githubRepositories = {
@@ -137,19 +141,19 @@ test("CLI sign-in is detected automatically and an explicit disconnect remains d
 				if (!signedIn) throw Object.assign(new Error("Sign in to GitHub CLI."), { statusCode: 502 });
 				return { login: "fixture-user" };
 			},
-		};
+		} as unknown as ReturnType<typeof createGitHubRepositories>;
 		const start = async () => {
-			host = new LocalAgentHost({ stateDirectory: directory, modelConfigFactory: () => ({}) });
-			server = createRuntimeServer({ host, worktreeManager: {}, githubRepositories });
-			await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+			host = new LocalAgentHost({ stateDirectory: directory, modelConfigFactory: () => ({}) as never });
+			server = createRuntimeServer({ host, worktreeManager: {} as never, githubRepositories });
+			await new Promise<void>(resolve => server!.listen(0, "127.0.0.1", resolve));
 		};
 		const stop = async () => {
-			await new Promise(resolve => server.close(resolve));
+			await new Promise<void>(resolve => server!.close(() => resolve()));
 			server = null;
-			await host.close();
+			await host!.close();
 			host = null;
 		};
-		const post = path => fetch(`http://127.0.0.1:${server.address().port}${path}`, {
+		const post = (path: string) => fetch(`http://127.0.0.1:${(server!.address() as AddressInfo).port}${path}`, {
 			method: "POST", headers: { origin: "http://127.0.0.1:1420", "content-type": "application/json" }, body: "{}",
 		});
 		try {
@@ -167,8 +171,10 @@ test("CLI sign-in is detected automatically and an explicit disconnect remains d
 			assert.equal(calls, 2);
 			assert.deepEqual(await (await post("/api/github/connect")).json(), { login: "fixture-user" });
 		} finally {
-			if (server) await new Promise(resolve => server.close(resolve));
-			if (host) await host.close();
+			const activeServer = server as Server | null;
+			const activeHost = host as LocalAgentHost | null;
+			if (activeServer) await new Promise<void>(resolve => activeServer.close(() => resolve()));
+			if (activeHost) await activeHost.close();
 			rmSync(directory, { recursive: true, force: true });
 		}
 });

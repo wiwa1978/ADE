@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
-import { createServer as createHttpServer } from "node:http";
+import { createServer as createHttpServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { EnvironmentManager } from "./environments.ts";
 import { createRuntimeServer } from "./server.ts";
 
-const directories = [];
-const servers = [];
+const directories: string[] = [];
+const servers: Server[] = [];
 
 function temporaryDirectory() {
 	const directory = mkdtempSync(join(tmpdir(), "ade-environments-"));
@@ -17,29 +18,37 @@ function temporaryDirectory() {
 	return directory;
 }
 
-async function listen(server) {
-	await new Promise((resolve, reject) => {
+async function listen(server: Server): Promise<number> {
+	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
 		server.listen(0, "127.0.0.1", resolve);
 	});
 	servers.push(server);
-	return server.address().port;
+	return (server.address() as AddressInfo).port;
 }
 
 afterEach(async () => {
-	for (const server of servers.splice(0)) await new Promise(resolve => server.close(resolve));
+	for (const server of servers.splice(0)) await new Promise<void>(resolve => server.close(() => resolve()));
 	for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
+type FakeChild = EventEmitter & {
+	stderr: EventEmitter;
+	exitCode: number | null;
+	killed: boolean;
+	kill: () => boolean;
+};
+
 function fakeSsh({ online = true } = {}) {
-	const calls = [];
-	const healthRequests = [];
-	const spawn = (command, args, options) => {
-		const child = new EventEmitter();
-		child.stderr = new EventEmitter();
-		child.exitCode = null;
-		child.killed = false;
-		child.kill = () => { child.killed = true; child.exitCode = 0; child.emit("exit", 0); return true; };
+	const calls: { command: string; args: string[]; options: Record<string, unknown>; child: FakeChild }[] = [];
+	const healthRequests: { host: string | undefined; url: string | undefined }[] = [];
+	const spawn = (command: string, args: string[], options: Record<string, unknown>) => {
+		const child = Object.assign(new EventEmitter(), {
+			stderr: new EventEmitter(),
+			exitCode: null as number | null,
+			killed: false,
+			kill() { child.killed = true; child.exitCode = 0; child.emit("exit", 0); return true; },
+		}) as FakeChild;
 		const forward = args[args.indexOf("-L") + 1];
 		const localPort = Number(forward.split(":")[1]);
 		const server = createHttpServer((request, response) => {
@@ -52,7 +61,7 @@ function fakeSsh({ online = true } = {}) {
 		calls.push({ command, args, options, child });
 		return child;
 	};
-	return { calls, spawn, healthRequests };
+	return { calls, spawn: spawn as unknown as typeof import("node:child_process").spawn, healthRequests };
 }
 
 test("SSH environments persist only connection metadata and connect through strict key-based OpenSSH", async () => {
@@ -66,7 +75,7 @@ test("SSH environments persist only connection metadata and connect through stri
 
 	const connected = await manager.connect(environment.id);
 	assert.equal(connected.activeId, environment.id);
-	assert.equal(connected.environments.find(item => item.id === environment.id).status, "connected");
+	assert.equal(connected.environments.find(item => item.id === environment.id)?.status, "connected");
 	assert.equal(ssh.calls.length, 1);
 	assert.equal(ssh.calls[0].command, "ssh");
 	assert.equal(ssh.calls[0].options.shell, undefined);
@@ -85,7 +94,7 @@ test("SSH environments persist only connection metadata and connect through stri
 	manager.close();
 
 	const reopened = new EnvironmentManager(directory);
-	assert.equal(reopened.list().environments.find(item => item.id === environment.id).status, "disconnected");
+	assert.equal(reopened.list().environments.find(item => item.id === environment.id)?.status, "disconnected");
 	assert.equal(reopened.list().activeId, "local");
 	reopened.close();
 });
@@ -106,14 +115,14 @@ test("a failed SSH connection keeps the local environment active and cleans up t
 	const environment = manager.add({ name: "Offline", sshHost: "offline" });
 	await assert.rejects(manager.connect(environment.id), /Could not reach the ADE runtime through SSH/);
 	assert.equal(manager.list().activeId, "local");
-	assert.equal(manager.list().environments.find(item => item.id === environment.id).status, "error");
+	assert.equal(manager.list().environments.find(item => item.id === environment.id)?.status, "error");
 	assert.equal(ssh.calls[0].child.killed, true);
 	manager.close();
 });
 
 test("environment management routes are local-origin protected", async () => {
 	const manager = new EnvironmentManager(temporaryDirectory());
-	const server = createRuntimeServer({ host: {}, worktreeManager: {}, environments: manager });
+	const server = createRuntimeServer({ host: {} as never, worktreeManager: {} as never, environments: manager });
 	const port = await listen(server);
 	const endpoint = `http://127.0.0.1:${port}/api/environments`;
 	const rejected = await fetch(endpoint, {
@@ -126,16 +135,16 @@ test("environment management routes are local-origin protected", async () => {
 		body: JSON.stringify({ name: "Build server", sshHost: "builder" }),
 	});
 	assert.equal(accepted.status, 200);
-	assert.equal((await accepted.json()).environment.kind, "ssh");
+	assert.equal((await accepted.json() as { environment: { kind: string } }).environment.kind, "ssh");
 	manager.close();
 });
 
 test("the local runtime proxies app API requests over the selected SSH tunnel", async () => {
-	const seen = [];
+	const seen: { host: string | undefined; origin: string | undefined; url: string | undefined }[] = [];
 	const remote = createHttpServer((request, response) => {
 		seen.push({ host: request.headers.host, origin: request.headers.origin, url: request.url });
 		response.writeHead(200, { "content-type": "application/json" });
-		response.end(JSON.stringify({ online: true, provider: new URL(request.url, "http://remote").searchParams.get("provider") }));
+		response.end(JSON.stringify({ online: true, provider: new URL(request.url ?? "/", "http://remote").searchParams.get("provider") }));
 	});
 	const remotePort = await listen(remote);
 	const environments = {
@@ -143,9 +152,9 @@ test("the local runtime proxies app API requests over the selected SSH tunnel", 
 		proxyTarget: () => ({ localPort: remotePort, remotePort: 4319 }),
 	};
 	const server = createRuntimeServer({
-		host: { health: async () => ({ online: false }) },
-		worktreeManager: {},
-		environments,
+		host: { health: async () => ({ online: false }) } as never,
+		worktreeManager: {} as never,
+		environments: environments as unknown as EnvironmentManager,
 	});
 	const localPort = await listen(server);
 	const response = await fetch(`http://127.0.0.1:${localPort}/api/health?provider=openai`, {

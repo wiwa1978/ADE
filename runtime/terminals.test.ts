@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import type { Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
+import type { IPty } from "node-pty";
 import { createRuntimeServer } from "./server.ts";
 import { TerminalManager } from "./terminals.ts";
 
-const directories = [];
-const servers = [];
+const directories: string[] = [];
+const servers: Server[] = [];
 
 function temporaryDirectory() {
 	const directory = mkdtempSync(join(tmpdir(), "ade-terminal-"));
@@ -15,31 +18,33 @@ function temporaryDirectory() {
 	return directory;
 }
 
-async function listen(server) {
-	await new Promise((resolve, reject) => {
+async function listen(server: Server): Promise<number> {
+	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
 		server.listen(0, "127.0.0.1", resolve);
 	});
 	servers.push(server);
-	return server.address().port;
+	return (server.address() as AddressInfo).port;
 }
 
 afterEach(async () => {
-	for (const server of servers.splice(0)) await new Promise(resolve => server.close(resolve));
+	for (const server of servers.splice(0)) await new Promise<void>(resolve => server.close(() => resolve()));
 	for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
 function fakePty() {
-	const dataListeners = [];
-	const exitListeners = [];
+	const dataListeners: ((data: string) => void)[] = [];
+	const exitListeners: ((event: { exitCode: number }) => void)[] = [];
 	const pty = {
-		writes: [], resizes: [], killed: false,
-		onData(listener) { dataListeners.push(listener); return { dispose() {} }; },
-		onExit(listener) { exitListeners.push(listener); return { dispose() {} }; },
-		write(data) { this.writes.push(data); },
-		resize(cols, rows) { this.resizes.push({ cols, rows }); },
+		writes: [] as string[],
+		resizes: [] as { cols: number; rows: number }[],
+		killed: false,
+		onData(listener: (data: string) => void) { dataListeners.push(listener); return { dispose() {} }; },
+		onExit(listener: (event: { exitCode: number }) => void) { exitListeners.push(listener); return { dispose() {} }; },
+		write(data: string) { this.writes.push(data); },
+		resize(cols: number, rows: number) { this.resizes.push({ cols, rows }); },
 		kill() { this.killed = true; for (const listener of exitListeners) listener({ exitCode: 0 }); },
-		emitData(data) { for (const listener of dataListeners) listener(data); },
+		emitData(data: string) { for (const listener of dataListeners) listener(data); },
 	};
 	return pty;
 }
@@ -47,11 +52,11 @@ function fakePty() {
 test("terminal sessions spawn a user-operated shell in the selected workspace and stream bounded output", () => {
 	const cwd = temporaryDirectory();
 	const pty = fakePty();
-	const spawned = [];
+	const spawned: { shell: string; args: string[] | string; options: { cwd?: string } }[] = [];
 	const manager = new TerminalManager({
 		environment: { SHELL: "/bin/zsh", HOME: "/tmp" },
 		maxOutputCharacters: 8,
-		spawn: (shell, args, options) => { spawned.push({ shell, args, options }); return pty; },
+		spawn: ((shell: string, args: string[], options: { cwd?: string }) => { spawned.push({ shell, args, options }); return pty as unknown as IPty; }) as never,
 	});
 	const created = manager.create({ cwd, cols: 90, rows: 30 });
 	assert.equal(spawned[0].shell, "/bin/zsh");
@@ -80,7 +85,7 @@ test("terminal sessions spawn a user-operated shell in the selected workspace an
 test("the system PTY executes input from the terminal session", async () => {
 	const cwd = temporaryDirectory();
 	const manager = new TerminalManager();
-	let id;
+	let id: string | undefined;
 	try {
 		const terminal = manager.create({ cwd });
 		id = terminal.id;
@@ -102,7 +107,7 @@ test("the system PTY executes input from the terminal session", async () => {
 });
 
 test("terminal sessions reject invalid workspaces, dimensions, and oversized input", () => {
-	const manager = new TerminalManager({ spawn: () => fakePty() });
+	const manager = new TerminalManager({ spawn: (() => fakePty() as unknown as IPty) as never });
 	assert.throws(() => manager.create({ cwd: "relative/path" }), /absolute workspace/);
 	assert.throws(() => manager.create({ cwd: join(temporaryDirectory(), "missing") }), /directory is unavailable/);
 	const cwd = temporaryDirectory();
@@ -113,15 +118,15 @@ test("terminal sessions reject invalid workspaces, dimensions, and oversized inp
 });
 
 test("terminal API routes require an approved ADE origin", async () => {
-	const calls = [];
+	const calls: { cwd: string }[] = [];
 	const terminals = {
-		create: input => { calls.push(input); return { id: "00000000-0000-4000-8000-000000000001", cwd: input.cwd }; },
-		read: (id, cursor) => ({ id, cursor: Number(cursor), data: "", exited: false }),
-		write: (id, data) => ({ id, data }),
-		resize: (id, input) => ({ id, ...input }),
-		close: id => ({ id, closed: true }),
+		create: (input: { cwd: string }) => { calls.push(input); return { id: "00000000-0000-4000-8000-000000000001", cwd: input.cwd }; },
+		read: (id: string, cursor: unknown) => ({ id, cursor: Number(cursor), data: "", exited: false }),
+		write: (id: string, data: string) => ({ id, data }),
+		resize: (id: string, input: Record<string, unknown>) => ({ id, ...input }),
+		close: (id: string) => ({ id, closed: true }),
 	};
-	const server = createRuntimeServer({ host: {}, worktreeManager: {}, terminals });
+	const server = createRuntimeServer({ host: {} as never, worktreeManager: {} as never, terminals: terminals as unknown as TerminalManager });
 	const port = await listen(server);
 	const url = `http://127.0.0.1:${port}/api/terminals`;
 	const body = JSON.stringify({ cwd: temporaryDirectory() });
@@ -131,5 +136,5 @@ test("terminal API routes require an approved ADE origin", async () => {
 		method: "POST", headers: { "content-type": "application/json", origin: "http://127.0.0.1:1420" }, body,
 	});
 	assert.equal(accepted.status, 200);
-	assert.equal((await accepted.json()).cwd, calls[0].cwd);
+	assert.equal((await accepted.json() as { cwd: string }).cwd, calls[0].cwd);
 });

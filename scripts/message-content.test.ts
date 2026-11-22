@@ -2,19 +2,20 @@ import { after, before, test } from "node:test"
 import assert from "node:assert/strict"
 import React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { createServer } from "vite"
+import { createServer, type ViteDevServer } from "vite"
 
-let server
-let MessageContent
+let server: ViteDevServer | undefined
+let MessageContent: React.ComponentType<{ content: string }>
 
 before(async () => {
   server = await createServer({ server: { middlewareMode: true }, appType: "custom" })
-  ;({ MessageContent } = await server.ssrLoadModule("/MessageContent.tsx"))
+  const mod = await server.ssrLoadModule("/MessageContent.tsx") as { MessageContent: React.ComponentType<{ content: string }> }
+  MessageContent = mod.MessageContent
 })
 
 after(async () => { await server?.close() })
 
-function render(content) {
+function render(content: string) {
   return renderToStaticMarkup(React.createElement(MessageContent, { content }))
 }
 

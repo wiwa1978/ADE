@@ -12,7 +12,7 @@ test("inspect linked worktrees without changing either checkout", async () => {
 	const root = mkdtempSync(join(tmpdir(), "ade-worktrees-"));
 	const repo = join(root, "repo");
 	const linked = join(root, "linked");
-	const git = (...args) => execFileSync("git", args, { stdio: "pipe" });
+	const git = (...args: string[]) => execFileSync("git", args, { stdio: "pipe" });
 	try {
 		git("init", repo);
 		git("-C", repo, "config", "user.name", "ADE test");
@@ -25,7 +25,7 @@ test("inspect linked worktrees without changing either checkout", async () => {
 		const before = git("-C", repo, "status", "--porcelain").toString();
 		const result = await inspectWorktrees(repo);
 		assert.equal(result.length, 2);
-		const listedPath = result.find(item => item.branch === "fixture").path;
+		const listedPath = result.find(item => item.branch === "fixture")!.path;
 		assert.ok(existsSync(listedPath));
 		assert.equal(statSync(listedPath).ino, statSync(linked).ino);
 		assert.equal(git("-C", repo, "status", "--porcelain").toString(), before);
@@ -40,8 +40,8 @@ test("creation is idempotent, disables hooks and filters, and preserves changes"
 	const root = mkdtempSync(join(tmpdir(), "ade-worktree-create-"));
 	const repo = join(root, "repo");
 	const state = join(root, "state");
-	const git = (...args) => execFileSync("git", args, { stdio: "pipe" }).toString().trim();
-	let manager;
+	const git = (...args: string[]) => execFileSync("git", args, { stdio: "pipe" }).toString().trim();
+	let manager: WorktreeManager | undefined;
 	try {
 		mkdirSync(state);
 		git("init", repo);

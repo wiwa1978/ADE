@@ -5,40 +5,43 @@ import { join } from "node:path"
 import { after, afterEach, before, beforeEach, test } from "node:test"
 import React, { act } from "react"
 import { Window } from "happy-dom"
-import { createServer } from "vite"
+import { createServer, type ViteDevServer } from "vite"
+import type { Root } from "react-dom/client"
 
-let browser
-let server
-let createRoot
-let App
-let container
-let root
-let cacheDirectory
-let requests
-let intervals
-let activeEnvironmentId
-let environments
-let projectRecords
-let sessionRecords
-let subagentRecords
-let approvalRecords
-let artifactRecords
-let mcpRecords
+let browser: Window
+let server: ViteDevServer
+let createRoot: typeof import("react-dom/client").createRoot
+let App: React.ComponentType
+let container: HTMLDivElement
+let root: Root
+let cacheDirectory: string
+let requests: Array<{ url: string; body: Record<string, unknown> | null; method: string }>
+let intervals: Map<symbol, { callback: () => void; delay: number }>
+let activeEnvironmentId: string
+let environments: Array<Record<string, unknown>>
+let projectRecords: Array<Record<string, unknown>>
+let sessionRecords: Array<Record<string, unknown>>
+let subagentRecords: Array<Record<string, unknown>>
+let approvalRecords: Array<Record<string, unknown>>
+let artifactRecords: Array<Record<string, unknown>>
+let mcpRecords: Array<Record<string, unknown>>
 
 before(async () => {
   browser = new Window({ url: "http://127.0.0.1:1420/" })
-  globalThis.window = browser
-  globalThis.document = browser.document
+  const globals = globalThis as unknown as Record<string, unknown>
+  const win = browser as unknown as Record<string, unknown>
+  globals.window = browser
+  globals.document = browser.document
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: browser.navigator })
   for (const name of ["DocumentFragment", "Element", "HTMLFormElement", "HTMLInputElement", "HTMLTextAreaElement", "localStorage", "MutationObserver", "getComputedStyle", "Event", "CustomEvent", "KeyboardEvent"]) {
-    globalThis[name] = browser[name]
+    globals[name] = win[name]
   }
-  globalThis.matchMedia = browser.matchMedia.bind(browser)
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  globals.matchMedia = browser.matchMedia.bind(browser)
+  globals.IS_REACT_ACT_ENVIRONMENT = true
   ;({ createRoot } = await import("react-dom/client"))
   cacheDirectory = mkdtempSync(join(tmpdir(), "ade-app-test-"))
   server = await createServer({ cacheDir: cacheDirectory, server: { middlewareMode: true, hmr: false }, appType: "custom", optimizeDeps: { noDiscovery: true } })
-  ;({ default: App } = await server.ssrLoadModule("/App.tsx"))
+  ;({ default: App } = (await server.ssrLoadModule("/App.tsx")) as { default: React.ComponentType })
 })
 
 after(async () => {
@@ -132,17 +135,18 @@ beforeEach(() => {
   mcpRecords = []
 
   browser.localStorage.clear()
-  browser.setInterval = (callback, delay) => {
+  ;(browser as unknown as Record<string, unknown>).setInterval = (callback: () => void, delay: number) => {
     const id = Symbol("interval")
     intervals.set(id, { callback, delay })
     return id
   }
-  browser.clearInterval = id => intervals.delete(id)
-  globalThis.fetch = async (url, init) => {
-    const body = init?.body ? JSON.parse(init.body) : null
+  ;(browser as unknown as Record<string, unknown>).clearInterval = (id: symbol) => intervals.delete(id)
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+    const body = typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : null
     const method = init?.method ?? "GET"
     requests.push({ url, body, method })
-    let payload: any = {}
+    let payload: Record<string, unknown> = {}
     if (url.startsWith("/api/health")) {
       payload = {
         online: true, harness: "Pi Durable", provider: "openai",
@@ -189,7 +193,7 @@ beforeEach(() => {
     } else if (url === "/api/projects" && method === "GET") {
       payload = { projects: projectRecords }
     } else if (url === "/api/projects" && method === "POST") {
-      const project = { id: body.id, name: body.name, githubUrl: body.githubUrl || null, repository: body.repository || null }
+      const project = { id: body?.id, name: body?.name, githubUrl: body?.githubUrl || null, repository: body?.repository || null }
       projectRecords.push(project)
       payload = { project }
     } else if (url === "/api/environments" && method === "GET") {
@@ -219,7 +223,7 @@ beforeEach(() => {
     } else if (url.includes("/artifacts") && method === "GET") {
       payload = { artifacts: artifactRecords }
     } else if (url.includes("/artifacts/") && url.endsWith("/review")) {
-      artifactRecords = artifactRecords.map(a => ({ ...a, status: body.decision }))
+      artifactRecords = artifactRecords.map(a => ({ ...a, status: body?.decision }))
       payload = { artifact: artifactRecords[0] }
     } else if (url.includes("/tasks")) {
       payload = { tasks: [{ id: "1", title: "Split panes", status: "done" }, { id: "2", title: "Browser pane", status: "in_progress" }] }
@@ -235,11 +239,11 @@ beforeEach(() => {
     } else if (url === "/api/browser/status") {
       payload = { available: true, chromePath: "/Applications/Google Chrome.app", running: false, url: "about:blank", title: "New Tab", loading: false, canGoBack: false, canGoForward: false, agentDriving: false, viewport: { width: 1280, height: 800, preset: "desktop" }, lastFrame: null, error: null }
     } else if (url === "/api/browser/open-external") {
-      payload = { url: body.url, launched: true }
+      payload = { url: body?.url, launched: true }
     } else if (url === "/api/mcp" && method === "GET") {
       payload = { servers: mcpRecords }
     } else if (url === "/api/mcp" && method === "POST") {
-      const serverItem = { id: "mcp-1", ...body, status: "disconnected", error: null, tools: [] }
+      const serverItem = { id: "mcp-1", ...(body ?? {}), status: "disconnected", error: null, tools: [] }
       mcpRecords.push(serverItem)
       payload = { server: serverItem }
     } else if (url === "/api/provider-tools") {
@@ -251,10 +255,11 @@ beforeEach(() => {
     } else if (url === "/api/worktree-operations") {
       payload = { operations: [] }
     }
-    return { ok: true, json: async () => payload }
-  }
-  container = browser.document.createElement("div")
-  browser.document.body.append(container)
+    return { ok: true, json: async () => payload } as Response
+  }) as typeof fetch
+  const rawContainer = browser.document.createElement("div")
+  browser.document.body.append(rawContainer)
+  container = rawContainer as unknown as HTMLDivElement
   root = createRoot(container)
 })
 
@@ -280,10 +285,14 @@ async function click(matcher: string | RegExp) {
   await act(async () => { findButton(matcher).click() })
 }
 
-function setInput(input, value) {
-  const prototype = input instanceof browser.HTMLTextAreaElement ? browser.HTMLTextAreaElement.prototype : browser.HTMLInputElement.prototype
-  Object.getOwnPropertyDescriptor(prototype, "value").set.call(input, value)
-  input.dispatchEvent(new browser.Event("input", { bubbles: true }))
+function setInput(input: Element, value: string) {
+  const prototype = input instanceof (browser.HTMLTextAreaElement as unknown as typeof HTMLTextAreaElement)
+    ? browser.HTMLTextAreaElement.prototype
+    : browser.HTMLInputElement.prototype
+  const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set
+  assert.ok(setter, "Missing value setter on input prototype")
+  setter.call(input, value)
+  input.dispatchEvent(new browser.Event("input", { bubbles: true }) as unknown as Event)
 }
 
 test("renders Paseo split-pane workspace with live multi-subagent tracks, side-by-side subagent pane, and approvals", async () => {
@@ -295,30 +304,30 @@ test("renders Paseo split-pane workspace with live multi-subagent tracks, side-b
   await act(async () => { (taskRow as HTMLElement).click() })
 
   // Verify ambient tracks show running subagents, git diff stats, tasks, and pending artifact
-  assert.match(container.textContent, /1 running · 2 subagents/)
-  assert.match(container.textContent, /\+42/)
-  assert.match(container.textContent, /1\/2 tasks/)
-  assert.match(container.textContent, /Review: Implementation Plan/)
+  assert.match(container.textContent ?? "", /1 running · 2 subagents/)
+  assert.match(container.textContent ?? "", /\+42/)
+  assert.match(container.textContent ?? "", /1\/2 tasks/)
+  assert.match(container.textContent ?? "", /Review: Implementation Plan/)
 
   // Verify approval card is visible and Allow once resolves it
-  assert.match(container.textContent, /Approval required/)
-  assert.match(container.textContent, /npm run build/)
+  assert.match(container.textContent ?? "", /Approval required/)
+  assert.match(container.textContent ?? "", /npm run build/)
   await click("Allow once")
-  assert.ok(requests.some(r => r.url.includes("/api/approvals/appr-1/resolve") && r.body.allow === true))
+  assert.ok(requests.some(r => r.url.includes("/api/approvals/appr-1/resolve") && r.body?.allow === true))
 
   // Expand live subagents strip and inspect subagent beside the lead
   await click(/1 running · 2 subagents/)
-  assert.match(container.textContent, /Backend Worker/)
-  assert.match(container.textContent, /UI Reviewer/)
+  assert.match(container.textContent ?? "", /Backend Worker/)
+  assert.match(container.textContent ?? "", /UI Reviewer/)
   await click("Inspect beside")
-  assert.match(container.textContent, /Assignment:/)
-  assert.match(container.textContent, /Build SSE stream and approval signals/)
+  assert.match(container.textContent ?? "", /Assignment:/)
+  assert.match(container.textContent ?? "", /Build SSE stream and approval signals/)
 })
 
 test("opens Built-in Browser pane and triggers external system browser launch", async () => {
   await act(async () => root.render(React.createElement(App)))
   await click("Built-in Browser")
-  assert.match(container.textContent, /Built-in Interactive Browser/)
+  assert.match(container.textContent ?? "", /Built-in Interactive Browser/)
   await click("External")
   assert.ok(requests.some(r => r.url === "/api/browser/open-external" && r.method === "POST"))
 })
@@ -326,9 +335,9 @@ test("opens Built-in Browser pane and triggers external system browser launch", 
 test("opens Artifact pane and approves Implementation Plan", async () => {
   await act(async () => root.render(React.createElement(App)))
   await click(/Review: Implementation Plan/)
-  assert.match(container.textContent, /Approve & Proceed/)
+  assert.match(container.textContent ?? "", /Approve & Proceed/)
   await click(/Approve & Proceed/)
-  assert.ok(requests.some(r => r.url.includes("/api/artifacts/art-1/review") && r.body.decision === "approved"))
+  assert.ok(requests.some(r => r.url.includes("/api/artifacts/art-1/review") && r.body?.decision === "approved"))
 })
 
 test("composer slash command autocomplete and Settings MCP + appearance persist", async () => {
@@ -336,7 +345,7 @@ test("composer slash command autocomplete and Settings MCP + appearance persist"
   const textarea = container.querySelector(".ade-composer-textarea")
   assert.ok(textarea)
   await act(async () => setInput(textarea, "/pl"))
-  assert.match(container.textContent, /Write an Implementation Plan artifact/)
+  assert.match(container.textContent ?? "", /Write an Implementation Plan artifact/)
 
   // Open Settings & MCP
   await click("Settings & MCP")
@@ -344,34 +353,34 @@ test("composer slash command autocomplete and Settings MCP + appearance persist"
   await click("Light")
   assert.equal(browser.document.documentElement.dataset.theme, "light")
   await click("Agents & permissions")
-  assert.match(container.textContent, /MCP Servers/)
-  assert.match(container.textContent, /Command Approvals/)
+  assert.match(container.textContent ?? "", /MCP Servers/)
+  assert.match(container.textContent ?? "", /Command Approvals/)
 })
 
 test("3-column ModelPicker searches models across providers, switches thinking level, and changes access mode", async () => {
   await act(async () => root.render(React.createElement(App)))
 
   await click("Model")
-  assert.match(container.textContent, /Thinking/)
-  assert.match(container.textContent, /Extra High/)
-  assert.match(container.textContent, /Max/)
-  assert.match(container.textContent, /⌘1/)
+  assert.match(container.textContent ?? "", /Thinking/)
+  assert.match(container.textContent ?? "", /Extra High/)
+  assert.match(container.textContent ?? "", /Max/)
+  assert.match(container.textContent ?? "", /⌘1/)
 
   // Select Extra High thinking
   await click("Extra High")
-  assert.equal(JSON.parse(browser.localStorage.getItem("ade-settings-v1")).reasoning, "xhigh")
+  assert.equal((JSON.parse(browser.localStorage.getItem("ade-settings-v1") ?? "{}") as { reasoning?: string }).reasoning, "xhigh")
 
   // Search across providers for Claude Sonnet
   const searchInput = container.querySelector(".ade-mp-search-input")
   assert.ok(searchInput)
   await act(async () => setInput(searchInput, "Claude Sonnet"))
-  assert.match(container.textContent, /Claude Sonnet 4/)
+  assert.match(container.textContent ?? "", /Claude Sonnet 4/)
 
   // Click Claude Sonnet 4 to switch provider + model
   const row = [...container.querySelectorAll(".ade-mp-row")].find(el => el.textContent?.includes("Claude Sonnet 4"))
   assert.ok(row)
   await act(async () => { (row as HTMLElement).click() })
-  const saved = JSON.parse(browser.localStorage.getItem("ade-settings-v1"))
+  const saved = JSON.parse(browser.localStorage.getItem("ade-settings-v1") ?? "{}") as { provider?: string; model?: string }
   assert.equal(saved.provider, "anthropic")
   assert.equal(saved.model, "claude-sonnet-4")
 })
