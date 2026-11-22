@@ -71,8 +71,9 @@ export function createCloudflareDoCaptainHost(params: {
       for (const ws of state.getWebSockets()) {
         try {
           ws.send(payload);
-        } catch {
-          // ignore closed hibernating socket
+        } catch (err) {
+          // Hibernating WebSockets may already be closed; log and continue broadcasting to healthy peers.
+          console.warn("[cloudflare-do] Failed to send broadcast event to WebSocket:", err instanceof Error ? err.message : String(err));
         }
       }
     },

@@ -127,8 +127,9 @@ export function NewSessionView({
         body: "{}",
       })
       if (res.path) setRepository(res.path)
-    } catch {
-      // ignore if native dialog unavailable
+    } catch (err) {
+      // Native OS folder picker is optional on headless/Linux hosts; log for diagnostics.
+      console.warn("[ADE] Native folder picker unavailable:", err instanceof Error ? err.message : String(err))
     }
   }
 

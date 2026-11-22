@@ -1,4 +1,5 @@
 import type { ServerResponse } from "node:http";
+import { logger } from "./log.ts";
 
 export type RuntimeEventType =
 	| "connected"
@@ -48,8 +49,9 @@ export class RuntimeEventBus {
 		for (const listener of this.#listeners) {
 			try {
 				listener(event);
-			} catch {
-				// isolate listener errors
+			} catch (error) {
+				// Isolate listener failures so one subscriber cannot break broadcast to others.
+				logger.warn("RuntimeEventBus listener threw", { error, sessionId, context: { eventType: type } });
 			}
 		}
 		if (!this.#clients.size) return;
@@ -91,8 +93,8 @@ export class RuntimeEventBus {
 		clearInterval(client.heartbeat);
 		try {
 			if (!client.response.writableEnded) client.response.end();
-		} catch {
-			// ignore close error
+		} catch (error) {
+			logger.debug("SSE client response close failed", { error, sessionId: client.sessionId ?? undefined });
 		}
 	}
 

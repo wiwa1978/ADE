@@ -46,6 +46,10 @@ const EMPTY_SKILLS: SkillsAndRulesCatalog = {
   commands: [],
 }
 
+function reportStreamWarning(scope: string, error: unknown) {
+  console.warn(`[ADE runtime stream] ${scope}:`, error instanceof Error ? error.message : String(error))
+}
+
 export function useRuntimeStream(opts: {
   sessionId: string | null
   hasWorkspace: boolean
@@ -80,8 +84,8 @@ export function useRuntimeStream(opts: {
     try {
       const snap = await request<ConversationTimelineSnapshot>(`/api/sessions/${encodeURIComponent(targetId)}/timeline`)
       if (sessionIdRef.current === targetId) setTimeline(snap)
-    } catch {
-      // ignore if endpoint unavailable in fixture
+    } catch (error) {
+      reportStreamWarning("refreshTimeline", error)
     }
   }, [])
 
@@ -89,8 +93,8 @@ export function useRuntimeStream(opts: {
     try {
       const data = await request<{ agents: SubagentInfo[] }>(`/api/coding-tasks/${encodeURIComponent(targetId)}/agents`)
       if (sessionIdRef.current === targetId) setSubagents(data.agents ?? [])
-    } catch {
-      // ignore
+    } catch (error) {
+      reportStreamWarning("refreshSubagents", error)
     }
   }, [])
 
@@ -101,8 +105,8 @@ export function useRuntimeStream(opts: {
       setApprovals(data.pending ?? [])
       if (data.policy) setApprovalPolicyState(data.policy)
       setApprovalRules(data.rules ?? [])
-    } catch {
-      // ignore
+    } catch (error) {
+      reportStreamWarning("refreshApprovals", error)
     }
   }, [])
 
@@ -111,8 +115,8 @@ export function useRuntimeStream(opts: {
       const qs = targetId ? `?sessionId=${encodeURIComponent(targetId)}` : ""
       const data = await request<{ processes: ManagedProcessSummary[] }>(`/api/processes${qs}`)
       setProcesses(data.processes ?? [])
-    } catch {
-      // ignore
+    } catch (error) {
+      reportStreamWarning("refreshProcesses", error)
     }
   }, [])
 
@@ -120,7 +124,8 @@ export function useRuntimeStream(opts: {
     try {
       const data = await request<WorkspaceGitSummary>(`/api/workspace/git?sessionId=${encodeURIComponent(targetId)}`)
       if (sessionIdRef.current === targetId) setGitSummary(data)
-    } catch {
+    } catch (error) {
+      reportStreamWarning("refreshGit", error)
       if (sessionIdRef.current === targetId) setGitSummary(EMPTY_GIT)
     }
   }, [])
@@ -135,8 +140,8 @@ export function useRuntimeStream(opts: {
         setArtifacts(artRes.artifacts ?? [])
         setTasks(taskRes.tasks ?? [])
       }
-    } catch {
-      // ignore
+    } catch (error) {
+      reportStreamWarning("refreshArtifactsAndTasks", error)
     }
   }, [])
 
@@ -145,8 +150,8 @@ export function useRuntimeStream(opts: {
       const qs = targetId ? `?sessionId=${encodeURIComponent(targetId)}` : ""
       const data = await request<SkillsAndRulesCatalog>(`/api/skills${qs}`)
       setSkillsCatalog(data)
-    } catch {
-      // ignore
+    } catch (error) {
+      reportStreamWarning("refreshSkills", error)
     }
   }, [])
 
@@ -154,8 +159,8 @@ export function useRuntimeStream(opts: {
     try {
       const data = await request<BrowserState>("/api/browser/status")
       setBrowserState(data)
-    } catch {
-      // ignore
+    } catch (error) {
+      reportStreamWarning("refreshBrowser", error)
     }
   }, [])
 
@@ -163,8 +168,8 @@ export function useRuntimeStream(opts: {
     try {
       const data = await request<{ servers: McpServerStatus[] }>("/api/mcp")
       setMcpServers(data.servers ?? [])
-    } catch {
-      // ignore
+    } catch (error) {
+      reportStreamWarning("refreshMcp", error)
     }
   }, [])
 
@@ -225,8 +230,8 @@ export function useRuntimeStream(opts: {
           } else {
             setTimeline(snap)
           }
-        } catch {
-          // ignore
+        } catch (error) {
+          reportStreamWarning("timeline.update parse", error)
         }
       })
       source.addEventListener("subagents.update", (ev: MessageEvent) => {
@@ -236,8 +241,8 @@ export function useRuntimeStream(opts: {
           if (sid && (!parsed.sessionId || parsed.sessionId === sid)) {
             void refreshSubagents(sid)
           }
-        } catch {
-          // ignore
+        } catch (error) {
+          reportStreamWarning("subagents.update parse", error)
         }
       })
       source.addEventListener("approval.requested", (ev: MessageEvent) => {
@@ -245,8 +250,8 @@ export function useRuntimeStream(opts: {
           const parsed = JSON.parse(ev.data)
           const item = parsed.payload as PendingApproval
           setApprovals(prev => prev.some(p => p.id === item.id) ? prev : [...prev, item])
-        } catch {
-          // ignore
+        } catch (error) {
+          reportStreamWarning("approval.requested parse", error)
         }
       })
       source.addEventListener("approval.resolved", (ev: MessageEvent) => {
@@ -255,8 +260,8 @@ export function useRuntimeStream(opts: {
           const item = parsed.payload as PendingApproval
           setApprovals(prev => prev.filter(p => p.id !== item.id))
           void refreshApprovals(sessionIdRef.current)
-        } catch {
-          // ignore
+        } catch (error) {
+          reportStreamWarning("approval.resolved parse", error)
         }
       })
       source.addEventListener("processes.update", (ev: MessageEvent) => {
@@ -265,8 +270,8 @@ export function useRuntimeStream(opts: {
           if (!parsed.sessionId || parsed.sessionId === sessionIdRef.current) {
             setProcesses(parsed.payload?.processes ?? [])
           }
-        } catch {
-          // ignore
+        } catch (error) {
+          reportStreamWarning("processes.update parse", error)
         }
       })
       source.addEventListener("artifacts.update", (ev: MessageEvent) => {
@@ -278,8 +283,8 @@ export function useRuntimeStream(opts: {
               callbacksRef.current.onArtifactUpdated?.(parsed.payload.activeArtifactId)
             }
           }
-        } catch {
-          // ignore
+        } catch (error) {
+          reportStreamWarning("artifacts.update parse", error)
         }
       })
       source.addEventListener("tasks.update", (ev: MessageEvent) => {
@@ -288,8 +293,8 @@ export function useRuntimeStream(opts: {
           if (parsed.sessionId === sessionIdRef.current) {
             setTasks(parsed.payload?.tasks ?? [])
           }
-        } catch {
-          // ignore
+        } catch (error) {
+          reportStreamWarning("tasks.update parse", error)
         }
       })
       source.addEventListener("browser.update", (ev: MessageEvent) => {
@@ -298,8 +303,8 @@ export function useRuntimeStream(opts: {
           const next = parsed.payload as BrowserState
           setBrowserState(next)
           if (next.agentDriving) callbacksRef.current.onAgentBrowserDriving?.()
-        } catch {
-          // ignore
+        } catch (error) {
+          reportStreamWarning("browser.update parse", error)
         }
       })
       source.addEventListener("browser.frame", (ev: MessageEvent) => {
@@ -308,16 +313,16 @@ export function useRuntimeStream(opts: {
           if (parsed.payload?.frame) {
             setBrowserState(prev => ({ ...prev, lastFrame: parsed.payload.frame }))
           }
-        } catch {
-          // ignore
+        } catch (error) {
+          reportStreamWarning("browser.frame parse", error)
         }
       })
       source.addEventListener("mcp.update", (ev: MessageEvent) => {
         try {
           const parsed = JSON.parse(ev.data)
           setMcpServers(parsed.payload?.servers ?? [])
-        } catch {
-          // ignore
+        } catch (error) {
+          reportStreamWarning("mcp.update parse", error)
         }
       })
       source.onerror = () => {

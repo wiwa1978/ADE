@@ -7,6 +7,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { map, unknown } from "@earendil-works/pi-schema";
 import type { RuntimeEventBus } from "./events.ts";
+import { isErrorCode, logger } from "./log.ts";
 
 export type McpServerConfig = {
 	id: string;
@@ -81,8 +82,9 @@ class StdioMcpClient {
 						if (msg.error) p.reject(new Error(msg.error.message || "MCP error"));
 						else p.resolve(msg.result);
 					}
-				} catch {
-					// ignore non-JSON log lines
+				} catch (error) {
+					// MCP stdio servers occasionally emit non-JSON diagnostic lines on stdout.
+					logger.debug("Ignored non-JSON stdout line from MCP server", { error, context: { line: trimmed.slice(0, 120) } });
 				}
 			}
 		});
@@ -118,8 +120,10 @@ class StdioMcpClient {
 	close(): void {
 		try {
 			this.#child.kill("SIGTERM");
-		} catch {
-			// ignore
+		} catch (error) {
+			if (!isErrorCode(error, "ESRCH")) {
+				logger.debug("Failed to stop stdio MCP server process", { error });
+			}
 		}
 	}
 }
@@ -223,8 +227,8 @@ export class McpManager {
 						headers: def.headers ?? {},
 					}), Date.now());
 			}
-		} catch {
-			// ignore malformed mcp.json
+		} catch (error) {
+			logger.warn("Could not import ~/.ade/mcp.json", { error, context: { path } });
 		}
 	}
 
@@ -232,7 +236,11 @@ export class McpManager {
 		const rows = this.#db.prepare("SELECT * FROM mcp_servers ORDER BY createdAt ASC").all() as unknown as McpServerRow[];
 		return rows.map(row => {
 			let cfg: StoredMcpConfig = {};
-			try { cfg = JSON.parse(row.configJson) as StoredMcpConfig; } catch { /* ignore */ }
+			try {
+				cfg = JSON.parse(row.configJson) as StoredMcpConfig;
+			} catch (error) {
+				logger.warn("Malformed configJson for MCP server", { error, context: { serverId: row.id, name: row.name } });
+			}
 			const rt = this.#runtime.get(row.id);
 			return {
 				id: row.id,

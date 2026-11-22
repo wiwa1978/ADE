@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { bool, int, obj, opt, str } from "@earendil-works/pi-schema";
 import { workspacePath } from "./coding-tools.ts";
+import { isErrorCode, logger } from "./log.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -116,8 +117,11 @@ export async function runWorkspaceGrep(root: string, opts: {
 					if (matches.length >= maxResults || perFile >= 15) break;
 				}
 			}
-		} catch {
-			// skip unreadable file
+		} catch (error) {
+			// Skip files that vanish or lack read permissions during workspace grep.
+			if (!isErrorCode(error, "ENOENT", "EACCES", "EPERM", "EISDIR")) {
+				logger.debug("Skipped unreadable file during workspace grep", { error, context: { file } });
+			}
 		}
 	}
 	if (!matches.length) return "No matches found.";

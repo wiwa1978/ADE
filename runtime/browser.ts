@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { int, obj, opt, str } from "@earendil-works/pi-schema";
 import type { RuntimeEventBus } from "./events.ts";
+import { isErrorCode, logger } from "./log.ts";
 
 export type BrowserViewport = { width: number; height: number; preset: "desktop" | "tablet" | "mobile" };
 
@@ -122,13 +123,13 @@ class CdpConnection {
 					for (const listener of this.#eventListeners) {
 						try {
 							listener(msg.method, msg.params ?? {});
-						} catch {
-							// ignore
+						} catch (error) {
+							logger.warn("CDP event listener threw", { error, context: { method: msg.method } });
 						}
 					}
 				}
-			} catch {
-				// ignore malformed frame
+			} catch (error) {
+				logger.debug("Malformed CDP message frame ignored", { error });
 			}
 		});
 		ws.addEventListener("close", () => {
@@ -159,8 +160,8 @@ class CdpConnection {
 	close(): void {
 		try {
 			this.#ws.close();
-		} catch {
-			// ignore
+		} catch (error) {
+			logger.debug("CDP WebSocket close failed", { error });
 		}
 	}
 }
@@ -262,7 +263,7 @@ export class BrowserManager {
 					}
 				}
 			} catch {
-				// retry
+				// Chrome DevTools endpoint is not listening yet; continue polling until deadline.
 			}
 			await new Promise(r => setTimeout(r, 150));
 		}
@@ -302,7 +303,9 @@ export class BrowserManager {
 				const dataUri = `data:image/jpeg;base64,${String(params.data ?? "")}`;
 				this.#state.lastFrame = dataUri;
 				this.#events.emit("browser.frame", { frame: dataUri, metadata: params.metadata });
-				void cdp.send("Page.screencastFrameAck", { sessionId: params.sessionId }).catch(() => {});
+				void cdp.send("Page.screencastFrameAck", { sessionId: params.sessionId }).catch((error) => {
+					logger.debug("CDP screencast frame ack failed", { error });
+				});
 			}
 		});
 
@@ -337,8 +340,8 @@ export class BrowserManager {
 			}
 			this.#state.canGoBack = (nav?.currentIndex ?? 0) > 0;
 			this.#state.canGoForward = (nav?.currentIndex ?? 0) < (nav?.entries?.length ?? 1) - 1;
-		} catch {
-			// ignore
+		} catch (error) {
+			logger.debug("Could not refresh Chrome navigation history", { error });
 		}
 		this.#emitState();
 	}
@@ -560,8 +563,10 @@ export class BrowserManager {
 		if (this.#chrome && !this.#chrome.killed) {
 			try {
 				this.#chrome.kill("SIGTERM");
-			} catch {
-				// ignore
+			} catch (error) {
+				if (!isErrorCode(error, "ESRCH")) {
+					logger.debug("Failed to terminate Chrome process during close", { error });
+				}
 			}
 		}
 		this.#chrome = null;

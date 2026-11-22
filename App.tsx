@@ -78,8 +78,9 @@ function readStoredIds(key: string): string[] {
 function writeStoredIds(key: string, ids: string[]) {
   try {
     localStorage.setItem(key, JSON.stringify(ids))
-  } catch {
-    // ignore storage errors
+  } catch (err) {
+    // Storage can be unavailable in private mode or quota-exceeded environments.
+    console.warn(`[ADE] Could not persist ${key}:`, err instanceof Error ? err.message : String(err))
   }
 }
 
@@ -189,8 +190,9 @@ export default function App() {
     try {
       const data = await request<{ sessions: Conversation[] }>("/api/sessions")
       setSessions(data.sessions ?? [])
-    } catch {
-      // handled by health check
+    } catch (err) {
+      // Health polling surfaces connection errors in the UI; log here for diagnostics.
+      console.warn("[ADE] Could not load sessions:", err instanceof Error ? err.message : String(err))
     }
   }, [])
 
@@ -229,8 +231,8 @@ export default function App() {
               : [...prev, updated]
           })
         }
-      } catch {
-        // ignore
+      } catch (err) {
+        console.warn("[ADE] Ignored malformed factory.event SSE frame:", err instanceof Error ? err.message : String(err))
       }
     }
     es.addEventListener("factory.event", onFactoryEvent)
@@ -261,8 +263,9 @@ export default function App() {
         setActiveEnvironmentId(active.id)
         setActiveEnvironmentName(active.name)
       }
-    } catch {
-      // fallback to local
+    } catch (err) {
+      // Fall back to local environment label if environments endpoint is unreachable.
+      console.warn("[ADE] Could not load environments:", err instanceof Error ? err.message : String(err))
     }
   }, [])
 
@@ -429,8 +432,9 @@ export default function App() {
       try {
         const text = await file.text()
         added.push({ id: crypto.randomUUID(), name: file.name, content: text })
-      } catch {
-        // skip unreadable file
+      } catch (err) {
+        console.warn("[ADE] Skipped unreadable attached file:", file.name, err instanceof Error ? err.message : String(err))
+        setRuntimeError(`Could not read attached file "${file.name}".`)
       }
     }
     if (added.length) setAttachments(prev => [...prev, ...added])
@@ -493,8 +497,8 @@ export default function App() {
         body: "{}",
       })
       await loadSessions()
-    } catch {
-      // ignore
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "Could not stop session.")
     }
   }
 
@@ -608,8 +612,8 @@ export default function App() {
         body: JSON.stringify({ title: trimmed }),
       })
       await loadSessions()
-    } catch {
-      // ignore
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "Could not rename session.")
     }
   }
 

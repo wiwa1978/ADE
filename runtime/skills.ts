@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { obj, str } from "@earendil-works/pi-schema";
+import { isErrorCode, logger } from "./log.ts";
 
 export type SkillSummary = {
 	name: string;
@@ -95,12 +96,14 @@ function scanSkillsDir(dir: string, scope: "global" | "workspace"): SkillSummary
 					path: skillFile,
 					scope,
 				});
-			} catch {
-				// skip unreadable skill
+			} catch (error) {
+				logger.warn("Skipped unreadable skill file", { error, context: { skillFile, scope } });
 			}
 		}
-	} catch {
-		// ignore
+	} catch (error) {
+		if (!isErrorCode(error, "ENOENT", "EACCES")) {
+			logger.warn("Could not scan skills directory", { error, context: { dir, scope } });
+		}
 	}
 	return results;
 }
@@ -133,8 +136,8 @@ function scanRules(workspace?: string | null): RuleSummary[] {
 						content: readFileSync(src.file, "utf8").slice(0, 8000),
 					});
 				}
-			} catch {
-				// ignore
+			} catch (error) {
+				logger.warn("Skipped unreadable rules file", { error, context: { file: src.file, scope: src.scope } });
 			}
 		}
 		if (src.dir && existsSync(src.dir)) {
@@ -151,8 +154,10 @@ function scanRules(workspace?: string | null): RuleSummary[] {
 						content: readFileSync(full, "utf8").slice(0, 6000),
 					});
 				}
-			} catch {
-				// ignore
+			} catch (error) {
+				if (!isErrorCode(error, "ENOENT", "EACCES")) {
+					logger.warn("Could not scan rules directory", { error, context: { dir: src.dir, scope: src.scope } });
+				}
 			}
 		}
 	}
@@ -186,8 +191,10 @@ function scanCommands(workspace?: string | null): SlashCommandSummary[] {
 					scope,
 				});
 			}
-		} catch {
-			// ignore
+		} catch (error) {
+			if (!isErrorCode(error, "ENOENT", "EACCES")) {
+				logger.warn("Could not scan custom commands directory", { error, context: { dir, scope } });
+			}
 		}
 	}
 	return [...map.values()];

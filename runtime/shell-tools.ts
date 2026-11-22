@@ -5,6 +5,7 @@ import { platform } from "node:os";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { bool, int, obj, opt, str } from "@earendil-works/pi-schema";
 import type { RuntimeEventBus } from "./events.ts";
+import { isErrorCode, logger } from "./log.ts";
 
 export type ManagedProcessSummary = {
 	id: string;
@@ -94,12 +95,16 @@ export class ProcessManager {
 				setTimeout(() => {
 					try {
 						if (!proc.child.killed) proc.child.kill("SIGKILL");
-					} catch {
-						// ignore
+					} catch (error) {
+						if (!isErrorCode(error, "ESRCH")) {
+							logger.debug("SIGKILL fallback failed for managed process", { error, sessionId: proc.sessionId, context: { processId: id } });
+						}
 					}
 				}, 2000).unref?.();
-			} catch {
-				// ignore
+			} catch (error) {
+				if (!isErrorCode(error, "ESRCH")) {
+					logger.warn("SIGTERM failed for managed process", { error, sessionId: proc.sessionId, context: { processId: id } });
+				}
 			}
 			this.#emitUpdate(proc.sessionId);
 		}
@@ -184,8 +189,8 @@ export class ProcessManager {
 		for (const id of [...this.#processes.keys()]) {
 			try {
 				this.kill(id);
-			} catch {
-				// ignore
+			} catch (error) {
+				logger.debug("Error killing managed process during shutdown", { error, context: { processId: id } });
 			}
 		}
 	}

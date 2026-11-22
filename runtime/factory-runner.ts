@@ -16,6 +16,7 @@ import {
 } from "../packages/captain-core/index.ts";
 import { LocalDockerSandbox, type LocalSandboxMode } from "../packages/sandbox-docker/index.ts";
 import { buildMergeReadyPrBody, LocalGitHubProvider } from "../packages/github-local/index.ts";
+import { logger } from "./log.ts";
 
 const DETAIL_STORAGE_PREFIX = "ade:factory:detail:";
 
@@ -481,8 +482,11 @@ export class LocalFactoryRunner {
       if (detail.sandboxId) {
         try {
           detail.diff = await this.sandbox.getDiff(detail.sandboxId);
-        } catch {
-          // ignore if sandbox already detached
+        } catch (error) {
+          logger.debug("Could not read factory sandbox diff (sandbox may already be detached)", {
+            error,
+            context: { runId, sandboxId: detail.sandboxId },
+          });
         }
       }
 
@@ -571,8 +575,11 @@ export class LocalFactoryRunner {
       if (detail.sandboxId) {
         try {
           await this.sandbox.destroy(detail.sandboxId);
-        } catch {
-          // ignore cleanup errors on shutdown
+        } catch (error) {
+          logger.warn("Failed to destroy factory sandbox during shutdown", {
+            error,
+            context: { runId: detail.run.runId, sandboxId: detail.sandboxId },
+          });
         }
       }
     }

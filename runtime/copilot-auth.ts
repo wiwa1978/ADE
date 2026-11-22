@@ -318,7 +318,11 @@ function createProtectedStore<T>(
 	}
 	function serialize<R>(action: () => Promise<R>): Promise<R> {
 		const result = chain.then(action);
-		chain = result.catch(() => {});
+		// Keep the mutex queue moving even if `result` rejects (caller receives the rejection via `result`).
+		chain = result.then(
+			() => undefined,
+			() => undefined,
+		);
 		return result;
 	}
 	return {

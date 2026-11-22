@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import type { AddressInfo } from "node:net";
 import { detectGitHubRemoteFromCheckout, LocalAgentHost } from "./host.ts";
 import { safeErrorMessage } from "./models.ts";
+import { logger } from "./log.ts";
 import { createSessionGit } from "./session-git.ts";
 import { inspectWorktrees, removeWorktree, resolveCheckout, restoreWorktree, WorktreeManager } from "./worktrees.ts";
 import { createGitHubRepositories } from "./github-repositories.ts";
@@ -505,8 +506,8 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 						const acc = await githubRepositories.connect();
 						host.connectGitHub(acc.login);
 						githubConnectionRevision++;
-					} catch {
-						// ignore secondary connection sync error
+					} catch (error) {
+						logger.warn("Secondary GitHub connection sync failed after repository creation", { error });
 					}
 				}
 				return json(response, 201, { repository: created });

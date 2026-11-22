@@ -254,8 +254,9 @@ export function createRemoteCaptainServer(options: RemoteCaptainServerOptions): 
       for (const client of sseClients) {
         try {
           client.end();
-        } catch {
-          // ignore
+        } catch (err) {
+          // Client stream may already be destroyed/closed during server shutdown.
+          console.warn("[host-remote] SSE client close error during shutdown:", err instanceof Error ? err.message : String(err));
         }
       }
       sseClients.clear();

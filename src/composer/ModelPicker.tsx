@@ -35,8 +35,9 @@ function loadFavorites(): FavoriteKey[] {
 function saveFavorites(list: FavoriteKey[]) {
   try {
     localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(list))
-  } catch {
-    // ignore
+  } catch (err) {
+    // localStorage may be unavailable in private browsing or when quota is exceeded.
+    console.warn("[ADE] Could not persist model favorites:", err instanceof Error ? err.message : String(err))
   }
 }
 

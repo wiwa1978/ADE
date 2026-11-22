@@ -16,6 +16,7 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import { lookupGitHubIssue, validateLinkedIssue } from "./github-issues.ts";
 import { scanProviderTools } from "./provider-tools.ts";
 import { RuntimeEventBus } from "./events.ts";
+import { logger } from "./log.ts";
 import { ApprovalManager } from "./approvals.ts";
 import { createShellTools, ProcessManager } from "./shell-tools.ts";
 import { createSearchTools } from "./search-tools.ts";
@@ -341,8 +342,8 @@ export class LocalAgentHost {
 		if (typeof row.stageOverridesJson === "string" && row.stageOverridesJson.trim()) {
 			try {
 				stageOverrides = JSON.parse(row.stageOverridesJson) as Record<string, { provider: string; model: string }>;
-			} catch {
-				// ignore malformed json
+			} catch (error) {
+				logger.warn("Malformed stageOverridesJson on project row", { error, context: { projectId: row.id } });
 			}
 		}
 		return {
@@ -734,8 +735,13 @@ export class LocalAgentHost {
 			watch.start(async (call) => {
 				if (call.kind === "value") emitView(call.value as unknown as WatchViewLike | undefined);
 			});
-		} catch {
-			// non-fatal watch error
+		} catch (error) {
+			logger.warn("Failed to watch conversation; live timeline updates stopped", {
+				error,
+				sessionId,
+				context: { conversationId: convKey, isSubagent },
+			});
+			this.events.emit("sessions.changed", { sessionId, watchError: error instanceof Error ? error.message : String(error) }, sessionId);
 		}
 	}
 
@@ -1434,7 +1440,9 @@ export class LocalAgentHost {
 		}
 		const operation = this.#executeTurn(turn, config);
 		if (normalizedSend.async) {
-			operation.catch(() => {});
+			operation.catch((error) => {
+				logger.error("Async turn execution failed", { error, sessionId: key });
+			});
 			return this.sessions().find(item => item.id === key);
 		}
 		return operation;
@@ -1659,7 +1667,11 @@ export class LocalAgentHost {
 		await this.#runtimeModels?.signIn.cancel();
 		await Promise.allSettled(this.#active.values());
 		for (const watch of this.#watches.values()) {
-			try { await watch.stop(); } catch { /* ignore */ }
+			try {
+				await watch.stop();
+			} catch (error) {
+				logger.debug("Failed to stop conversation watch during host close", { error });
+			}
 		}
 		this.#watches.clear();
 		this.processes.close();

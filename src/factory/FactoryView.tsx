@@ -119,8 +119,8 @@ export function FactoryView({
               : [...prev, updated]
           })
         }
-      } catch {
-        // ignore malformed SSE frame
+      } catch (err) {
+        console.warn("[ADE] Ignored malformed factory.event SSE frame:", err instanceof Error ? err.message : String(err))
       }
     }
     es.addEventListener("factory.event", onFactoryEvent)

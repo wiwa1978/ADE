@@ -176,8 +176,8 @@ export function BrowserPanel({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ kind: "mouse", type: "mouseReleased", x: pos.x, y: pos.y, button: "left", clickCount: 1 }),
       })
-    } catch {
-      // ignore
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send browser click.")
     }
   }
 
@@ -190,8 +190,8 @@ export function BrowserPanel({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ kind: "mouse", type: "mouseWheel", x: pos.x, y: pos.y, deltaX: e.deltaX, deltaY: e.deltaY }),
       })
-    } catch {
-      // ignore
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send browser scroll.")
     }
   }
 
@@ -213,8 +213,8 @@ export function BrowserPanel({
           body: JSON.stringify({ kind: "key", key: e.key }),
         })
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send browser key input.")
     }
   }
 

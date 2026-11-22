@@ -78,8 +78,8 @@ function LiveSessionPane({
         `/api/sessions/${encodeURIComponent(session.id)}/timeline`,
       )
       setTimeline(snap)
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn("[ADE] Failed to refresh stream pane timeline:", err instanceof Error ? err.message : String(err))
     }
   }, [session.id])
 
@@ -89,8 +89,8 @@ function LiveSessionPane({
         `/api/workspace/git?sessionId=${encodeURIComponent(session.id)}`,
       )
       if (summary) setGitSummary(summary)
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn("[ADE] Failed to refresh stream pane git summary:", err instanceof Error ? err.message : String(err))
     }
   }, [session.id])
 
@@ -106,8 +106,8 @@ function LiveSessionPane({
           void refresh()
           void refreshGit()
         }
-      } catch {
-        // ignore
+      } catch (err) {
+        console.warn("[ADE] Ignored malformed stream SSE message:", err instanceof Error ? err.message : String(err))
       }
     }
     es.addEventListener("timeline.updated", onMsg)

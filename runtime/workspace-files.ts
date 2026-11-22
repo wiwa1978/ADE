@@ -3,6 +3,7 @@ import { lstatSync, readdirSync, readFileSync, statSync, writeFileSync } from "n
 import { extname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { workspacePath } from "./coding-tools.ts";
+import { isErrorCode, logger } from "./log.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -49,8 +50,11 @@ export function listWorkspaceDirectory(root: string, relPath = "."): WorkspaceEn
 		if (entry.isFile()) {
 			try {
 				size = statSync(full).size;
-			} catch {
-				// ignore
+			} catch (error) {
+				// File may disappear or become inaccessible between readdir and stat.
+				if (!isErrorCode(error, "ENOENT", "EACCES", "EPERM")) {
+					logger.debug("Could not stat workspace file during directory listing", { error, context: { path: full } });
+				}
 			}
 		}
 		return {
@@ -167,8 +171,12 @@ export async function getWorkspaceGitSummary(workspace: string): Promise<Workspa
 						item.deletions += del;
 					}
 				}
-			} catch {
-				// ignore if no HEAD yet
+			} catch (error) {
+				// An unborn repository (no HEAD commit yet) fails `git diff --cached --numstat`; log any other error.
+				const stderr = String((error as { stderr?: unknown })?.stderr ?? "");
+				if (!/bad revision|unknown revision|ambiguous argument 'HEAD'/i.test(stderr)) {
+					logger.debug("git diff --numstat failed", { error, context: { workspace, diffArgs } });
+				}
 			}
 		}
 
@@ -183,8 +191,10 @@ export async function getWorkspaceGitSummary(workspace: string): Promise<Workspa
 						item.additions = count;
 						totalAdditions += count;
 					}
-				} catch {
-					// ignore
+				} catch (error) {
+					if (!isErrorCode(error, "ENOENT", "EACCES", "EPERM")) {
+						logger.debug("Could not count lines for untracked file", { error, context: { workspace, path: item.path } });
+					}
 				}
 			}
 		}
@@ -198,18 +208,31 @@ export async function getWorkspaceGitSummary(workspace: string): Promise<Workspa
 			deletions: totalDeletions,
 			files: [...fileMap.values()].sort((a, b) => a.path.localeCompare(b.path)),
 		};
-	} catch {
+	} catch (error) {
+		const stderr = String((error as { stderr?: unknown })?.stderr ?? "");
+		if (!/not a git repository/i.test(stderr) && !isErrorCode(error, "ENOENT")) {
+			logger.warn("git status failed for workspace", { error, context: { workspace } });
+		}
 		return { isGitRepo: false, branch: null, ahead: 0, behind: 0, additions: 0, deletions: 0, files: [] };
 	}
 }
 
 export async function getWorkspaceFileDiff(workspace: string, filePath: string, staged = false): Promise<string> {
 	workspacePath(workspace, filePath, { mustExist: false });
+	const args = staged ? ["diff", "--cached", "--", filePath] : ["diff", "--", filePath];
+	let out: string;
 	try {
-		const args = staged ? ["diff", "--cached", "--", filePath] : ["diff", "--", filePath];
-		const out = await runGit(workspace, args);
-		if (out.trim()) return out;
-		// Check if untracked file — synthesize unified diff
+		out = await runGit(workspace, args);
+	} catch (error) {
+		logger.warn("git diff failed for workspace file", { error, context: { workspace, filePath, staged } });
+		throw Object.assign(
+			new Error(`Could not load Git diff for ${filePath}: ${error instanceof Error ? error.message : String(error)}`),
+			{ statusCode: 500 },
+		);
+	}
+	if (out.trim()) return out;
+	// Check if untracked file — synthesize unified diff
+	try {
 		const full = workspacePath(workspace, filePath, { mustExist: true });
 		const stat = statSync(full);
 		if (stat.isFile() && stat.size < 500_000) {
@@ -224,7 +247,12 @@ export async function getWorkspaceFileDiff(workspace: string, filePath: string, 
 			].join("\n");
 		}
 		return "";
-	} catch {
+	} catch (error) {
+		// Deleted or non-existent file simply has no untracked content to synthesize.
+		if (isErrorCode(error, "ENOENT") || (error instanceof Error && /does not exist|not found/i.test(error.message))) {
+			return "";
+		}
+		logger.warn("Could not read untracked file for diff synthesis", { error, context: { workspace, filePath } });
 		return "";
 	}
 }
