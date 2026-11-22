@@ -30,6 +30,7 @@ import { CaptainCore } from "../packages/captain-core/index.ts";
 import { createNodeSqliteCaptainHost } from "../packages/host-node/index.ts";
 import { LocalFactoryRunner } from "./factory-runner.ts";
 import { createPiFactoryStageExecutor } from "./factory-pi-executor.ts";
+import { badGateway, badRequest, conflict, httpError, notFound, serviceUnavailable } from "./http-error.ts";
 
 const modes = {
 	coding: {
@@ -380,11 +381,11 @@ export class LocalAgentHost {
 
 	connectGitHub(login: unknown) {
 		if (typeof login !== "string" || !/^[a-z0-9][a-z0-9-]{0,38}$/i.test(login)) {
-			throw Object.assign(new Error("GitHub CLI did not return a valid account."), { statusCode: 502 });
+			throw badGateway("GitHub CLI did not return a valid account.");
 		}
 		const previous = this.githubConnection().login;
 		if (previous && previous.toLowerCase() !== login.toLowerCase()) {
-			throw Object.assign(new Error("The GitHub CLI account changed. Disconnect it in Settings before connecting another account."), { statusCode: 409 });
+			throw conflict("The GitHub CLI account changed. Disconnect it in Settings before connecting another account.");
 		}
 		this.#db.prepare("INSERT INTO github_connection (id,login) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET login=excluded.login").run(login);
 		this.#db.prepare("INSERT INTO github_connection_preferences (id,auto_connect) VALUES (1,1) ON CONFLICT(id) DO UPDATE SET auto_connect=1").run();
@@ -406,21 +407,21 @@ export class LocalAgentHost {
 
 	renameCodingTask(id: string, title: unknown) {
 		if (typeof title !== "string" || !title.trim() || title.length > 200) {
-			throw Object.assign(new Error("Provide a session name of up to 200 characters."), { statusCode: 400 });
+			throw badRequest("Provide a session name of up to 200 characters.");
 		}
 		const result = this.#db.prepare("UPDATE coding_tasks SET initialTitle=COALESCE(initialTitle,title),title=? WHERE id=?").run(title.trim(), id);
-		if (!result.changes) throw Object.assign(new Error("Session not found."), { statusCode: 404 });
+		if (!result.changes) throw notFound("Session not found.");
 		return this.sessions().find(item => item.id === id);
 	}
 
 	createChatThread(input: { id?: unknown; mode?: unknown } | null | undefined) {
 		if (typeof input?.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.id) ||
 			typeof input.mode !== "string" || !Object.hasOwn(modes, input.mode)) {
-			throw Object.assign(new Error("Provide a valid chat ID and mode."), { statusCode: 400 });
+			throw badRequest("Provide a valid chat ID and mode.");
 		}
 		const existing = this.#db.prepare("SELECT * FROM chat_threads WHERE id=?").get(input.id) as ChatThreadRow | undefined;
 		if (existing) {
-			if (existing.mode !== input.mode) throw Object.assign(new Error("This chat ID already belongs to a different conversation."), { statusCode: 409 });
+			if (existing.mode !== input.mode) throw conflict("This chat ID already belongs to a different conversation.");
 			return this.sessions().find(item => item.id === input.id);
 		}
 		this.#db.prepare("INSERT INTO chat_threads (id,mode,title,createdAt) VALUES (?,?,?,?)")
@@ -430,24 +431,24 @@ export class LocalAgentHost {
 
 	renameChatThread(id: string, title: unknown) {
 		if (typeof title !== "string" || !title.trim() || title.length > 200) {
-			throw Object.assign(new Error("Provide a chat name of up to 200 characters."), { statusCode: 400 });
+			throw badRequest("Provide a chat name of up to 200 characters.");
 		}
 		const result = this.#db.prepare("UPDATE chat_threads SET title=?,manuallyNamed=1 WHERE id=?").run(title.trim(), id);
-		if (!result.changes) throw Object.assign(new Error("Chat not found."), { statusCode: 404 });
+		if (!result.changes) throw notFound("Chat not found.");
 		return this.sessions().find(item => item.id === id);
 	}
 
 	deleteChatThread(id: string) {
 		this.#db.prepare("DELETE FROM turns WHERE chatId=?").run(id);
 		const result = this.#db.prepare("DELETE FROM chat_threads WHERE id=?").run(id);
-		if (!result.changes) throw Object.assign(new Error("Chat not found."), { statusCode: 404 });
+		if (!result.changes) throw notFound("Chat not found.");
 		return { deleted: true, id };
 	}
 
 	deleteCodingTask(id: string) {
 		this.#db.prepare("DELETE FROM turns WHERE taskId=?").run(id);
 		const result = this.#db.prepare("DELETE FROM coding_tasks WHERE id=?").run(id);
-		if (!result.changes) throw Object.assign(new Error("Session not found."), { statusCode: 404 });
+		if (!result.changes) throw notFound("Session not found.");
 		return { deleted: true, id };
 	}
 
@@ -456,10 +457,10 @@ export class LocalAgentHost {
 	 * terminals and (optionally) removes the worktree. The branch and conversation are always kept.
 	 */
 	async setSessionArchived(id: string, archived: boolean): Promise<{ id: string; archivedAt: number | null; workspace: string | null; repository: string | null; kind: string | null }> {
-		if (Object.hasOwn(modes, id)) throw Object.assign(new Error("Built-in chats cannot be archived."), { statusCode: 400 });
+		if (Object.hasOwn(modes, id)) throw badRequest("Built-in chats cannot be archived.");
 		const task = this.#get<CodingTaskRow>("SELECT * FROM coding_tasks WHERE id=?", id);
 		const chat = task ? null : this.#get<ChatThreadRow>("SELECT * FROM chat_threads WHERE id=?", id);
-		if (!task && !chat) throw Object.assign(new Error("Session not found."), { statusCode: 404 });
+		if (!task && !chat) throw notFound("Session not found.");
 		if (archived && (this.#active.has(id) || this.#recovering.has(id))) await this.abortSession(id).catch(() => ({ ok: false }));
 		const archivedAt = archived ? Date.now() : null;
 		this.#db.prepare(`UPDATE ${task ? "coding_tasks" : "chat_threads"} SET archivedAt=? WHERE id=?`).run(archivedAt, id);
@@ -485,7 +486,7 @@ export class LocalAgentHost {
 	/** Record that a removed worktree was recreated on disk, refreshing its identity checks. */
 	markWorktreeRestored(id: string) {
 		const task = this.#get<Pick<CodingTaskRow, "workspace">>("SELECT workspace FROM coding_tasks WHERE id=?", id);
-		if (!task?.workspace) throw Object.assign(new Error("Session workspace not found."), { statusCode: 404 });
+		if (!task?.workspace) throw notFound("Session workspace not found.");
 		const info = statSync(task.workspace, { bigint: true });
 		this.#db.prepare("UPDATE coding_tasks SET worktreeRemoved=0, workspaceDev=?, workspaceIno=? WHERE id=?").run(String(info.dev), String(info.ino), id);
 	}
@@ -493,7 +494,7 @@ export class LocalAgentHost {
 	/** Archive or restore a project. Archiving a project also archives its sessions; restoring leaves them archived. */
 	async setProjectArchived(id: string, archived: boolean) {
 		const project = this.#get<ProjectRow>("SELECT * FROM projects WHERE id=?", id);
-		if (!project) throw Object.assign(new Error("Project not found."), { statusCode: 404 });
+		if (!project) throw notFound("Project not found.");
 		const sessions = [];
 		if (archived) {
 			const tasks = this.#all<{ id: string }>("SELECT id FROM coding_tasks WHERE projectId=? AND archivedAt IS NULL", id);
@@ -548,7 +549,7 @@ export class LocalAgentHost {
 			}
 			return this.sessions().find(item => item.id === newId);
 		}
-		throw Object.assign(new Error("Session not found."), { statusCode: 404 });
+		throw notFound("Session not found.");
 	}
 
 	moveSession(sourceId: string, opts: { mode?: "coding" | "personal"; projectId?: string | null }) {
@@ -558,7 +559,7 @@ export class LocalAgentHost {
 				const targetProjectId = opts.projectId ? String(opts.projectId) : null;
 				if (targetProjectId) {
 					const proj = this.#get<Pick<ProjectRow, "id" | "repository">>("SELECT id, repository FROM projects WHERE id=?", targetProjectId);
-					if (!proj) throw Object.assign(new Error("Target project not found."), { statusCode: 404 });
+					if (!proj) throw notFound("Target project not found.");
 					this.#db.prepare("UPDATE coding_tasks SET projectId=?, repository=CASE WHEN repository='' THEN ? ELSE repository END WHERE id=?")
 						.run(targetProjectId, proj.repository ?? "", sourceId);
 				} else {
@@ -571,7 +572,7 @@ export class LocalAgentHost {
 		if (chat) {
 			if (opts.projectId) {
 				const proj = this.#get<Pick<ProjectRow, "id" | "repository">>("SELECT id, repository FROM projects WHERE id=?", opts.projectId);
-				if (!proj) throw Object.assign(new Error("Target project not found."), { statusCode: 404 });
+				if (!proj) throw notFound("Target project not found.");
 				this.#db.prepare(
 					"INSERT INTO coding_tasks (id,title,repository,kind,base,branch,workspace,status,message,createdAt,projectId,initialTitle) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
 				).run(chat.id, chat.title, proj.repository ?? "", proj.repository ? "existing" : "none", "main", null, proj.repository ?? null, "ready", null, chat.createdAt, proj.id, chat.title);
@@ -585,7 +586,7 @@ export class LocalAgentHost {
 			}
 			return this.sessions().find(item => item.id === sourceId);
 		}
-		throw Object.assign(new Error("Session not found."), { statusCode: 404 });
+		throw notFound("Session not found.");
 	}
 
 	async saveProject(input: Record<string, unknown> | null | undefined, id?: string) {
@@ -594,13 +595,13 @@ export class LocalAgentHost {
 			typeof input?.name !== "string" || !input.name.trim() || input.name.length > 100 ||
 			(input.githubUrl != null && typeof input.githubUrl !== "string") ||
 			(input.repository != null && typeof input.repository !== "string")) {
-			throw Object.assign(new Error("Provide a project ID, name and optional repository links."), { statusCode: 400 });
+			throw badRequest("Provide a project ID, name and optional repository links.");
 		}
 		let githubUrl: string | null = null;
 		if (typeof input.githubUrl === "string" && input.githubUrl.trim()) {
 			const match = /^(?:https:\/\/github\.com\/)?([a-z0-9-]+)\/([a-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(input.githubUrl.trim());
 			if (!match || [".", ".."].includes(match[2])) {
-				throw Object.assign(new Error("Use a GitHub repository URL or owner/repository, without credentials or query parameters."), { statusCode: 400 });
+				throw badRequest("Use a GitHub repository URL or owner/repository, without credentials or query parameters.");
 			}
 			githubUrl = `https://github.com/${match[1]}/${match[2]}`;
 		}
@@ -622,7 +623,7 @@ export class LocalAgentHost {
 
 		const existing = this.#db.prepare("SELECT * FROM projects WHERE id=?").get(projectId);
 		if (id) {
-			if (!existing) throw Object.assign(new Error("Project not found."), { statusCode: 404 });
+			if (!existing) throw notFound("Project not found.");
 			this.#db.prepare(
 				`UPDATE projects SET
 					name=?, githubUrl=?, repository=?,
@@ -648,7 +649,7 @@ export class LocalAgentHost {
 			);
 		} else if (existing) {
 			if (existing.name !== name || existing.githubUrl !== githubUrl || existing.repository !== repository) {
-				throw Object.assign(new Error("This project ID already belongs to different inputs."), { statusCode: 409 });
+				throw conflict("This project ID already belongs to different inputs.");
 			}
 		} else {
 			const now = Date.now();
@@ -673,7 +674,7 @@ export class LocalAgentHost {
 
 	deleteProject(id: string) {
 		const existing = this.#db.prepare("SELECT * FROM projects WHERE id=?").get(id);
-		if (!existing) throw Object.assign(new Error("Project not found."), { statusCode: 404 });
+		if (!existing) throw notFound("Project not found.");
 		this.#db.prepare("UPDATE coding_tasks SET projectId=NULL WHERE projectId=?").run(id);
 		this.#db.prepare("DELETE FROM projects WHERE id=?").run(id);
 		return { deleted: true, id };
@@ -775,10 +776,10 @@ export class LocalAgentHost {
 	async steerOrFollowUp(sessionId: string, content: string, mode: "steer" | "follow-up" = "steer"): Promise<{ ok: boolean; mode: string }> {
 		const trimmed = typeof content === "string" ? content.trim() : "";
 		if (!trimmed || trimmed.length > 8000) {
-			throw Object.assign(new Error("Enter a message between 1 and 8000 characters."), { statusCode: 400 });
+			throw badRequest("Enter a message between 1 and 8000 characters.");
 		}
 		const open = this.#sessions.get(sessionId);
-		if (!open) throw Object.assign(new Error("Session is not currently active."), { statusCode: 409 });
+		if (!open) throw conflict("Session is not currently active.");
 		const whenBusy = mode === "steer" ? "steer" : "followUp";
 		await open.root.submit({ type: "input", content: trimmed, whenBusy }, context);
 		this.events.emit("sessions.changed", { sessionId }, sessionId);
@@ -795,19 +796,19 @@ export class LocalAgentHost {
 
 	async compactSession(sessionId: string, instructions?: string): Promise<{ ok: boolean }> {
 		const open = this.#sessions.get(sessionId);
-		if (!open) throw Object.assign(new Error("Open or send a message in this session before compacting."), { statusCode: 409 });
+		if (!open) throw conflict("Open or send a message in this session before compacting.");
 		await open.root.compact(instructions, context);
 		return { ok: true };
 	}
 
 	async messageSubagent(sessionId: string, subagentId: string, message: string, mode: "steer" | "follow-up" = "follow-up"): Promise<{ ok: boolean }> {
 		const trimmed = typeof message === "string" ? message.trim() : "";
-		if (!trimmed) throw Object.assign(new Error("Provide a message for the subagent."), { statusCode: 400 });
+		if (!trimmed) throw badRequest("Provide a message for the subagent.");
 		const open = this.#sessions.get(sessionId);
-		if (!open) throw Object.assign(new Error("Session is not currently open."), { statusCode: 409 });
+		if (!open) throw conflict("Session is not currently open.");
 		const convId = toConversationId(subagentId);
 		const conv = await open.harness.conversation(convId, context);
-		if (!conv) throw Object.assign(new Error("Subagent not found."), { statusCode: 404 });
+		if (!conv) throw notFound("Subagent not found.");
 		await this.#watchConversation(sessionId, open.harness, convId, true);
 		const whenBusy = mode === "steer" ? "steer" : "followUp";
 		await conv.submit({ type: "input", content: trimmed, whenBusy }, context);
@@ -820,7 +821,7 @@ export class LocalAgentHost {
 		if (!open) return { ok: true };
 		const convId = toConversationId(subagentId);
 		const conv = await open.harness.conversation(convId, context);
-		if (!conv) throw Object.assign(new Error("Subagent not found."), { statusCode: 404 });
+		if (!conv) throw notFound("Subagent not found.");
 		await conv.abort(context);
 		this.events.emit("subagents.update", { sessionId, subagentId: String(convId) }, sessionId);
 		return { ok: true };
@@ -828,7 +829,7 @@ export class LocalAgentHost {
 
 	async featureAgents(taskId: string) {
 		const task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(taskId) as CodingTaskRow | undefined;
-		if (!task) throw Object.assign(new Error("Feature not found."), { statusCode: 404 });
+		if (!task) throw notFound("Feature not found.");
 		const path = join(this.#stateDirectory, `coding-task-${taskId}.sqlite`);
 		let harness = this.#sessions.get(taskId)?.harness;
 		if (!harness && !existsSync(path)) {
@@ -911,7 +912,7 @@ export class LocalAgentHost {
 
 	async projectAgents(projectId: string) {
 		if (!this.#db.prepare("SELECT 1 FROM projects WHERE id=?").get(projectId)) {
-			throw Object.assign(new Error("Project not found."), { statusCode: 404 });
+			throw notFound("Project not found.");
 		}
 		const sessions = this.#db.prepare("SELECT id,title FROM coding_tasks WHERE projectId=? ORDER BY createdAt DESC").all(projectId) as { id: string; title: string }[];
 		const agents = [];
@@ -993,14 +994,14 @@ export class LocalAgentHost {
 
 	async copilotAuth(action: unknown) {
 		const signIn = this.#runtimeModels?.signIn;
-		if (!signIn) throw Object.assign(new Error("Copilot sign-in is unavailable."), { statusCode: 404 });
+		if (!signIn) throw notFound("Copilot sign-in is unavailable.");
 		if (action === "start") return signIn.start();
 		if (action === "cancel") return signIn.cancel();
 		if (action === "sign-out") {
-			if (this.#active.size) throw Object.assign(new Error("Wait for active turns to finish before signing out."), { statusCode: 409 });
+			if (this.#active.size) throw conflict("Wait for active turns to finish before signing out.");
 			return signIn.signOut();
 		}
-		throw Object.assign(new Error("Unknown Copilot sign-in action."), { statusCode: 400 });
+		throw badRequest("Unknown Copilot sign-in action.");
 	}
 
 	safeErrorMessage(error: unknown) {
@@ -1008,14 +1009,14 @@ export class LocalAgentHost {
 	}
 
 	async modelCredentials(input: { action?: unknown; provider?: unknown; key?: unknown; url?: unknown; model?: unknown } | null | undefined) {
-		if (!this.#runtimeModels) throw Object.assign(new Error("Model credentials are unavailable."), { statusCode: 404 });
+		if (!this.#runtimeModels) throw notFound("Model credentials are unavailable.");
 		if (input?.action === "status") return { credentials: await this.#runtimeModels.credentialStatus(), compatible: this.#runtimeModels.compatibleStatus() };
 		if (input?.action === "configure-compatible") {
-			if (this.#active.size || this.#recovering.size) throw Object.assign(new Error("Wait for active work to finish before changing providers."), { statusCode: 409 });
+			if (this.#active.size || this.#recovering.size) throw conflict("Wait for active work to finish before changing providers.");
 			return { credentials: await this.#runtimeModels.credentialStatus(), compatible: this.#runtimeModels.configureCompatible({ url: input.url, model: input.model }) };
 		}
 		if (this.#credentialChangeBusy || this.#active.size || this.#recovering.size || this.#provisioning.size) {
-			throw Object.assign(new Error("Wait for active work to finish before changing model credentials."), { statusCode: 409 });
+			throw conflict("Wait for active work to finish before changing model credentials.");
 		}
 		this.#credentialChangeBusy = true;
 		this.#credentialRevision++;
@@ -1029,7 +1030,7 @@ export class LocalAgentHost {
 	async providerTools(input: { action?: unknown; id?: unknown; enabled?: unknown } | null | undefined) {
 		if (input?.action === "set") {
 			if (typeof input.id !== "string" || typeof input.enabled !== "boolean") {
-				throw Object.assign(new Error("Provide a provider id and enabled state."), { statusCode: 400 });
+				throw badRequest("Provide a provider id and enabled state.");
 			}
 			this.#db.prepare("INSERT INTO provider_preferences(id,enabled) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled")
 				.run(input.id, input.enabled ? 1 : 0);
@@ -1173,17 +1174,17 @@ export class LocalAgentHost {
 		if (typeof input?.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.id) ||
 			typeof input.kind !== "string" || !["none", "checkout", "worktree"].includes(input.kind) || typeof input.repository !== "string" ||
 			typeof input.title !== "string" || !input.title.trim() || input.title.length > 200) {
-			throw Object.assign(new Error("Provide a task ID, title, repository and workspace choice."), { statusCode: 400 });
+			throw badRequest("Provide a task ID, title, repository and workspace choice.");
 		}
 		if (input.projectId != null && (typeof input.projectId !== "string" || !this.#db.prepare("SELECT 1 FROM projects WHERE id=?").get(input.projectId))) {
-			throw Object.assign(new Error("Choose an existing project for this feature."), { statusCode: 400 });
+			throw badRequest("Choose an existing project for this feature.");
 		}
 		const project = typeof input.projectId === "string"
 			? (this.#db.prepare("SELECT * FROM projects WHERE id=?").get(input.projectId) as ProjectRow | undefined) ?? null
 			: null;
 		const githubIssue = validateLinkedIssue(input.githubIssue, project);
 		if (input.kind === "none" && input.repository.trim()) {
-			throw Object.assign(new Error("A workspace-free feature cannot have a checkout path."), { statusCode: 400 });
+			throw badRequest("A workspace-free feature cannot have a checkout path.");
 		}
 		type ValidatedInitialMessage = { id: string; content: string; provider: string; model: string; reasoning: string };
 		let initial: ValidatedInitialMessage | undefined;
@@ -1194,11 +1195,11 @@ export class LocalAgentHost {
 				typeof message.content !== "string" || !message.content.trim() || message.content.length > 8000 ||
 				typeof message.provider !== "string" || !message.provider || typeof message.model !== "string" || !message.model ||
 				typeof message.reasoning !== "string" || !["none", "off", "low", "medium", "high", "xhigh", "max"].includes(message.reasoning)) {
-				throw Object.assign(new Error("Provide a valid initial message, provider, model and reasoning level."), { statusCode: 400 });
+				throw badRequest("Provide a valid initial message, provider, model and reasoning level.");
 			}
 			initial = { id: message.id, content: message.content.trim(), provider: message.provider, model: message.model, reasoning: message.reasoning };
 		}
-		if (this.#closing) throw Object.assign(new Error("ADE is shutting down"), { statusCode: 503 });
+		if (this.#closing) throw serviceUnavailable("ADE is shutting down");
 		const repository = input.kind === "none" ? "" : await resolveCheckout(input.repository);
 		const normalizedInput = {
 			id: input.id,
@@ -1214,23 +1215,23 @@ export class LocalAgentHost {
 			const base = input.kind === "worktree" ? await resolveBaseCommit(repository, "HEAD") : "HEAD";
 			if (initial) {
 				config = await this.#modelConfig(initial.provider);
-				if (!config.configured) throw Object.assign(new Error(config.setupMessage || "The selected model provider is not configured"), { statusCode: 503 });
+				if (!config.configured) throw serviceUnavailable(config.setupMessage || "The selected model provider is not configured");
 				if (config.provider !== initial.provider || !config.resolveModel(initial.model)) {
-					throw Object.assign(new Error("The selected model is not available from this provider."), { statusCode: 400 });
+					throw badRequest("The selected model is not available from this provider.");
 				}
 			}
 			task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(input.id) as CodingTaskRow | undefined;
 			if (task) this.#verifyTaskInputs(task, normalizedInput, repository, initial);
 			if (!task) {
-				if (this.#closing) throw Object.assign(new Error("ADE is shutting down"), { statusCode: 503 });
+				if (this.#closing) throw serviceUnavailable("ADE is shutting down");
 				if (initial && (this.#credentialChangeBusy || credentialRevision !== this.#credentialRevision)) {
-					throw Object.assign(new Error("Model credentials changed. Retry the message."), { statusCode: 409 });
+					throw conflict("Model credentials changed. Retry the message.");
 				}
 				const now = Date.now();
 				this.#db.exec("BEGIN IMMEDIATE");
 				try {
 					if (initial && this.#db.prepare("SELECT 1 FROM turns WHERE id=?").get(initial.id)) {
-						throw Object.assign(new Error("This initial message ID already belongs to another turn."), { statusCode: 409 });
+						throw conflict("This initial message ID already belongs to another turn.");
 					}
 					this.#db.prepare("INSERT INTO coding_tasks (id,title,repository,kind,base,branch,status,createdAt,initialTurnId,projectId,initialTitle,issueUrl,issueRepository,issueNumber,issueTitle,issueState) VALUES (?,?,?,?,?,?,'provisioning',?,?,?,?,?,?,?,?,?)")
 						.run(input.id, input.title.trim(), repository, input.kind, base, branch, now, initial?.id ?? null, normalizedInput.projectId, input.title.trim(),
@@ -1247,7 +1248,7 @@ export class LocalAgentHost {
 		}
 		if (task?.status === "provisioning") await this.#ensureProvisioned(task, manager);
 		task = this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(input.id) as CodingTaskRow | undefined;
-		if (!task) throw Object.assign(new Error("Session not found."), { statusCode: 404 });
+		if (!task) throw notFound("Session not found.");
 		const pendingStatus = initial
 			? (this.#db.prepare("SELECT status FROM turns WHERE id=?").get(initial.id) as { status: string } | undefined)?.status
 			: undefined;
@@ -1278,13 +1279,13 @@ export class LocalAgentHost {
 			task.initialTurnId !== (initial?.id ?? null) || task.projectId !== (input.projectId ?? null) ||
 			task.issueUrl !== (issue?.url ?? null) || task.issueRepository !== (issue?.repository ?? null) || task.issueNumber !== (issue?.number ?? null) ||
 			task.issueTitle !== (issue?.title ?? null) || task.issueState !== (issue?.state ?? null)) {
-			throw Object.assign(new Error("This task ID already belongs to different inputs."), { statusCode: 409 });
+			throw conflict("This task ID already belongs to different inputs.");
 		}
 		if (initial) {
 			const turn = this.#db.prepare("SELECT * FROM turns WHERE id=?").get(initial.id) as TurnRow | undefined;
 			if (!turn || turn.taskId !== task.id || turn.content !== initial.content || turn.provider !== initial.provider ||
 				turn.model !== initial.model || turn.reasoning !== initial.reasoning) {
-				throw Object.assign(new Error("This task ID already belongs to a different initial message."), { statusCode: 409 });
+				throw conflict("This task ID already belongs to a different initial message.");
 			}
 		}
 	}
@@ -1322,7 +1323,7 @@ export class LocalAgentHost {
 
 	async #verifyTaskWorkspace(task: CodingTaskRow) {
 		if (task.kind === "none") return;
-		if (!task.workspace) throw Object.assign(new Error("Task workspace is missing."), { statusCode: 409 });
+		if (!task.workspace) throw conflict("Task workspace is missing.");
 		try {
 			const info = statSync(task.workspace, { bigint: true });
 			if (String(info.dev) !== task.workspaceDev || String(info.ino) !== task.workspaceIno) {
@@ -1330,7 +1331,7 @@ export class LocalAgentHost {
 			}
 			await resolveCheckout(task.workspace);
 		} catch (error) {
-			throw Object.assign(new Error(`Task workspace unavailable: ${this.safeErrorMessage(error)}. It will not be retargeted automatically.`), { statusCode: 409 });
+			throw conflict(`Task workspace unavailable: ${this.safeErrorMessage(error)}. It will not be retargeted automatically.`);
 		}
 	}
 
@@ -1347,7 +1348,7 @@ export class LocalAgentHost {
 		if (existing.mode !== mode || existing.taskId !== taskId || existing.chatId !== chatId || existing.content !== input.content.trim() ||
 			(input.provider && existing.provider !== input.provider) || (input.model && existing.model !== input.model) ||
 			(input.reasoning && existing.reasoning !== input.reasoning)) {
-			throw Object.assign(new Error("This message ID was already used with different inputs."), { statusCode: 409 });
+			throw conflict("This message ID was already used with different inputs.");
 		}
 		if (this.#active.has(key)) await this.#active.get(key);
 		return this.sessions().find(item => item.id === key);
@@ -1360,22 +1361,22 @@ export class LocalAgentHost {
 		chatId: string | null = null,
 	) {
 		const credentialRevision = this.#credentialRevision;
-		if (!Object.hasOwn(modes, mode)) throw Object.assign(new Error("Unknown conversation"), { statusCode: 404 });
+		if (!Object.hasOwn(modes, mode)) throw notFound("Unknown conversation");
 		const sessionMode = mode as SessionMode;
 		const task = taskId ? (this.#db.prepare("SELECT * FROM coding_tasks WHERE id=?").get(taskId) as CodingTaskRow | undefined) ?? null : null;
-		if (taskId && (sessionMode !== "coding" || !task || task.status !== "ready")) throw Object.assign(new Error("This coding task has no ready workspace."), { statusCode: 409 });
-		if (task?.archivedAt) throw Object.assign(new Error("This session is archived. Restore it to continue."), { statusCode: 409 });
-		if (task?.worktreeRemoved) throw Object.assign(new Error("This session's worktree was removed when it was archived."), { statusCode: 409 });
+		if (taskId && (sessionMode !== "coding" || !task || task.status !== "ready")) throw conflict("This coding task has no ready workspace.");
+		if (task?.archivedAt) throw conflict("This session is archived. Restore it to continue.");
+		if (task?.worktreeRemoved) throw conflict("This session's worktree was removed when it was archived.");
 		const chat = chatId ? (this.#db.prepare("SELECT * FROM chat_threads WHERE id=?").get(chatId) as ChatThreadRow | undefined) ?? null : null;
-		if (chatId && (!chat || chat.mode !== sessionMode || taskId)) throw Object.assign(new Error("This chat thread is unavailable."), { statusCode: 404 });
+		if (chatId && (!chat || chat.mode !== sessionMode || taskId)) throw notFound("This chat thread is unavailable.");
 		const key = chatId ?? taskId ?? sessionMode;
-		if (this.#closing) throw Object.assign(new Error("ADE is shutting down"), { statusCode: 503 });
+		if (this.#closing) throw serviceUnavailable("ADE is shutting down");
 		if (typeof input?.content !== "string" || !input.content.trim() || input.content.length > 8000) {
-			throw Object.assign(new Error("Enter a message between 1 and 8000 characters"), { statusCode: 400 });
+			throw badRequest("Enter a message between 1 and 8000 characters");
 		}
 		if (input.id !== undefined) {
 			if (typeof input.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.id)) {
-				throw Object.assign(new Error("Invalid message ID."), { statusCode: 400 });
+				throw badRequest("Invalid message ID.");
 			}
 		}
 		const normalizedSend = {
@@ -1392,9 +1393,9 @@ export class LocalAgentHost {
 		const config = await this.#modelConfig(normalizedSend.provider);
 		const admitted = await this.#existingTurn(sessionMode, taskId, chatId, normalizedSend, key);
 		if (admitted) return admitted;
-		if (this.#closing) throw Object.assign(new Error("ADE is shutting down"), { statusCode: 503 });
+		if (this.#closing) throw serviceUnavailable("ADE is shutting down");
 		if (this.#credentialChangeBusy || credentialRevision !== this.#credentialRevision) {
-			throw Object.assign(new Error("Model credentials changed. Retry the message."), { statusCode: 409 });
+			throw conflict("Model credentials changed. Retry the message.");
 		}
 		if (this.#active.has(key) || this.#recovering.has(key) ||
 			(chatId ? this.#db.prepare("SELECT 1 FROM turns WHERE chatId=? AND status='pending' LIMIT 1").get(chatId)
@@ -1402,23 +1403,23 @@ export class LocalAgentHost {
 				: this.#db.prepare("SELECT 1 FROM turns WHERE mode=? AND taskId IS NULL AND chatId IS NULL AND status='pending' LIMIT 1").get(sessionMode))) {
 			const alreadyAdmitted = await this.#existingTurn(sessionMode, taskId, chatId, normalizedSend, key);
 			if (alreadyAdmitted) return alreadyAdmitted;
-			throw Object.assign(new Error("This conversation has a turn in progress or awaiting recovery"), { statusCode: 409 });
+			throw conflict("This conversation has a turn in progress or awaiting recovery");
 		}
 		if (task) {
 			const otherTasks = this.#db.prepare("SELECT id FROM coding_tasks WHERE id<>? AND workspaceDev=? AND workspaceIno=?").all(taskId, task.workspaceDev, task.workspaceIno) as { id: string }[];
 			if (otherTasks.some(other => this.#active.has(other.id) || this.#recovering.has(other.id) ||
 				this.#db.prepare("SELECT 1 FROM turns WHERE taskId=? AND status='pending'").get(other.id))) {
-				throw Object.assign(new Error("Another task is already working in this checkout. Use a separate worktree for concurrent work."), { statusCode: 409 });
+				throw conflict("Another task is already working in this checkout. Use a separate worktree for concurrent work.");
 			}
 		}
-		if (!config.configured) throw Object.assign(new Error(config.setupMessage || "The selected model provider is not configured"), { statusCode: 503 });
+		if (!config.configured) throw serviceUnavailable(config.setupMessage || "The selected model provider is not configured");
 		const modelId = normalizedSend.model || config.defaultModel;
 		if (!modelId || !config.resolveModel(modelId)) {
-			throw Object.assign(new Error(`Model "${modelId || "(none)"}" is not available from ${config.provider}`), { statusCode: 400 });
+			throw badRequest(`Model "${modelId || "(none)"}" is not available from ${config.provider}`);
 		}
 		const reasoning = normalizedSend.reasoning ?? "medium";
 		if (!["none", "off", "low", "medium", "high", "xhigh", "max"].includes(reasoning)) {
-			throw Object.assign(new Error("Reasoning must be none, off, low, medium, high, xhigh, or max"), { statusCode: 400 });
+			throw badRequest("Reasoning must be none, off, low, medium, high, xhigh, or max");
 		}
 		const now = Date.now();
 		const turn = { id: normalizedSend.id ?? randomUUID(), mode: sessionMode, taskId, chatId, content: normalizedSend.content.trim(), provider: config.provider, model: modelId, reasoning };
@@ -1547,7 +1548,7 @@ export class LocalAgentHost {
 		recovery = false,
 	) {
 		const key = turn.chatId ?? turn.taskId ?? turn.mode;
-		if (this.#active.has(key)) throw Object.assign(new Error("This conversation is already processing a turn"), { statusCode: 409 });
+		if (this.#active.has(key)) throw conflict("This conversation is already processing a turn");
 		const operation = (async () => {
 			this.events.emit("sessions.changed", { sessionId: key, status: "working" }, key);
 			try {
@@ -1566,7 +1567,7 @@ export class LocalAgentHost {
 						? `Turn ended without an answer: ${settled.reason}${detail}${config.provider === copilotId && settled.reason === "model_error" ? ". Check your Copilot access or reconnect in Settings." : ""}`
 						: `Turn ended with status "${settled.status}"`;
 					this.#finishTurn(turn.id, "failed", null, error);
-					throw Object.assign(new Error(error), { statusCode: 502 });
+					throw badGateway(error);
 				}
 				const transcript = await session.root.context(context);
 				const assistantMessage = [...transcript.messages].reverse().find((message) => message.role === "assistant");
@@ -1588,7 +1589,7 @@ export class LocalAgentHost {
 					? `Saved turn ${turn.id} could not be reconnected`
 					: safeMessage;
 				const statusCode = (error as { statusCode?: number })?.statusCode ?? 502;
-				throw Object.assign(new Error(message), { statusCode });
+				throw httpError(statusCode, message);
 			} finally {
 				this.#active.delete(key);
 				this.events.emit("sessions.changed", { sessionId: key, status: "idle" }, key);

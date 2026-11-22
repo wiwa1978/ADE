@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { createGitHubRepositories } from "./github-repositories.ts";
 import { LocalAgentHost } from "./host.ts";
 import { createRuntimeServer } from "./server.ts";
+import { badGateway } from "./http-error.ts";
 
 test("GitHub repository search checks the account and finds matching public and private repositories across pages", async () => {
 	const requests: string[][] = [];
@@ -138,7 +139,7 @@ test("CLI sign-in is detected automatically and an explicit disconnect remains d
 		const githubRepositories = {
 			async connect() {
 				calls++;
-				if (!signedIn) throw Object.assign(new Error("Sign in to GitHub CLI."), { statusCode: 502 });
+				if (!signedIn) throw badGateway("Sign in to GitHub CLI.");
 				return { login: "fixture-user" };
 			},
 		} as unknown as ReturnType<typeof createGitHubRepositories>;

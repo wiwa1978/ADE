@@ -1,9 +1,10 @@
 import type { ApprovalPolicy } from "./approvals.ts";
 import type { McpServerConfig } from "./mcp.ts";
 import type { ModelProfileId, ModelRef } from "../packages/protocol/index.ts";
+import { badRequest } from "./http-error.ts";
 
 function badInput(message: string): Error {
-	return Object.assign(new Error(message), { statusCode: 400 });
+	return badRequest(message);
 }
 
 export function requireString(

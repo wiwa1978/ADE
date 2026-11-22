@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { badRequest, conflict, httpError } from "./http-error.ts";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -35,7 +36,7 @@ async function git(repository: string, args: string[], options: ExecFileOptions 
 }
 
 function inputError(message: string, statusCode = 400) {
-	return Object.assign(new Error(message), { statusCode });
+	return httpError(statusCode, message);
 }
 
 function samePath(left: string, right: string): boolean {
@@ -57,15 +58,15 @@ function samePath(left: string, right: string): boolean {
 
 export async function inspectWorktrees(repository: unknown) {
 	if (typeof repository !== "string" || !isAbsolute(repository) || repository.includes("\0")) {
-		throw Object.assign(new Error("Enter an absolute path to a local Git checkout."), { statusCode: 400 });
+		throw badRequest("Enter an absolute path to a local Git checkout.");
 	}
 	let output: string;
 	try {
 		const res = await git(repository, ["-c", "core.fsmonitor=false", "worktree", "list", "--porcelain", "-z"], { timeout: 10000 });
 		output = String(res.stdout);
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException)?.code === "ENOENT") throw Object.assign(new Error("Git is not installed or the checkout path does not exist."), { statusCode: 400 });
-		throw Object.assign(new Error("Could not inspect this Git checkout. Verify the path, Git trust settings, and repository access."), { statusCode: 400 });
+		if ((error as NodeJS.ErrnoException)?.code === "ENOENT") throw badRequest("Git is not installed or the checkout path does not exist.");
+		throw badRequest("Could not inspect this Git checkout. Verify the path, Git trust settings, and repository access.");
 	}
 	const entries = [];
 	for (const record of output.split("\0\0")) {
@@ -116,7 +117,7 @@ export async function resolveBaseCommit(repository: string, base: string): Promi
 export async function removeWorktree({ repository, path, allowedRoot }: { repository: string; path: string; allowedRoot: string }) {
 	const root = resolve(allowedRoot);
 	const target = resolve(path);
-	if (!target.startsWith(`${root}${sep}`)) throw Object.assign(new Error("Only worktrees created by ADE can be removed."), { statusCode: 400 });
+	if (!target.startsWith(`${root}${sep}`)) throw badRequest("Only worktrees created by ADE can be removed.");
 	await execFileAsync("git", ["worktree", "remove", "--force", target], { cwd: repository, timeout: 30000, windowsHide: true, env: gitEnvironment() });
 	await execFileAsync("git", ["worktree", "prune"], { cwd: repository, timeout: 30000, windowsHide: true }).catch(() => undefined);
 }
@@ -125,8 +126,8 @@ export async function removeWorktree({ repository, path, allowedRoot }: { reposi
 export async function restoreWorktree({ repository, path, branch, allowedRoot }: { repository: string; path: string; branch: string; allowedRoot: string }) {
 	const root = resolve(allowedRoot);
 	const target = resolve(path);
-	if (!target.startsWith(`${root}${sep}`)) throw Object.assign(new Error("Only worktrees created by ADE can be restored."), { statusCode: 400 });
-	if (existsSync(target)) throw Object.assign(new Error("The worktree folder already exists."), { statusCode: 409 });
+	if (!target.startsWith(`${root}${sep}`)) throw badRequest("Only worktrees created by ADE can be restored.");
+	if (existsSync(target)) throw conflict("The worktree folder already exists.");
 	await execFileAsync("git", ["worktree", "add", target, branch], { cwd: repository, timeout: 60000, windowsHide: true, env: gitEnvironment() });
 }
 

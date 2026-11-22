@@ -7,6 +7,7 @@ import type { AddressInfo } from "node:net";
 import { detectGitHubRemoteFromCheckout, LocalAgentHost } from "./host.ts";
 import { safeErrorMessage } from "./models.ts";
 import { logger } from "./log.ts";
+import { badGateway, badRequest, conflict, HttpError, notFound, payloadTooLarge, unsupportedMediaType } from "./http-error.ts";
 import { createSessionGit } from "./session-git.ts";
 import { inspectWorktrees, removeWorktree, resolveCheckout, restoreWorktree, WorktreeManager } from "./worktrees.ts";
 import { createGitHubRepositories } from "./github-repositories.ts";
@@ -92,24 +93,24 @@ function json(response: ServerResponse, status: number, value: unknown) {
 
 async function readBody(request: IncomingMessage, maxBytes = 16_384): Promise<Record<string, unknown>> {
 	if (!request.headers["content-type"]?.startsWith("application/json")) {
-		throw Object.assign(new Error("JSON content type required"), { statusCode: 415 });
+		throw unsupportedMediaType("JSON content type required");
 	}
 	let size = 0;
 	const chunks: Buffer[] = [];
 	for await (const chunk of request) {
 		const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
 		size += buf.length;
-		if (size > maxBytes) throw Object.assign(new Error("Request too large"), { statusCode: 413 });
+		if (size > maxBytes) throw payloadTooLarge("Request too large");
 		chunks.push(buf);
 	}
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
 	} catch {
-		throw Object.assign(new Error("Invalid JSON"), { statusCode: 400 });
+		throw badRequest("Invalid JSON");
 	}
 	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-		throw Object.assign(new Error("JSON object body required"), { statusCode: 400 });
+		throw badRequest("JSON object body required");
 	}
 	return parsed as Record<string, unknown>;
 }
@@ -154,7 +155,7 @@ async function proxyRemoteRequest(
 			upstreamResponse.pipe(response);
 			upstreamResponse.once("end", () => resolve());
 		});
-		upstream.once("error", error => reject(Object.assign(new Error("The selected SSH environment could not be reached."), { statusCode: 502, cause: error })));
+		upstream.once("error", error => reject(badGateway("The selected SSH environment could not be reached.", { cause: error })));
 		if (body) upstream.write(body);
 		upstream.end();
 	});
@@ -471,7 +472,7 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 				const revision = githubConnectionRevision;
 				const account = await githubRepositories.connect();
 				if (revision !== githubConnectionRevision) {
-					throw Object.assign(new Error("The GitHub connection changed. Try again in Settings."), { statusCode: 409 });
+					throw conflict("The GitHub connection changed. Try again in Settings.");
 				}
 				const connection = host.connectGitHub(account.login);
 				githubConnectionRevision++;
@@ -484,7 +485,7 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 				const revision = githubConnectionRevision;
 				const account = await githubRepositories.connect();
 				if (revision !== githubConnectionRevision) {
-					throw Object.assign(new Error("The GitHub connection changed. Try again in Settings."), { statusCode: 409 });
+					throw conflict("The GitHub connection changed. Try again in Settings.");
 				}
 				const connection = host.connectGitHub(account.login);
 				githubConnectionRevision++;
@@ -518,12 +519,12 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 				const connection = host.githubConnection();
 				if (!connection.login || typeof input.login !== "string" ||
 					input.login.toLowerCase() !== connection.login.toLowerCase()) {
-					throw Object.assign(new Error("Connect your GitHub CLI account in Settings before searching."), { statusCode: 409 });
+					throw conflict("Connect your GitHub CLI account in Settings before searching.");
 				}
 				const revision = githubConnectionRevision;
 				const result = await githubRepositories.search({ ...input, login: connection.login });
 				if (revision !== githubConnectionRevision) {
-					throw Object.assign(new Error("The GitHub connection changed. Try again in Settings."), { statusCode: 409 });
+					throw conflict("The GitHub connection changed. Try again in Settings.");
 				}
 				return json(response, 200, result);
 			}
@@ -564,7 +565,7 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 				if (!origins.includes(request.headers.origin)) return json(response, 403, { error: "Use ADE to send a chat message." });
 				const input = validateSendMessage(await readBody(request));
 				const session = host.sessions().find(item => item.id === chatMessage[1]);
-				if (!session?.chatThread) throw Object.assign(new Error("Chat not found."), { statusCode: 404 });
+				if (!session?.chatThread) throw notFound("Chat not found.");
 				return json(response, 200, { session: await host.send(session.mode, input, null, chatMessage[1]) });
 			}
 			const projectAgents = /^\/api\/projects\/([0-9a-f-]+)\/agents$/i.exec(path);
@@ -866,8 +867,22 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 				return json(response, 200, { servers: host.mcp.list() });
 			}
 			json(response, 404, { error: "Not found" });
-		})().catch((error) => {
-			json(response, error.statusCode ?? 500, { error: host.safeErrorMessage?.(error) ?? safeErrorMessage(error) });
+		})().catch((error: unknown) => {
+			if (error instanceof HttpError) {
+				if (error.status >= 500) {
+					logger.error("HTTP request failed with server error", {
+						error,
+						context: { method: request.method, url: request.url, status: error.status },
+					});
+				}
+				json(response, error.status, { error: host.safeErrorMessage?.(error) ?? safeErrorMessage(error) });
+				return;
+			}
+			logger.error("Unhandled HTTP request error", {
+				error,
+				context: { method: request.method, url: request.url },
+			});
+			json(response, 500, { error: host.safeErrorMessage?.(error) ?? safeErrorMessage(error) });
 		});
 	});
 	return server;

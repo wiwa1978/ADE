@@ -7,6 +7,7 @@ import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { int, obj, opt, str } from "@earendil-works/pi-schema";
 import type { RuntimeEventBus } from "./events.ts";
 import { isErrorCode, logger } from "./log.ts";
+import { badRequest, serviceUnavailable } from "./http-error.ts";
 
 export type BrowserViewport = { width: number; height: number; preset: "desktop" | "tablet" | "mobile" };
 
@@ -56,7 +57,7 @@ export function validateExternalUrl(raw: string): string {
 	const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 	const parsed = new URL(withProtocol);
 	if (!["http:", "https:"].includes(parsed.protocol)) {
-		throw Object.assign(new Error("Only http:// and https:// URLs are allowed."), { statusCode: 400 });
+		throw badRequest("Only http:// and https:// URLs are allowed.");
 	}
 	return parsed.toString();
 }
@@ -220,7 +221,7 @@ export class BrowserManager {
 		if (!this.#chromePath) {
 			this.#state.error = "No local Chrome/Chromium binary found. Set ADE_CHROME_PATH or use iframe / external browser mode.";
 			this.#emitState();
-			throw Object.assign(new Error(this.#state.error), { statusCode: 503 });
+			throw serviceUnavailable(this.#state.error);
 		}
 		const port = await getFreePort();
 		const profileDir = join(this.#stateDirectory, "browser-profile");

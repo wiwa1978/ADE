@@ -4,6 +4,7 @@ import { extname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { workspacePath } from "./coding-tools.ts";
 import { isErrorCode, logger } from "./log.ts";
+import { badRequest, internalError, payloadTooLarge } from "./http-error.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -69,8 +70,8 @@ export function listWorkspaceDirectory(root: string, relPath = "."): WorkspaceEn
 export function readWorkspaceFile(root: string, relPath: string): { path: string; content: string; language: string; size: number; binary: boolean } {
 	const full = workspacePath(root, relPath, { mustExist: true });
 	const stat = lstatSync(full);
-	if (!stat.isFile()) throw Object.assign(new Error("Path is not a file."), { statusCode: 400 });
-	if (stat.size > 2_000_000) throw Object.assign(new Error("File is too large to open in the editor (>2MB)."), { statusCode: 413 });
+	if (!stat.isFile()) throw badRequest("Path is not a file.");
+	if (stat.size > 2_000_000) throw payloadTooLarge("File is too large to open in the editor (>2MB).");
 	const buf = readFileSync(full);
 	let binary = false;
 	for (let i = 0; i < Math.min(buf.length, 4096); i++) {
@@ -95,7 +96,7 @@ export function readWorkspaceFile(root: string, relPath: string): { path: string
 }
 
 export function writeWorkspaceFile(root: string, relPath: string, content: string): { path: string; size: number } {
-	if (typeof content !== "string") throw Object.assign(new Error("Content must be a string."), { statusCode: 400 });
+	if (typeof content !== "string") throw badRequest("Content must be a string.");
 	const full = workspacePath(root, relPath, { mustExist: false });
 	writeFileSync(full, content, "utf8");
 	return { path: relPath.replace(/\\/g, "/"), size: Buffer.byteLength(content, "utf8") };
@@ -225,10 +226,7 @@ export async function getWorkspaceFileDiff(workspace: string, filePath: string, 
 		out = await runGit(workspace, args);
 	} catch (error) {
 		logger.warn("git diff failed for workspace file", { error, context: { workspace, filePath, staged } });
-		throw Object.assign(
-			new Error(`Could not load Git diff for ${filePath}: ${error instanceof Error ? error.message : String(error)}`),
-			{ statusCode: 500 },
-		);
+		throw internalError(`Could not load Git diff for ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
 	}
 	if (out.trim()) return out;
 	// Check if untracked file — synthesize unified diff
@@ -282,7 +280,7 @@ export async function gitDiscardFile(workspace: string, filePath: string): Promi
 
 export async function gitCommitChanges(workspace: string, message: string): Promise<{ hash: string; summary: string }> {
 	const trimmed = message.trim();
-	if (!trimmed) throw Object.assign(new Error("Enter a commit message."), { statusCode: 400 });
+	if (!trimmed) throw badRequest("Enter a commit message.");
 	const out = await runGit(workspace, ["commit", "-m", trimmed]);
 	const hash = (await runGit(workspace, ["rev-parse", "--short", "HEAD"])).trim();
 	return { hash, summary: out.trim() };

@@ -4,6 +4,7 @@ import { request as httpRequest } from "node:http";
 import { createServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { httpError } from "./http-error.ts";
 
 const DEFAULT_REMOTE_PORT = 4319;
 const DEFAULT_SSH_PORT = 22;
@@ -25,7 +26,7 @@ type ActiveTunnel = {
 };
 
 function inputError(message: string, statusCode = 400) {
-	return Object.assign(new Error(message), { statusCode });
+	return httpError(statusCode, message);
 }
 
 function parseSshHost(value: unknown): string {

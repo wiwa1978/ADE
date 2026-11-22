@@ -4,14 +4,11 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { workspacePath } from "./coding-tools.ts";
+import { badGateway, httpError } from "./http-error.ts";
 
 const execute = promisify(execFile);
 
 export type CommandRunner = (command: "git" | "gh", args: string[], cwd: string) => Promise<string>;
-
-function httpError(status: number, message: string) {
-	return Object.assign(new Error(message), { statusCode: status });
-}
 
 const defaultRunner: CommandRunner = async (command, args, cwd) => {
 	try {
@@ -31,7 +28,7 @@ const defaultRunner: CommandRunner = async (command, args, cwd) => {
 				: "Git was not found on this host.");
 		}
 		const detail = String(err?.stderr || err?.message || "").trim().split("\n").filter(Boolean).slice(-3).join(" ");
-		throw Object.assign(new Error(detail || `${command} ${args[0]} failed.`), { statusCode: 502, stderr: String(err?.stderr ?? "") });
+		throw badGateway(detail || `${command} ${args[0]} failed.`, { stderr: String(err?.stderr ?? "") });
 	}
 };
 

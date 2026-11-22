@@ -4,6 +4,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { defineExtension, defineSignal, hook, ToolTask, type Harness } from "@earendil-works/pi-durable";
 import { bool, obj, opt, str } from "@earendil-works/pi-schema";
 import type { RuntimeEventBus } from "./events.ts";
+import { badRequest, notFound } from "./http-error.ts";
 
 export type ApprovalPolicy = "ask" | "auto-safe" | "auto-all";
 
@@ -119,7 +120,7 @@ export class ApprovalManager {
 
 	setPolicy(policy: ApprovalPolicy, sessionId?: string): void {
 		if (!["ask", "auto-safe", "auto-all"].includes(policy)) {
-			throw Object.assign(new Error("Approval policy must be ask, auto-safe, or auto-all."), { statusCode: 400 });
+			throw badRequest("Approval policy must be ask, auto-safe, or auto-all.");
 		}
 		if (sessionId) {
 			this.#sessionPolicies.set(sessionId, policy);
@@ -228,7 +229,7 @@ export class ApprovalManager {
 	async resolve(id: string, decision: { allow: boolean; alwaysAllow?: boolean; prefix?: string; reason?: string }): Promise<PendingApproval> {
 		const pending = this.#pending.get(id);
 		if (!pending) {
-			throw Object.assign(new Error("Approval request not found or already resolved."), { statusCode: 404 });
+			throw notFound("Approval request not found or already resolved.");
 		}
 		if (decision.allow && decision.alwaysAllow) {
 			this.addRule(pending.toolName, decision.prefix || pending.suggestedPrefix || "*");

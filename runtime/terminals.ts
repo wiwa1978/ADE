@@ -2,6 +2,7 @@ import { spawn as spawnPty, type IPty } from "node-pty";
 import { realpathSync, statSync } from "node:fs";
 import { basename, isAbsolute, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
+import { httpError } from "./http-error.ts";
 
 const MAX_INPUT_BYTES = 8_192;
 const MAX_OUTPUT_CHARACTERS = 500_000;
@@ -19,7 +20,7 @@ type TerminalRecord = {
 };
 
 function inputError(message: string, statusCode = 400) {
-	return Object.assign(new Error(message), { statusCode });
+	return httpError(statusCode, message);
 }
 
 function integerInRange(value: unknown, min: number, max: number, fallback: number | undefined, label: string): number {

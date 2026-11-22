@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { arr, bool, obj, opt, str } from "@earendil-works/pi-schema";
 import type { RuntimeEventBus } from "./events.ts";
+import { notFound } from "./http-error.ts";
 
 export type ArtifactKind = "plan" | "markdown" | "html" | "walkthrough" | "diff";
 export type ArtifactStatus = "draft" | "awaiting_approval" | "approved" | "changes_requested";
@@ -94,7 +95,7 @@ export class ArtifactManager {
 
 	reviewArtifact(id: string, decision: "approved" | "changes_requested", feedback?: string): SessionArtifact {
 		const existing = this.getArtifact(id);
-		if (!existing) throw Object.assign(new Error("Artifact not found."), { statusCode: 404 });
+		if (!existing) throw notFound("Artifact not found.");
 		const now = Date.now();
 		this.#db.prepare("UPDATE session_artifacts SET status=?, feedback=?, updatedAt=? WHERE id=?")
 			.run(decision, feedback?.trim() || null, now, id);

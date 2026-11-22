@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
+import { badGateway, badRequest, conflict, serviceUnavailable } from "./http-error.ts";
 
 const execute = promisify(execFile);
 
@@ -15,15 +16,9 @@ async function runGh(args: string[]): Promise<string> {
 		return stdout;
 	} catch (error) {
 		if ((error as { code?: unknown })?.code === "ENOENT") {
-			throw Object.assign(
-				new Error("GitHub CLI was not found. Install gh, then sign in with gh auth login --hostname github.com --web."),
-				{ statusCode: 503 },
-			);
+			throw serviceUnavailable("GitHub CLI was not found. Install gh, then sign in with gh auth login --hostname github.com --web.");
 		}
-		throw Object.assign(
-			new Error("GitHub CLI could not access GitHub. Check your connection and sign in with gh auth login --hostname github.com --web."),
-			{ statusCode: 502 },
-		);
+		throw badGateway("GitHub CLI could not access GitHub. Check your connection and sign in with gh auth login --hostname github.com --web.");
 	}
 }
 
@@ -56,10 +51,7 @@ async function githubRestJson(token: string, path: string): Promise<unknown> {
 		},
 	});
 	if (!response.ok) {
-		throw Object.assign(
-			new Error("GitHub CLI could not access GitHub. Check your connection and sign in with gh auth login --hostname github.com --web."),
-			{ statusCode: 502 },
-		);
+		throw badGateway("GitHub CLI could not access GitHub. Check your connection and sign in with gh auth login --hostname github.com --web.");
 	}
 	return response.json();
 }
@@ -85,7 +77,7 @@ export function createGitHubRepositories(run = runGh) {
 		const data = (await githubRestJson(token, "user")) as { login?: unknown };
 		const login = typeof data?.login === "string" ? data.login.trim() : "";
 		if (!/^[a-z0-9](?:[a-z0-9-]{0,38})$/i.test(login)) {
-			throw Object.assign(new Error("GitHub CLI did not return a valid account. Check your GitHub CLI sign-in."), { statusCode: 502 });
+			throw badGateway("GitHub CLI did not return a valid account. Check your GitHub CLI sign-in.");
 		}
 		tokenLoginCache.set(fp, { login, expiresAt: Date.now() + CACHE_TTL_MS });
 		return login;
@@ -98,14 +90,14 @@ export function createGitHubRepositories(run = runGh) {
 		}
 		const login = (await run(["api", "--hostname", "github.com", "user", "--jq", ".login"])).trim();
 		if (!/^[a-z0-9](?:[a-z0-9-]{0,38})$/i.test(login)) {
-			throw Object.assign(new Error("GitHub CLI did not return a valid account. Check your GitHub CLI sign-in."), { statusCode: 502 });
+			throw badGateway("GitHub CLI did not return a valid account. Check your GitHub CLI sign-in.");
 		}
 		return login;
 	}
 
 	function parseRepoList(data: unknown): RepoEntry[] {
 		if (!Array.isArray(data)) {
-			throw Object.assign(new Error("GitHub returned an invalid repository list."), { statusCode: 502 });
+			throw badGateway("GitHub returned an invalid repository list.");
 		}
 		const out: RepoEntry[] = [];
 		for (const repo of data) {
@@ -116,7 +108,7 @@ export function createGitHubRepositories(run = runGh) {
 				[".", ".."].includes(repo.full_name.split("/")[1]) ||
 				typeof repo.private !== "boolean"
 			) {
-				throw Object.assign(new Error("GitHub returned invalid repository details."), { statusCode: 502 });
+				throw badGateway("GitHub returned invalid repository details.");
 			}
 			out.push({ fullName: repo.full_name, private: repo.private });
 		}
@@ -139,7 +131,7 @@ export function createGitHubRepositories(run = runGh) {
 			addReadme?: boolean;
 		} = {}) {
 			if (typeof name !== "string" || !name.trim()) {
-				throw Object.assign(new Error("Provide a repository name (e.g. my-app or org/my-app)."), { statusCode: 400 });
+				throw badRequest("Provide a repository name (e.g. my-app or org/my-app).");
 			}
 			const trimmed = name.trim();
 			if (
@@ -147,13 +139,10 @@ export function createGitHubRepositories(run = runGh) {
 				trimmed.endsWith(".") ||
 				trimmed.includes("..")
 			) {
-				throw Object.assign(
-					new Error("Repository name may only contain letters, numbers, hyphens, dots, and underscores."),
-					{ statusCode: 400 },
-				);
+				throw badRequest("Repository name may only contain letters, numbers, hyphens, dots, and underscores.");
 			}
 			if (visibility !== "private" && visibility !== "public") {
-				throw Object.assign(new Error("Visibility must be private or public."), { statusCode: 400 });
+				throw badRequest("Visibility must be private or public.");
 			}
 			const login = await account();
 			const target = trimmed.includes("/") ? trimmed : `${login}/${trimmed}`;
@@ -177,7 +166,7 @@ export function createGitHubRepositories(run = runGh) {
 		},
 		async listIssues({ repository, state = "open", limit = 40 }: { repository: string; state?: "open" | "closed" | "all"; limit?: number }) {
 			if (typeof repository !== "string" || !/^[a-z0-9-]+\/[a-z0-9_.-]+$/i.test(repository.trim())) {
-				throw Object.assign(new Error("Provide a valid owner/repository slug."), { statusCode: 400 });
+				throw badRequest("Provide a valid owner/repository slug.");
 			}
 			const slug = repository.trim();
 			const cap = Math.min(Math.max(1, limit), 100);
@@ -220,7 +209,7 @@ export function createGitHubRepositories(run = runGh) {
 			try {
 				parsed = JSON.parse(raw);
 			} catch {
-				throw Object.assign(new Error("GitHub CLI returned invalid issue JSON."), { statusCode: 502 });
+				throw badGateway("GitHub CLI returned invalid issue JSON.");
 			}
 			if (!Array.isArray(parsed)) return { issues: [] };
 			return {
@@ -251,7 +240,7 @@ export function createGitHubRepositories(run = runGh) {
 				page < 1 ||
 				page > 1000
 			) {
-				throw Object.assign(new Error("Invalid GitHub repository search."), { statusCode: 400 });
+				throw badRequest("Invalid GitHub repository search.");
 			}
 
 			// Fast path: direct GitHub REST fetch using local `gh auth token` + token-scoped 60s page cache
@@ -261,7 +250,7 @@ export function createGitHubRepositories(run = runGh) {
 					const fp = tokenFingerprint(token);
 					const activeLogin = await accountFromToken(token);
 					if (activeLogin.toLowerCase() !== login.toLowerCase()) {
-						throw Object.assign(new Error("The active GitHub CLI account changed. Disconnect and reconnect in Settings."), { statusCode: 409 });
+						throw conflict("The active GitHub CLI account changed. Disconnect and reconnect in Settings.");
 					}
 					const needle = query.trim().toLowerCase();
 					const repositories: RepoEntry[] = [];
@@ -295,7 +284,7 @@ export function createGitHubRepositories(run = runGh) {
 
 			// Fallback / injected test runner path
 			if ((await account()).toLowerCase() !== login.toLowerCase()) {
-				throw Object.assign(new Error("The active GitHub CLI account changed. Disconnect and reconnect in Settings."), { statusCode: 409 });
+				throw conflict("The active GitHub CLI account changed. Disconnect and reconnect in Settings.");
 			}
 			const needle = query.trim().toLowerCase();
 			const repositories: RepoEntry[] = [];
@@ -306,11 +295,11 @@ export function createGitHubRepositories(run = runGh) {
 				try {
 					data = JSON.parse(await run(["api", "--hostname", "github.com", endpoint]));
 				} catch (error) {
-					if (error instanceof SyntaxError) throw Object.assign(new Error("GitHub returned an invalid repository list."), { statusCode: 502 });
+					if (error instanceof SyntaxError) throw badGateway("GitHub returned an invalid repository list.");
 					throw error;
 				}
 				if ((await account()).toLowerCase() !== login.toLowerCase()) {
-					throw Object.assign(new Error("The active GitHub CLI account changed. Disconnect and reconnect in Settings."), { statusCode: 409 });
+					throw conflict("The active GitHub CLI account changed. Disconnect and reconnect in Settings.");
 				}
 				const parsed = parseRepoList(data);
 				for (const repo of parsed) {

@@ -6,6 +6,7 @@ import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { bool, int, obj, opt, str } from "@earendil-works/pi-schema";
 import type { RuntimeEventBus } from "./events.ts";
 import { isErrorCode, logger } from "./log.ts";
+import { conflict, notFound } from "./http-error.ts";
 
 export type ManagedProcessSummary = {
 	id: string;
@@ -68,16 +69,16 @@ export class ProcessManager {
 
 	getOutput(id: string): { summary: ManagedProcessSummary; output: string } {
 		const proc = this.#processes.get(id);
-		if (!proc) throw Object.assign(new Error("Process not found."), { statusCode: 404 });
+		if (!proc) throw notFound("Process not found.");
 		const { child: _c, output, ...summary } = proc;
 		return { summary: { ...summary, outputTail: output.slice(-4000) }, output };
 	}
 
 	sendInput(id: string, input: string): ManagedProcessSummary {
 		const proc = this.#processes.get(id);
-		if (!proc) throw Object.assign(new Error("Process not found."), { statusCode: 404 });
+		if (!proc) throw notFound("Process not found.");
 		if (proc.status !== "running" || !proc.child.stdin?.writable) {
-			throw Object.assign(new Error("Process is not accepting input."), { statusCode: 409 });
+			throw conflict("Process is not accepting input.");
 		}
 		proc.child.stdin.write(input);
 		const { child: _c, output, ...summary } = proc;
@@ -86,7 +87,7 @@ export class ProcessManager {
 
 	kill(id: string): ManagedProcessSummary {
 		const proc = this.#processes.get(id);
-		if (!proc) throw Object.assign(new Error("Process not found."), { statusCode: 404 });
+		if (!proc) throw notFound("Process not found.");
 		if (proc.status === "running") {
 			proc.status = "killed";
 			proc.endedAt = Date.now();

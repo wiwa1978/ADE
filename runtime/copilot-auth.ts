@@ -2,6 +2,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join, resolve as resolvePath } from "node:path";
+import { conflict } from "./http-error.ts";
 
 export const copilotId = "github-copilot";
 export const apiKeyEnvironment = Object.freeze({
@@ -47,7 +48,9 @@ function runCommandWithStdin(
 			(error, stdout, stderr) => {
 				if (error) {
 					const detail = stderr?.trim() || error.message;
-					reject(Object.assign(new Error(detail), { code: (error as NodeJS.ErrnoException).code }));
+					const wrapped: NodeJS.ErrnoException = new Error(detail);
+					wrapped.code = (error as NodeJS.ErrnoException).code;
+					reject(wrapped);
 				} else {
 					resolve(stdout);
 				}
@@ -426,7 +429,7 @@ export function createCopilotSignIn(models: CopilotModelsLike) {
 	return {
 		status: (): CopilotSignInState => state,
 		start(): CopilotSignInState {
-			if (running) throw Object.assign(new Error("Copilot sign-in is already in progress."), { statusCode: 409 });
+			if (running) throw conflict("Copilot sign-in is already in progress.");
 			controller = new AbortController();
 			const activeController = controller;
 			const signal = AbortSignal.any([activeController.signal, AbortSignal.timeout(15 * 60 * 1000)]);

@@ -8,6 +8,7 @@ import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { map, unknown } from "@earendil-works/pi-schema";
 import type { RuntimeEventBus } from "./events.ts";
 import { isErrorCode, logger } from "./log.ts";
+import { badRequest, notFound } from "./http-error.ts";
 
 export type McpServerConfig = {
 	id: string;
@@ -261,13 +262,13 @@ export class McpManager {
 
 	save(input: Partial<McpServerConfig>): McpServerStatus {
 		const name = typeof input.name === "string" ? input.name.trim() : "";
-		if (!name || name.length > 80) throw Object.assign(new Error("Provide an MCP server name."), { statusCode: 400 });
+		if (!name || name.length > 80) throw badRequest("Provide an MCP server name.");
 		const transport = input.transport === "http" ? "http" : "stdio";
 		if (transport === "stdio" && !input.command?.trim()) {
-			throw Object.assign(new Error("Provide a command for stdio MCP servers."), { statusCode: 400 });
+			throw badRequest("Provide a command for stdio MCP servers.");
 		}
 		if (transport === "http" && !input.url?.trim()) {
-			throw Object.assign(new Error("Provide a URL for HTTP MCP servers."), { statusCode: 400 });
+			throw badRequest("Provide a URL for HTTP MCP servers.");
 		}
 		const id = input.id || randomUUID();
 		const configJson = JSON.stringify({
@@ -298,7 +299,7 @@ export class McpManager {
 
 	async connect(id: string): Promise<McpServerStatus> {
 		const server = this.list().find(s => s.id === id);
-		if (!server) throw Object.assign(new Error("MCP server not found."), { statusCode: 404 });
+		if (!server) throw notFound("MCP server not found.");
 		this.disconnect(id);
 		const client = server.transport === "http"
 			? new HttpMcpClient(server.url!, server.headers)

@@ -4,6 +4,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
 import { detectGitHubRemoteFromCheckout } from "./host.ts";
+import { badGateway, badRequest, conflict, internalError, notFound, notImplemented } from "./http-error.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -21,7 +22,7 @@ export function browseDirectories(requestedPath?: string): {
 } {
 	const target = requestedPath?.trim() ? resolve(requestedPath.trim()) : defaultWorkspaceRoot();
 	if (!existsSync(target) || !statSync(target).isDirectory()) {
-		throw Object.assign(new Error(`Directory does not exist: "${target}"`), { statusCode: 400 });
+		throw badRequest(`Directory does not exist: "${target}"`);
 	}
 	const parent = dirname(target);
 	const isGitRepo = existsSync(join(target, ".git"));
@@ -62,7 +63,7 @@ export async function pickNativeFolder(): Promise<string | null> {
 		} catch (err) {
 			const e = err as { stderr?: unknown; message?: unknown };
 			if (String(e?.stderr ?? e?.message ?? "").includes("-128")) return null; // User cancelled
-			throw Object.assign(new Error("Could not open macOS folder picker. Use the folder browser instead."), { statusCode: 500 });
+			throw internalError("Could not open macOS folder picker. Use the folder browser instead.");
 		}
 	}
 	if (process.platform === "win32") {
@@ -81,7 +82,7 @@ export async function pickNativeFolder(): Promise<string | null> {
 			return null;
 		}
 	}
-	throw Object.assign(new Error("Native folder picker is supported on macOS and Windows. Use the built-in folder browser."), { statusCode: 501 });
+	throw notImplemented("Native folder picker is supported on macOS and Windows. Use the built-in folder browser.");
 }
 
 export function extractRepoNameFromUrl(rawUrl: string): string {
@@ -89,7 +90,7 @@ export function extractRepoNameFromUrl(rawUrl: string): string {
 	const last = cleaned.split(/[/:]/).pop() ?? "";
 	const safe = last.replace(/[^a-zA-Z0-9._-]/g, "");
 	if (!safe || safe === "." || safe === "..") {
-		throw Object.assign(new Error("Could not derive a valid folder name from that repository URL."), { statusCode: 400 });
+		throw badRequest("Could not derive a valid folder name from that repository URL.");
 	}
 	return safe;
 }
@@ -97,7 +98,7 @@ export function extractRepoNameFromUrl(rawUrl: string): string {
 export function normalizeCloneUrl(raw: string): { cloneUrl: string; githubSlug: string | null } {
 	const trimmed = raw.trim();
 	if (!trimmed || trimmed.startsWith("-") || /\s/.test(trimmed)) {
-		throw Object.assign(new Error("Provide a valid Git repository URL or owner/repository."), { statusCode: 400 });
+		throw badRequest("Provide a valid Git repository URL or owner/repository.");
 	}
 	// Shorthand owner/repo -> GitHub HTTPS
 	if (/^[a-z0-9-]+\/[a-z0-9_.-]+$/i.test(trimmed)) {
@@ -113,7 +114,7 @@ export function normalizeCloneUrl(raw: string): { cloneUrl: string; githubSlug: 
 		const gh = /github\.com[:/]([a-z0-9-]+\/[a-z0-9_.-]+?)(?:\.git)?$/i.exec(trimmed);
 		return { cloneUrl: trimmed, githubSlug: gh ? gh[1] : null };
 	}
-	throw Object.assign(new Error("Use an HTTPS Git URL, SSH Git URL, or GitHub owner/repository."), { statusCode: 400 });
+	throw badRequest("Use an HTTPS Git URL, SSH Git URL, or GitHub owner/repository.");
 }
 
 export async function cloneProjectRepository(params: {
@@ -129,7 +130,7 @@ export async function cloneProjectRepository(params: {
 
 	const derivedName = (params.folderName?.trim() || extractRepoNameFromUrl(cloneUrl)).replace(/[^a-zA-Z0-9._-]/g, "");
 	if (!derivedName || derivedName === "." || derivedName === "..") {
-		throw Object.assign(new Error("Provide a valid destination folder name."), { statusCode: 400 });
+		throw badRequest("Provide a valid destination folder name.");
 	}
 	const targetDir = join(parentDir, derivedName);
 
@@ -143,7 +144,7 @@ export async function cloneProjectRepository(params: {
 				alreadyExisted: true,
 			};
 		}
-		throw Object.assign(new Error(`Destination folder "${targetDir}" already exists and is not a Git repository.`), { statusCode: 409 });
+		throw conflict(`Destination folder "${targetDir}" already exists and is not a Git repository.`);
 	}
 
 	// Prefer `gh repo clone` for GitHub slugs so private repos use authenticated gh credentials seamlessly
@@ -174,10 +175,7 @@ export async function cloneProjectRepository(params: {
 		});
 	} catch (err) {
 		const e = err as { stderr?: unknown; message?: unknown };
-		throw Object.assign(
-			new Error(`Git clone failed: ${String(e?.stderr || e?.message || "Check URL and credentials.").trim()}`),
-			{ statusCode: 502 },
-		);
+		throw badGateway(`Git clone failed: ${String(e?.stderr || e?.message || "Check URL and credentials.").trim()}`);
 	}
 
 	const detected = await detectGitHubRemoteFromCheckout(targetDir);
@@ -220,7 +218,7 @@ export async function openInExternalApp(
 ): Promise<{ opened: true; app: string; path: string }> {
 	const target = resolve(folderPath?.trim() || homedir());
 	if (!existsSync(target)) {
-		throw Object.assign(new Error(`Folder does not exist: ${target}`), { statusCode: 404 });
+		throw notFound(`Folder does not exist: ${target}`);
 	}
 	const platform = process.platform;
 	const tryCmd = async (bin: string, args: string[]) => {

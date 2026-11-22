@@ -16,6 +16,7 @@ import {
 	type StoredApiKeyCredential,
 	type StoredOAuthCredential,
 } from "./copilot-auth.ts";
+import { badRequest, conflict } from "./http-error.ts";
 
 export type ModelOption = { id: string; name: string };
 export type EnvMap = Record<string, string | undefined>;
@@ -231,15 +232,15 @@ export function createRuntimeModels(environment: EnvMap, stateDirectory: string)
 	}
 	async function changeCredential(action: unknown, provider: unknown, key?: unknown) {
 		if (typeof provider !== "string" || !Object.hasOwn(apiKeyEnvironment, provider)) {
-			throw Object.assign(new Error("Unknown API-key provider."), { statusCode: 400 });
+			throw badRequest("Unknown API-key provider.");
 		}
 		if (action !== "save" && action !== "remove") {
-			throw Object.assign(new Error("Unknown credential action."), { statusCode: 400 });
+			throw badRequest("Unknown credential action.");
 		}
 		if (action === "save" && !isValidApiKey(key)) {
-			throw Object.assign(new Error("Enter a valid API key without leading or trailing whitespace."), { statusCode: 400 });
+			throw badRequest("Enter a valid API key without leading or trailing whitespace.");
 		}
-		if (credentialChange) throw Object.assign(new Error("A credential change is already in progress."), { statusCode: 409 });
+		if (credentialChange) throw conflict("A credential change is already in progress.");
 		const change = (async () => {
 			if (provider === "radius" && radiusCatalog) await radiusCatalog;
 			if (action === "save") await credentials.modify(provider, async () => ({ type: "api_key" as const, key: key as string }));
@@ -269,11 +270,11 @@ export function createRuntimeModels(environment: EnvMap, stateDirectory: string)
 			try {
 				parsed = new URL(url);
 			} catch {
-				throw Object.assign(new Error("Enter an absolute endpoint URL, for example http://127.0.0.1:11434/v1."), { statusCode: 400 });
+				throw badRequest("Enter an absolute endpoint URL, for example http://127.0.0.1:11434/v1.");
 			}
-			if (!["http:", "https:"].includes(parsed.protocol)) throw Object.assign(new Error("The endpoint must use http or https."), { statusCode: 400 });
+			if (!["http:", "https:"].includes(parsed.protocol)) throw badRequest("The endpoint must use http or https.");
 		}
-		if (model.length > 200) throw Object.assign(new Error("The model name is too long."), { statusCode: 400 });
+		if (model.length > 200) throw badRequest("The model name is too long.");
 		providerSettings = { ...providerSettings, compatible: url || model ? { url, model } : undefined };
 		const path = join(stateDirectory, "provider-settings.json");
 		writeFileSync(`${path}.tmp`, JSON.stringify(providerSettings, null, 2), { mode: 0o600 });
@@ -305,7 +306,7 @@ export function createRuntimeModels(environment: EnvMap, stateDirectory: string)
 			if (credentialChange) await credentialChange;
 			id ??= await this.defaultProvider();
 			if (!providers.some(provider => provider.id === id)) {
-				throw Object.assign(new Error("Unknown model provider."), { statusCode: 400 });
+				throw badRequest("Unknown model provider.");
 			}
 			let config: ProviderConfigBase = (id === "radius" ? await radiusConfig() : other.get(id)) ?? {
 				provider: id,
