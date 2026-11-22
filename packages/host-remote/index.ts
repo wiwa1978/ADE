@@ -41,6 +41,22 @@ async function readRawBody(req: IncomingMessage, maxBytes = 256 * 1024): Promise
   return Buffer.concat(chunks);
 }
 
+function timingSafeEqualStrings(actual: string, expected: string): boolean {
+  const a = Buffer.from(actual, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+export function verifyBearerToken(
+  authorizationHeader: string | undefined,
+  expectedToken: string,
+): boolean {
+  if (!authorizationHeader || !expectedToken) return false;
+  if (!authorizationHeader.startsWith("Bearer ")) return false;
+  const provided = authorizationHeader.slice("Bearer ".length);
+  return timingSafeEqualStrings(provided, expectedToken);
+}
+
 export function verifyGitHubWebhookSignature(
   rawBody: Buffer,
   signatureHeader: string | undefined,
@@ -48,9 +64,7 @@ export function verifyGitHubWebhookSignature(
 ): boolean {
   if (!signatureHeader || !signatureHeader.startsWith("sha256=")) return false;
   const expected = `sha256=${createHmac("sha256", secret).update(rawBody).digest("hex")}`;
-  const a = Buffer.from(signatureHeader, "utf8");
-  const b = Buffer.from(expected, "utf8");
-  return a.length === b.length && timingSafeEqual(a, b);
+  return timingSafeEqualStrings(signatureHeader, expected);
 }
 
 /**
@@ -165,9 +179,8 @@ export function createRemoteCaptainServer(options: RemoteCaptainServerOptions): 
         );
       }
 
-      // Bearer auth for all client API endpoints
-      const auth = req.headers.authorization;
-      if (auth !== `Bearer ${options.authToken}`) {
+      // Bearer auth for all client API endpoints (constant-time compare)
+      if (!verifyBearerToken(req.headers.authorization, options.authToken)) {
         return sendJson(res, 401, { error: "Unauthorized" }, allowedOrigin);
       }
 
