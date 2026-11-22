@@ -35,14 +35,38 @@ export function useModelSelection(params: {
   }, [])
 
   useEffect(() => {
-    void loadHealth()
-    void loadModelCatalog()
-  }, [loadHealth, loadModelCatalog, environmentVersion])
+    let cancelled = false
+    const qs = settings.provider ? `?provider=${encodeURIComponent(settings.provider)}` : ""
+    void request<RuntimeHealth>(`/api/health${qs}`)
+      .then(data => {
+        if (cancelled) return
+        setRuntime(data)
+        setRuntimeError("")
+      })
+      .catch(err => {
+        if (cancelled) return
+        setRuntime(null)
+        setRuntimeError(err instanceof Error ? err.message : "Waiting for the ADE local runtime.")
+      })
+    void request<{ providers: ProviderCatalogEntry[] }>("/api/models/catalog")
+      .then(catalog => {
+        if (!cancelled && Array.isArray(catalog?.providers)) setModelCatalog(catalog.providers)
+      })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [settings.provider, environmentVersion])
 
   // Refresh provider list when returning from Settings so toggled providers appear immediately.
   useEffect(() => {
-    if (screen === "work") void loadModelCatalog()
-  }, [screen, loadModelCatalog])
+    if (screen !== "work") return
+    let cancelled = false
+    void request<{ providers: ProviderCatalogEntry[] }>("/api/models/catalog")
+      .then(catalog => {
+        if (!cancelled && Array.isArray(catalog?.providers)) setModelCatalog(catalog.providers)
+      })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [screen])
 
   const matchingRuntime = runtime && (!settings.provider || runtime.provider === settings.provider) ? runtime : null
   const effectiveCatalog: ProviderCatalogEntry[] = (() => {

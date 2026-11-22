@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import { ChevronDown, ChevronRight, FileCode2, Folder, FolderOpen, RefreshCw, Search } from "lucide-react"
 import { request } from "../../api"
 import type { WorkspaceEntry } from "../../app-types"
@@ -20,21 +20,22 @@ function DirectoryBranch({
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [error, setError] = useState("")
 
-  const load = useCallback(async () => {
-    try {
-      const res = await request<{ entries: WorkspaceEntry[] }>(
-        `/api/workspace/tree?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}`,
-      )
-      setEntries(res.entries)
-      setError("")
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load directory")
-    }
-  }, [sessionId, path])
-
   useEffect(() => {
-    void load()
-  }, [load])
+    let cancelled = false
+    void request<{ entries: WorkspaceEntry[] }>(
+      `/api/workspace/tree?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}`,
+    )
+      .then(res => {
+        if (!cancelled) {
+          setEntries(res.entries)
+          setError("")
+        }
+      })
+      .catch(err => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load directory")
+      })
+    return () => { cancelled = true }
+  }, [sessionId, path])
 
   if (error) return <div className="ade-pane-note">{error}</div>
   if (!entries) return <div className="ade-pane-note">Loading…</div>

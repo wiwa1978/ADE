@@ -27,8 +27,22 @@ export function useEnvironments() {
   }, [])
 
   useEffect(() => {
-    void loadEnvironments()
-  }, [loadEnvironments, environmentVersion])
+    let cancelled = false
+    void request<EnvironmentDirectory>("/api/environments")
+      .then(dir => {
+        if (cancelled) return
+        setEnvironmentDirectory(dir)
+        const active = dir.environments.find(e => e.id === dir.activeId) ?? dir.environments[0]
+        if (active) {
+          setActiveEnvironmentId(active.id)
+          setActiveEnvironmentName(active.name)
+        }
+      })
+      .catch(err => {
+        if (!cancelled) console.warn("[ADE] Could not load environments:", err instanceof Error ? err.message : String(err))
+      })
+    return () => { cancelled = true }
+  }, [environmentVersion])
 
   const selectEnvironment = useCallback(async (env: EnvironmentDirectory["environments"][number]) => {
     const dir = await request<EnvironmentDirectory>("/api/environments/active", {

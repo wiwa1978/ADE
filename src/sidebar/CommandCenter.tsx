@@ -55,12 +55,19 @@ export function CommandCenter({
 }) {
   const [query, setQuery] = useState("")
   const [index, setIndex] = useState(0)
+  const [prevOpen, setPrevOpen] = useState(open)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
+  if (open !== prevOpen) {
+    setPrevOpen(open)
     if (open) {
       setQuery("")
       setIndex(0)
+    }
+  }
+
+  useEffect(() => {
+    if (open) {
       setTimeout(() => inputRef.current?.focus(), 10)
     }
   }, [open])

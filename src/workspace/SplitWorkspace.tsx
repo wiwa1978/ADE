@@ -119,6 +119,9 @@ export function SplitWorkspace({
   const [besideTabs, setBesideTabs] = useState<WorkspaceTab[]>([])
   const [activeBesideId, setActiveBesideId] = useState<string | null>(null)
   const [pullRequest, setPullRequest] = useState<PullRequestInfo | null>(null)
+  const [prevSessionId, setPrevSessionId] = useState(session.id)
+  const [prevExternalRequest, setPrevExternalRequest] = useState<WorkspaceTab | null>(null)
+  const [prevSubCount, setPrevSubCount] = useState(subagents.length)
   const [splitRatio, setSplitRatio] = useState(() => {
     const saved = Number(localStorage.getItem("ade.split-ratio"))
     return saved >= 30 && saved <= 75 ? saved : 52
@@ -152,28 +155,42 @@ export function SplitWorkspace({
     })
   }, [])
 
-  useEffect(() => {
-    if (!externalOpenRequest) return
-    openBeside(externalOpenRequest)
-    onClearExternalOpenRequest()
-  }, [externalOpenRequest, openBeside, onClearExternalOpenRequest])
-
-  const prevSubCount = useRef(subagents.length)
-  useEffect(() => {
-    if (subagents.length > prevSubCount.current) {
-      const newest = subagents[subagents.length - 1]
-      if (newest && newest.status === "running" && besideTabs.length === 0) {
-        openBeside({ id: `subagent:${newest.id}`, kind: "subagent", title: newest.name, subagentId: newest.id })
-      }
-    }
-    prevSubCount.current = subagents.length
-  }, [subagents, besideTabs.length, openBeside])
-
-  useEffect(() => {
+  if (session.id !== prevSessionId) {
+    setPrevSessionId(session.id)
     setBesideTabs(prev => prev.filter(t => t.kind === "browser"))
     setActiveBesideId(prev => (prev === "browser" ? "browser" : null))
     setPullRequest(null)
-  }, [session.id])
+  }
+
+  if (externalOpenRequest && externalOpenRequest !== prevExternalRequest) {
+    setPrevExternalRequest(externalOpenRequest)
+    setBesideTabs(prev => {
+      const existing = prev.find(t => t.id === externalOpenRequest.id)
+      if (existing) return prev.map(t => (t.id === externalOpenRequest.id ? { ...t, ...externalOpenRequest } : t))
+      return [...prev, { ...externalOpenRequest, closable: true }]
+    })
+    setActiveBesideId(externalOpenRequest.id)
+  } else if (!externalOpenRequest && prevExternalRequest !== null) {
+    setPrevExternalRequest(null)
+  }
+
+  useEffect(() => {
+    if (!externalOpenRequest) return
+    onClearExternalOpenRequest()
+  }, [externalOpenRequest, onClearExternalOpenRequest])
+
+  if (subagents.length !== prevSubCount) {
+    const grew = subagents.length > prevSubCount
+    setPrevSubCount(subagents.length)
+    if (grew) {
+      const newest = subagents[subagents.length - 1]
+      if (newest && newest.status === "running" && besideTabs.length === 0) {
+        const tab: WorkspaceTab = { id: `subagent:${newest.id}`, kind: "subagent", title: newest.name, subagentId: newest.id, closable: true }
+        setBesideTabs([tab])
+        setActiveBesideId(tab.id)
+      }
+    }
+  }
 
   useEffect(() => {
     const onMove = (e: PointerEvent) => {

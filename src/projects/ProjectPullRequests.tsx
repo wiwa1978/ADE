@@ -53,6 +53,16 @@ export function ProjectPullRequests({
   const [rows, setRows] = useState<PullRequestRow[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const fetchKey = `${project.id}:${project.githubUrl ?? ""}:${state}`
+  const [prevFetchKey, setPrevFetchKey] = useState(fetchKey)
+
+  if (fetchKey !== prevFetchKey) {
+    setPrevFetchKey(fetchKey)
+    if (project.githubUrl) {
+      setLoading(true)
+      setError("")
+    }
+  }
 
   const load = useCallback(async () => {
     if (!project.githubUrl) return
@@ -70,8 +80,25 @@ export function ProjectPullRequests({
   }, [project.id, project.githubUrl, state])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    if (!project.githubUrl) return
+    let cancelled = false
+    void request<{ pullRequests: PullRequestRow[] }>(`/api/projects/${encodeURIComponent(project.id)}/pulls?state=${state}`)
+      .then(res => {
+        if (!cancelled) {
+          setRows(res.pullRequests)
+          setError("")
+          setLoading(false)
+        }
+      })
+      .catch(err => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Could not load pull requests via GitHub CLI.")
+          setRows([])
+          setLoading(false)
+        }
+      })
+    return () => { cancelled = true }
+  }, [project.id, project.githubUrl, state])
 
   if (!project.githubUrl) {
     return (

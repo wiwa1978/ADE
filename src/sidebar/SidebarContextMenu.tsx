@@ -56,11 +56,17 @@ export function SidebarContextMenu({
 }) {
   const menuRef = useRef<HTMLDivElement>(null)
   const [submenu, setSubmenu] = useState<SubmenuKind>(null)
+  const [prevTarget, setPrevTarget] = useState(target)
   const [pos, setPos] = useState<{ left: number; top: number; flipSub: boolean }>({
     left: target?.x ?? 0,
     top: target?.y ?? 0,
     flipSub: false,
   })
+
+  if (target !== prevTarget) {
+    setPrevTarget(target)
+    if (!target) setSubmenu(null)
+  }
 
   useLayoutEffect(() => {
     if (!target) return
@@ -76,10 +82,7 @@ export function SidebarContextMenu({
   }, [target])
 
   useEffect(() => {
-    if (!target) {
-      setSubmenu(null)
-      return
-    }
+    if (!target) return
     const onMouseDown = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose()
     }

@@ -59,9 +59,15 @@ export function LiveSessionPane({
   }, [session.id])
 
   useEffect(() => {
-    void refresh()
-    void refreshGit()
-  }, [session.id, refresh, refreshGit])
+    let cancelled = false
+    void request<ConversationTimelineSnapshot>(`/api/sessions/${encodeURIComponent(session.id)}/timeline`)
+      .then(snap => { if (!cancelled) setTimeline(snap) })
+      .catch(err => console.warn("[ADE] Failed to refresh stream pane timeline:", err instanceof Error ? err.message : String(err)))
+    void request<WorkspaceGitSummary>(`/api/workspace/git?sessionId=${encodeURIComponent(session.id)}`)
+      .then(summary => { if (!cancelled && summary) setGitSummary(summary) })
+      .catch(err => console.warn("[ADE] Failed to refresh stream pane git summary:", err instanceof Error ? err.message : String(err)))
+    return () => { cancelled = true }
+  }, [session.id])
 
   const handleStreamMessage = useCallback(
     (ev: MessageEvent) => {

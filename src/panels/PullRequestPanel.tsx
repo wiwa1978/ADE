@@ -95,8 +95,28 @@ export function PullRequestPanel({
   }, [sessionId, onPullRequestChange])
 
   useEffect(() => {
-    void load()
-  }, [load, refreshKey])
+    let cancelled = false
+    void Promise.all([
+      request<BranchStatus>(`/api/sessions/${encodeURIComponent(sessionId)}/branch`),
+      request<{ pullRequest: PullRequestInfo | null }>(`/api/sessions/${encodeURIComponent(sessionId)}/pr`).catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not read the pull request from GitHub.")
+        return { pullRequest: null }
+      }),
+    ])
+      .then(([branch, pull]) => {
+        if (cancelled) return
+        setStatus(branch)
+        setPr(pull.pullRequest)
+        onPullRequestChange?.(pull.pullRequest)
+        setBase(current => current || branch.baseBranch || "")
+      })
+      .catch(err => {
+        if (cancelled) return
+        setError(err instanceof Error ? err.message : "Could not read the branch status.")
+        setPr(null)
+      })
+    return () => { cancelled = true }
+  }, [sessionId, onPullRequestChange, refreshKey])
 
   // Keep checks fresh while they are running.
   useEffect(() => {

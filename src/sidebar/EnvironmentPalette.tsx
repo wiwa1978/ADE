@@ -21,8 +21,17 @@ export function EnvironmentPalette({
 }) {
   const [query, setQuery] = useState("")
   const [index, setIndex] = useState(0)
+  const [prevOpen, setPrevOpen] = useState(open)
   const [busyId, setBusyId] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  if (open !== prevOpen) {
+    setPrevOpen(open)
+    if (open) {
+      setQuery("")
+      setIndex(0)
+    }
+  }
 
   const filtered = environments.filter(e => {
     const q = query.trim().toLowerCase()
@@ -36,8 +45,6 @@ export function EnvironmentPalette({
 
   useEffect(() => {
     if (open) {
-      setQuery("")
-      setIndex(0)
       requestAnimationFrame(() => inputRef.current?.focus())
     }
   }, [open])

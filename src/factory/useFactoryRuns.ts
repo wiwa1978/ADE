@@ -55,8 +55,29 @@ export function useFactoryRuns(params: {
   }, [])
 
   useEffect(() => {
-    void refresh()
-  }, [refresh])
+    let cancelled = false
+    void Promise.all([
+      request<FactoryCapabilities>("/api/factory/capabilities"),
+      request<{ blueprints: FactoryBlueprint[] }>("/api/factory/blueprints"),
+      request<{ runs: FactoryRunDetail[] }>("/api/factory/runs"),
+    ])
+      .then(([c, bps, r]) => {
+        if (cancelled) return
+        setCaps(c)
+        setBlueprints(bps.blueprints)
+        setRuns(r.runs)
+        setError("")
+      })
+      .catch(err => {
+        if (cancelled) return
+        setError(
+          err instanceof Error
+            ? `${err.message} — restart \`npm run dev\` if the runtime server was started before Factory routes were added.`
+            : "Could not load Factory runtime.",
+        )
+      })
+    return () => { cancelled = true }
+  }, [])
 
   useEventStreamListener("factory.event", (ev) => {
     try {

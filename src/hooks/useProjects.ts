@@ -30,6 +30,16 @@ export function useProjects(params: {
   const [factoryRuns, setFactoryRuns] = useState<FactoryRunDetail[]>([])
   const [openStreamIdsByProject, setOpenStreamIdsByProject] = useState<Record<string, string[]>>({})
   const [focusedStreamId, setFocusedStreamId] = useState<string | null>(null)
+  const activityKey = screen === "project" && selectedProjectId ? `${selectedProjectId}:${environmentVersion}` : ""
+  const [prevActivityKey, setPrevActivityKey] = useState(activityKey)
+
+  if (activityKey !== prevActivityKey) {
+    setPrevActivityKey(activityKey)
+    if (activityKey) {
+      setProjectActivity(null)
+      setProjectActivityError("")
+    }
+  }
 
   const loadProjects = useCallback(async () => {
     try {
@@ -51,9 +61,24 @@ export function useProjects(params: {
   }, [])
 
   useEffect(() => {
-    void loadProjects()
-    void loadFactoryRuns()
-  }, [loadProjects, loadFactoryRuns, environmentVersion])
+    let cancelled = false
+    void request<{ projects: Project[] }>("/api/projects")
+      .then(data => {
+        if (!cancelled) {
+          setProjects(data.projects ?? [])
+          setProjectsError("")
+        }
+      })
+      .catch(err => {
+        if (!cancelled) setProjectsError(err instanceof Error ? err.message : "Could not load projects.")
+      })
+    void request<{ runs: FactoryRunDetail[] }>("/api/factory/runs")
+      .then(data => {
+        if (!cancelled && Array.isArray(data?.runs)) setFactoryRuns(data.runs)
+      })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [environmentVersion])
 
   useEventStreamListener("factory.event", (ev) => {
     try {
@@ -77,8 +102,6 @@ export function useProjects(params: {
   useEffect(() => {
     if (screen !== "project" || !selectedProjectId) return
     let cancelled = false
-    setProjectActivity(null)
-    setProjectActivityError("")
     void request<ProjectActivity>(`/api/projects/${encodeURIComponent(selectedProjectId)}/agents`)
       .then(data => { if (!cancelled) setProjectActivity(data) })
       .catch(err => { if (!cancelled) setProjectActivityError(err?.message || "Unavailable") })

@@ -108,15 +108,17 @@ export function SettingsView({
   skillsCatalog, onRefreshMcp, onChangeApprovalPolicy, onDeleteApprovalRule, initialCategory, autoOpenAddEnvironment = false,
 }: SettingsViewProps) {
   const [selectedCategory, setSelectedCategory] = useState<SettingsCategory>(initialCategory ?? "general")
+  const [prevInitialCategory, setPrevInitialCategory] = useState(initialCategory)
   const [permission, setPermission] = useState(notificationPermission)
   const [compatible, setCompatible] = useState<{ url: string; model: string; fromEnvironment: boolean } | null>(null)
   const [compatibleDraft, setCompatibleDraft] = useState({ url: "", model: "" })
   const [compatibleBusy, setCompatibleBusy] = useState(false)
   const [compatibleMessage, setCompatibleMessage] = useState("")
 
-  useEffect(() => {
+  if (initialCategory !== prevInitialCategory) {
+    setPrevInitialCategory(initialCategory)
     if (initialCategory) setSelectedCategory(initialCategory)
-  }, [initialCategory])
+  }
 
   useEffect(() => {
     if (selectedCategory !== "models") return

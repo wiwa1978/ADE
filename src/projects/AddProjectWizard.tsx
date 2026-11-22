@@ -40,15 +40,18 @@ export function AddProjectWizard({
   const [busy, setBusy] = useState(false)
   const [statusMsg, setStatusMsg] = useState("")
   const [error, setError] = useState("")
+  const [prevSyncKey, setPrevSyncKey] = useState(`${open}:${initialSource}:${githubLogin ?? ""}`)
 
-  useEffect(() => {
+  const syncKey = `${open}:${initialSource}:${githubLogin ?? ""}`
+  if (syncKey !== prevSyncKey) {
+    setPrevSyncKey(syncKey)
     if (open) {
       setSource(initialSource)
       setActiveGhLogin(githubLogin)
       setError("")
       setStatusMsg("")
     }
-  }, [open, initialSource, githubLogin])
+  }
 
   const loadDirectory = useCallback(async (path?: string, silent = false) => {
     try {
@@ -62,8 +65,17 @@ export function AddProjectWizard({
   }, [cloneParentDir])
 
   useEffect(() => {
-    if (open && !cloneParentDir) void loadDirectory(undefined, true)
-  }, [open, cloneParentDir, loadDirectory])
+    if (!open || cloneParentDir) return
+    let cancelled = false
+    void request<DirBrowserState>("/api/system/browse-dirs")
+      .then(res => {
+        if (cancelled) return
+        setDirState(res)
+        setCloneParentDir(prev => prev || res.currentPath)
+      })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [open, cloneParentDir])
 
   const searchRepos = useCallback(
     (login: string, query: string, page: number, signal?: AbortSignal) =>

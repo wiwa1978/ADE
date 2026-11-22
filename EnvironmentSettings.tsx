@@ -22,7 +22,16 @@ export function EnvironmentSettings({
   const [notice, setNotice] = useState("")
 
   const [addOpen, setAddOpen] = useState(autoOpenAdd)
+  const [prevAutoOpenAdd, setPrevAutoOpenAdd] = useState(autoOpenAdd)
   const [addMode, setAddMode] = useState<AddMode>("choose")
+
+  if (autoOpenAdd !== prevAutoOpenAdd) {
+    setPrevAutoOpenAdd(autoOpenAdd)
+    if (autoOpenAdd) {
+      setAddMode("choose")
+      setAddOpen(true)
+    }
+  }
 
   // SSH fields
   const [name, setName] = useState("")
@@ -36,13 +45,6 @@ export function EnvironmentSettings({
 
   // Pairing link field
   const [pairingLink, setPairingLink] = useState("")
-
-  useEffect(() => {
-    if (autoOpenAdd) {
-      setAddMode("choose")
-      setAddOpen(true)
-    }
-  }, [autoOpenAdd])
 
   const refresh = useCallback(async () => {
     try {

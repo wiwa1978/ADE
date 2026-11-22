@@ -38,31 +38,37 @@ export function DiffPanel({
   }, [sessionId])
 
   useEffect(() => {
-    if (mode === "branch") void loadBranchFiles()
-  }, [mode, loadBranchFiles, summary])
+    if (mode !== "branch") return
+    let cancelled = false
+    void request<{ files: BranchFile[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/branch-diff`)
+      .then(res => { if (!cancelled) setBranchFiles(res.files) })
+      .catch(err => {
+        if (!cancelled) {
+          setBranchFiles([])
+          setError(err instanceof Error ? err.message : "Could not load the branch diff.")
+        }
+      })
+    return () => { cancelled = true }
+  }, [mode, sessionId, summary])
 
   const activeFile = summary.files.find(f => f.path === selectedPath) ?? summary.files[0] ?? null
   const activeBranchFile = branchFiles?.find(f => f.path === selectedPath) ?? branchFiles?.[0] ?? null
-
-  const loadDiff = useCallback(async () => {
-    const path = mode === "branch" ? activeBranchFile?.path : activeFile?.path
-    if (!path) {
-      setDiffText("")
-      return
-    }
-    try {
-      const res = await request<{ diff: string }>(mode === "branch"
-        ? `/api/sessions/${encodeURIComponent(sessionId)}/branch-diff/file?path=${encodeURIComponent(path)}`
-        : `/api/workspace/git/diff?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}&staged=${showStaged && activeFile?.staged ? "true" : "false"}`)
-      setDiffText(res.diff)
-    } catch {
-      setDiffText("")
-    }
-  }, [sessionId, mode, activeFile, activeBranchFile, showStaged])
+  const activeDiffPath = mode === "branch" ? activeBranchFile?.path : activeFile?.path
+  const activeStagedFlag = showStaged && Boolean(activeFile?.staged)
 
   useEffect(() => {
-    void loadDiff()
-  }, [loadDiff])
+    if (!activeDiffPath) return
+    let cancelled = false
+    const url = mode === "branch"
+      ? `/api/sessions/${encodeURIComponent(sessionId)}/branch-diff/file?path=${encodeURIComponent(activeDiffPath)}`
+      : `/api/workspace/git/diff?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(activeDiffPath)}&staged=${activeStagedFlag ? "true" : "false"}`
+    void request<{ diff: string }>(url)
+      .then(res => { if (!cancelled) setDiffText(res.diff) })
+      .catch(() => { if (!cancelled) setDiffText("") })
+    return () => { cancelled = true }
+  }, [sessionId, mode, activeDiffPath, activeStagedFlag])
+
+  const displayedDiffText = activeDiffPath ? diffText : ""
 
   const stage = async (paths: string[]) => {
     setBusy(true)
@@ -153,7 +159,7 @@ export function DiffPanel({
     )
   }
 
-  const diffLines = diffText ? diffText.replace(/\n$/, "").split("\n") : []
+  const diffLines = displayedDiffText ? displayedDiffText.replace(/\n$/, "").split("\n") : []
   const stagedCount = summary.files.filter(f => f.staged).length
   const modeToggle = (
     <div className="ade-segmented" role="tablist" aria-label="Diff scope">

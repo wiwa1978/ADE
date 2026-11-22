@@ -22,6 +22,14 @@ export function FileViewerPanel({
   const [saving, setSaving] = useState(false)
   const [savedToast, setSavedToast] = useState(false)
   const [error, setError] = useState("")
+  const [prevFileKey, setPrevFileKey] = useState(`${sessionId}:${filePath}`)
+
+  const fileKey = `${sessionId}:${filePath}`
+  if (fileKey !== prevFileKey) {
+    setPrevFileKey(fileKey)
+    setLoading(true)
+    setError("")
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -42,8 +50,26 @@ export function FileViewerPanel({
   }, [sessionId, filePath])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    let cancelled = false
+    void request<{ path: string; content: string; language: string; binary: boolean }>(
+      `/api/workspace/file?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(filePath)}`,
+    )
+      .then(res => {
+        if (cancelled) return
+        setContent(res.content)
+        setOriginal(res.content)
+        setLanguage(res.language)
+        setBinary(res.binary)
+        setError("")
+        setLoading(false)
+      })
+      .catch(err => {
+        if (cancelled) return
+        setError(err instanceof Error ? err.message : "Could not open file.")
+        setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [sessionId, filePath])
 
   const dirty = content !== original
 

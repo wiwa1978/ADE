@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react"
+import { useEffect, useState, type FormEvent } from "react"
 import {
   ArrowUp,
   FolderGit2,
@@ -97,27 +97,30 @@ export function NewSessionView({
     setIssueOpen(false)
   }
 
-  const loadProjectIssues = useCallback(async () => {
-    if (!activeProject?.id || !activeProject.githubUrl) return
-    setLoadingIssues(true)
-    setIssueError("")
-    try {
-      const res = await request<{ issues: OpenIssueOption[] }>(
-        `/api/projects/${encodeURIComponent(activeProject.id)}/issues?state=open`,
-      )
-      setOpenIssues(res.issues)
-    } catch (err) {
-      setIssueError(err instanceof Error ? err.message : "Could not load open GitHub issues.")
-    } finally {
-      setLoadingIssues(false)
-    }
-  }, [activeProject?.id, activeProject?.githubUrl])
+  const activeProjectId = activeProject?.id ?? null
+  const activeProjectGithubUrl = activeProject?.githubUrl ?? null
 
   useEffect(() => {
-    if (issueOpen && activeProject?.githubUrl && openIssues.length === 0) {
-      void loadProjectIssues()
-    }
-  }, [issueOpen, activeProject?.githubUrl, openIssues.length, loadProjectIssues])
+    if (!issueOpen || !activeProjectId || !activeProjectGithubUrl || openIssues.length > 0) return
+    let cancelled = false
+    void request<{ issues: OpenIssueOption[] }>(
+      `/api/projects/${encodeURIComponent(activeProjectId)}/issues?state=open`,
+    )
+      .then(res => {
+        if (!cancelled) {
+          setOpenIssues(res.issues)
+          setIssueError("")
+          setLoadingIssues(false)
+        }
+      })
+      .catch(err => {
+        if (!cancelled) {
+          setIssueError(err instanceof Error ? err.message : "Could not load open GitHub issues.")
+          setLoadingIssues(false)
+        }
+      })
+    return () => { cancelled = true }
+  }, [issueOpen, activeProjectId, activeProjectGithubUrl, openIssues.length])
 
   async function pickFolder() {
     try {

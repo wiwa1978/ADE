@@ -76,6 +76,18 @@ export function useRuntimeStream(opts: {
   const [mcpServers, setMcpServers] = useState<McpServerStatus[]>([])
   const eventStream = useEventStream()
   const sseConnected = eventStream.connected
+  const streamResetKey = `${sessionId ?? ""}:${environmentVersion}`
+  const [prevStreamResetKey, setPrevStreamResetKey] = useState(streamResetKey)
+
+  if (streamResetKey !== prevStreamResetKey) {
+    setPrevStreamResetKey(streamResetKey)
+    setTimeline(null)
+    setSubagentTimelines({})
+    setSubagents([])
+    setArtifacts([])
+    setTasks([])
+    setGitSummary(EMPTY_GIT)
+  }
 
   const callbacksRef = useRef({ onSessionsChanged, onAgentBrowserDriving, onArtifactUpdated })
   callbacksRef.current = { onSessionsChanged, onAgentBrowserDriving, onArtifactUpdated }
@@ -147,25 +159,6 @@ export function useRuntimeStream(opts: {
     }
   }, [])
 
-  const refreshSkills = useCallback(async (targetId: string | null) => {
-    try {
-      const qs = targetId ? `?sessionId=${encodeURIComponent(targetId)}` : ""
-      const data = await request<SkillsAndRulesCatalog>(`/api/skills${qs}`)
-      setSkillsCatalog(data)
-    } catch (error) {
-      reportStreamWarning("refreshSkills", error)
-    }
-  }, [])
-
-  const refreshBrowser = useCallback(async () => {
-    try {
-      const data = await request<BrowserState>("/api/browser/status")
-      setBrowserState(data)
-    } catch (error) {
-      reportStreamWarning("refreshBrowser", error)
-    }
-  }, [])
-
   const refreshMcp = useCallback(async () => {
     try {
       const data = await request<{ servers: McpServerStatus[] }>("/api/mcp")
@@ -177,23 +170,57 @@ export function useRuntimeStream(opts: {
 
   // Initial load on session / environment switch
   useEffect(() => {
-    setTimeline(null)
-    setSubagentTimelines({})
-    setSubagents([])
-    setArtifacts([])
-    setTasks([])
-    setGitSummary(EMPTY_GIT)
-    void refreshApprovals(sessionId)
-    void refreshProcesses(sessionId)
-    void refreshSkills(sessionId)
-    void refreshBrowser()
-    void refreshMcp()
-    if (!sessionId) return
-    void refreshTimeline(sessionId)
-    void refreshArtifactsAndTasks(sessionId)
-    if (isCodingTask) void refreshSubagents(sessionId)
-    if (hasWorkspace) void refreshGit(sessionId)
-  }, [sessionId, hasWorkspace, isCodingTask, environmentVersion, refreshTimeline, refreshSubagents, refreshApprovals, refreshProcesses, refreshGit, refreshArtifactsAndTasks, refreshSkills, refreshBrowser, refreshMcp])
+    let cancelled = false
+    const qs = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""
+    void request<{ pending: PendingApproval[]; policy: ApprovalPolicy; rules: ApprovalRule[] }>(`/api/approvals${qs}`)
+      .then(data => {
+        if (cancelled) return
+        setApprovals(data.pending ?? [])
+        if (data.policy) setApprovalPolicyState(data.policy)
+        setApprovalRules(data.rules ?? [])
+      })
+      .catch(error => reportStreamWarning("refreshApprovals", error))
+    void request<{ processes: ManagedProcessSummary[] }>(`/api/processes${qs}`)
+      .then(data => { if (!cancelled) setProcesses(data.processes ?? []) })
+      .catch(error => reportStreamWarning("refreshProcesses", error))
+    void request<SkillsAndRulesCatalog>(`/api/skills${qs}`)
+      .then(data => { if (!cancelled) setSkillsCatalog(data) })
+      .catch(error => reportStreamWarning("refreshSkills", error))
+    void request<BrowserState>("/api/browser/status")
+      .then(data => { if (!cancelled) setBrowserState(data) })
+      .catch(error => reportStreamWarning("refreshBrowser", error))
+    void request<{ servers: McpServerStatus[] }>("/api/mcp")
+      .then(data => { if (!cancelled) setMcpServers(data.servers ?? []) })
+      .catch(error => reportStreamWarning("refreshMcp", error))
+    if (!sessionId) return () => { cancelled = true }
+    void request<ConversationTimelineSnapshot>(`/api/sessions/${encodeURIComponent(sessionId)}/timeline`)
+      .then(snap => { if (!cancelled) setTimeline(snap) })
+      .catch(error => reportStreamWarning("refreshTimeline", error))
+    void Promise.all([
+      request<{ artifacts: SessionArtifact[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/artifacts`),
+      request<{ tasks: SessionTaskItem[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/tasks`),
+    ])
+      .then(([artRes, taskRes]) => {
+        if (cancelled) return
+        setArtifacts(artRes.artifacts ?? [])
+        setTasks(taskRes.tasks ?? [])
+      })
+      .catch(error => reportStreamWarning("refreshArtifactsAndTasks", error))
+    if (isCodingTask) {
+      void request<{ agents: SubagentInfo[] }>(`/api/coding-tasks/${encodeURIComponent(sessionId)}/agents`)
+        .then(data => { if (!cancelled) setSubagents(data.agents ?? []) })
+        .catch(error => reportStreamWarning("refreshSubagents", error))
+    }
+    if (hasWorkspace) {
+      void request<WorkspaceGitSummary>(`/api/workspace/git?sessionId=${encodeURIComponent(sessionId)}`)
+        .then(data => { if (!cancelled) setGitSummary(data) })
+        .catch(error => {
+          reportStreamWarning("refreshGit", error)
+          if (!cancelled) setGitSummary(EMPTY_GIT)
+        })
+    }
+    return () => { cancelled = true }
+  }, [sessionId, hasWorkspace, isCodingTask, environmentVersion])
 
   // Subscribe to the shared EventSource stream by event type
   useEffect(() => {

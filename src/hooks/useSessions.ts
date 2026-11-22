@@ -95,8 +95,14 @@ export function useSessions(params: {
   }, [])
 
   useEffect(() => {
-    void loadSessions()
-  }, [loadSessions, environmentVersion])
+    let cancelled = false
+    void request<{ sessions: Conversation[] }>("/api/sessions")
+      .then(data => { if (!cancelled) setSessions(data.sessions ?? []) })
+      .catch(err => {
+        if (!cancelled) console.warn("[ADE] Could not load sessions:", err instanceof Error ? err.message : String(err))
+      })
+    return () => { cancelled = true }
+  }, [environmentVersion])
 
   // Replay any pending task starts stored before reload.
   useEffect(() => {
@@ -192,13 +198,31 @@ export function useSessions(params: {
     const legacy = readStoredIds("ade.archived-ids")
     if (!legacy.length || (!sessions.length && !projects.length)) return
     localStorage.removeItem("ade.archived-ids")
-    for (const id of legacy) {
-      const known = id.startsWith("project:")
+    const targets = legacy.filter(id =>
+      id.startsWith("project:")
         ? projects.some(p => `project:${p.id}` === id && !p.archivedAt)
-        : sessions.some(s => s.id === id && !s.archivedAt && s.id !== "coding" && s.id !== "personal")
-      if (known) void toggleArchive(id, false)
-    }
-  }, [sessions, projects, toggleArchive])
+        : sessions.some(s => s.id === id && !s.archivedAt && s.id !== "coding" && s.id !== "personal"),
+    )
+    if (!targets.length) return
+    void Promise.all(
+      targets.map(id => {
+        const isProject = id.startsWith("project:")
+        const targetId = isProject ? id.slice("project:".length) : id
+        return request(
+          isProject ? `/api/projects/${encodeURIComponent(targetId)}/archive` : `/api/sessions/${encodeURIComponent(targetId)}/archive`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(
+              isProject
+                ? { archived: true, removeWorktrees: settings.archiveRemovesWorktree }
+                : { archived: true, removeWorktree: settings.archiveRemovesWorktree },
+            ),
+          },
+        ).catch(() => undefined)
+      }),
+    ).then(() => Promise.all([loadSessions(), onLoadProjects()]))
+  }, [sessions, projects, settings.archiveRemovesWorktree, loadSessions, onLoadProjects])
 
   const attachFiles = useCallback(async (fileList: FileList | null) => {
     if (!fileList) return

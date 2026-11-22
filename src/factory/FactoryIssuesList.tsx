@@ -30,6 +30,19 @@ export function FactoryIssuesList({
   const [loading, setLoading] = useState(false)
   const [startingNumber, setStartingNumber] = useState<number | null>(null)
   const [error, setError] = useState("")
+  const projectKey = `${project?.id ?? ""}:${project?.githubUrl ?? ""}`
+  const [prevProjectKey, setPrevProjectKey] = useState(projectKey)
+
+  if (projectKey !== prevProjectKey) {
+    setPrevProjectKey(projectKey)
+    setError("")
+    if (!project || !project.githubUrl) {
+      setIssues([])
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
+  }
 
   const load = useCallback(async () => {
     if (!project || !project.githubUrl) {
@@ -51,8 +64,26 @@ export function FactoryIssuesList({
   }, [project])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    if (!project || !project.githubUrl) return
+    let cancelled = false
+    void request<{ issues: ProjectGitHubIssue[] }>(
+      `/api/projects/${encodeURIComponent(project.id)}/issues?state=open`,
+    )
+      .then(res => {
+        if (!cancelled) {
+          setIssues(res.issues)
+          setError("")
+          setLoading(false)
+        }
+      })
+      .catch(err => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Could not load GitHub issues via gh CLI.")
+          setLoading(false)
+        }
+      })
+    return () => { cancelled = true }
+  }, [project])
 
   if (!project) {
     return (
