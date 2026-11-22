@@ -213,3 +213,37 @@ Categories with no function (Voice, Pair device, Metadata, Usage, Sidebar) are h
 - **First:** merge this branch.
 - **Then:** let the other agent do Q-09, Q-10 and Q-12.
 - **Q-01 (credential storage):** it's included here because it blocks Settings, so remove it from the other agent's list.
+
+---
+
+## 5. Roadmap: features a full ADE needs next
+Features that comparable tools (Conductor, Claude Code, Cursor, Codex, Orca, Paseo, Antigravity) have and ADE doesn't yet. Grouped by priority; within a group, the first item is the most valuable.
+
+### Now: makes ADE usable every day
+| # | Feature | What it means | Why it matters |
+| --- | --- | --- | --- |
+| R1 | **Setup and run scripts per project** | Per project: a setup script that runs when a worktree is created (install dependencies, copy `.env`), and a Run button that starts the dev server on a free port and opens it in the browser panel. | Without it every new worktree starts empty and can't run or test. Conductor relies on this heavily. |
+| R2 | **Undo an agent's changes (checkpoints)** | Snapshot the workspace on every agent turn; roll back to any earlier turn from the timeline. | Lets people let agents work freely; cheap to build on worktrees. |
+| R3 | **More than one agent engine** | Run Claude Code, Codex or OpenCode (already detected on the host) as a session's engine, next to Pi Durable. | The biggest difference between the competing tools; reuses subscriptions instead of API keys. |
+| R4 | **An inbox across all sessions** | One view of every session with its state: working, needs you, ready to review, PR open, checks failing, merged. | Needed to manage 5–10 parallel agents. Ties into design decision 3.2.2. |
+
+### Next: closes the review loop
+| # | Feature | What it means |
+| --- | --- | --- |
+| R5 | **Review comments back to the agent** | Comment on diff lines and send them to the agent; pull PR review comments and failed CI logs into the session with "Address comments" and "Fix CI" actions. |
+| R6 | **Keep branches up to date** | Show when a branch is behind its base; update it from `main` (rebase or merge); let the agent help resolve conflicts. |
+| R7 | **Context controls** | @-mention files and folders in the composer; show how full the context is; edit the project instructions file (`AGENTS.md` / `CLAUDE.md`) in the app. |
+| R8 | **Cost and usage** | Tokens and cost per session and per project, with optional budget limits. (Replaces the removed "Usage" settings placeholder.) |
+| R9 | **Start from an existing branch or PR** | Check out a branch or someone's PR into a worktree to review or continue it. |
+
+### Later: scale and polish
+| # | Feature | What it means |
+| --- | --- | --- |
+| R10 | **Best of N** | Run one task 2–3 times in parallel (possibly with different models), compare the diffs, keep one. |
+| R11 | **Background and triggered agents** | Scheduled runs, or start automatically when an issue gets a label. Fits the Software Factory direction. |
+| R12 | **Hooks and a policy editor** | Commands that run before or after tools (for example lint after every edit), and an editor for approval rules beyond the allow-list. |
+| R13 | **Secrets per project** | Give agents environment variables safely, without committing `.env`. Pairs with R1. |
+| R14 | **Integrations** | Linear or Jira as issue sources; Slack notifications. |
+| R15 | **Sharing and debugging** | Export or share a transcript; replay an agent's tool calls to see what went wrong. |
+
+**Suggested order:** R1 → R2 → R3, then R4 alongside the design decisions in 3.2, since the inbox and the single session layout shape each other.
