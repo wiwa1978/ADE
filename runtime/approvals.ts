@@ -4,6 +4,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { defineExtension, defineSignal, hook, ToolTask, type Harness } from "@earendil-works/pi-durable";
 import { bool, obj, opt, str } from "@earendil-works/pi-schema";
 import type { RuntimeEventBus } from "./events.ts";
+import { runHostMigrations } from "./db/migrations.ts";
 import { badRequest, notFound } from "./http-error.ts";
 
 export type ApprovalPolicy = "ask" | "auto-safe" | "auto-all";
@@ -92,19 +93,7 @@ export class ApprovalManager {
 	constructor(db: DatabaseSync, events: RuntimeEventBus) {
 		this.#db = db;
 		this.#events = events;
-		this.#db.exec(`
-			CREATE TABLE IF NOT EXISTS approval_rules (
-				id TEXT PRIMARY KEY,
-				toolName TEXT NOT NULL,
-				prefix TEXT NOT NULL,
-				createdAt INTEGER NOT NULL,
-				UNIQUE(toolName, prefix)
-			);
-			CREATE TABLE IF NOT EXISTS approval_settings (
-				id INTEGER PRIMARY KEY CHECK(id=1),
-				policy TEXT NOT NULL
-			);
-		`);
+		runHostMigrations(this.#db);
 		const row = this.#db.prepare("SELECT policy FROM approval_settings WHERE id=1").get() as { policy?: string } | undefined;
 		if (row?.policy && ["ask", "auto-safe", "auto-all"].includes(row.policy)) {
 			this.#policy = row.policy as ApprovalPolicy;

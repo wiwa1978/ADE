@@ -7,6 +7,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { map, unknown } from "@earendil-works/pi-schema";
 import type { RuntimeEventBus } from "./events.ts";
+import { runHostMigrations } from "./db/migrations.ts";
 import { isErrorCode, logger } from "./log.ts";
 import { badRequest, notFound } from "./http-error.ts";
 
@@ -194,16 +195,7 @@ export class McpManager {
 	constructor(db: DatabaseSync, events: RuntimeEventBus) {
 		this.#db = db;
 		this.#events = events;
-		this.#db.exec(`
-			CREATE TABLE IF NOT EXISTS mcp_servers (
-				id TEXT PRIMARY KEY,
-				name TEXT NOT NULL,
-				transport TEXT NOT NULL,
-				configJson TEXT NOT NULL,
-				enabled INTEGER NOT NULL DEFAULT 1,
-				createdAt INTEGER NOT NULL
-			);
-		`);
+		runHostMigrations(this.#db);
 		this.#importDiskConfig();
 	}
 

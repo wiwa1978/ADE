@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { arr, bool, obj, opt, str } from "@earendil-works/pi-schema";
 import type { RuntimeEventBus } from "./events.ts";
+import { runHostMigrations } from "./db/migrations.ts";
 import { notFound } from "./http-error.ts";
 
 export type ArtifactKind = "plan" | "markdown" | "html" | "walkthrough" | "diff";
@@ -33,24 +34,7 @@ export class ArtifactManager {
 	constructor(db: DatabaseSync, events: RuntimeEventBus) {
 		this.#db = db;
 		this.#events = events;
-		this.#db.exec(`
-			CREATE TABLE IF NOT EXISTS session_artifacts (
-				id TEXT PRIMARY KEY,
-				sessionId TEXT NOT NULL,
-				title TEXT NOT NULL,
-				kind TEXT NOT NULL,
-				content TEXT NOT NULL,
-				status TEXT NOT NULL,
-				feedback TEXT,
-				createdAt INTEGER NOT NULL,
-				updatedAt INTEGER NOT NULL
-			);
-			CREATE TABLE IF NOT EXISTS session_tasks (
-				sessionId TEXT PRIMARY KEY,
-				itemsJson TEXT NOT NULL,
-				updatedAt INTEGER NOT NULL
-			);
-		`);
+		runHostMigrations(this.#db);
 	}
 
 	listArtifacts(sessionId: string): SessionArtifact[] {
