@@ -99,7 +99,6 @@ export class ArtifactManager {
 	}
 
 	createExtension(sessionId: string) {
-		const manager = this;
 		const writeArtifact = defineTool({
 			name: "write_artifact",
 			description: "Create or update a rich session artifact (implementation plan, walkthrough, markdown report, or interactive HTML preview) shown in ADE's Artifact pane. Set requestApproval=true for plans requiring user approval.",
@@ -110,8 +109,8 @@ export class ArtifactManager {
 				requestApproval: opt(bool({ description: "Prompt the user with Approve / Request Changes actions (default false)" })),
 			}),
 			replay: "safe",
-			async execute(args) {
-				const artifact = manager.upsertArtifact({
+			execute: async (args) => {
+				const artifact = this.upsertArtifact({
 					sessionId,
 					title: args.title,
 					kind: args.kind as ArtifactKind | undefined,
@@ -136,8 +135,8 @@ export class ArtifactManager {
 				})),
 			}),
 			replay: "safe",
-			async execute(args) {
-				const saved = manager.setTasks(sessionId, args.items as SessionTaskItem[]);
+			execute: async (args) => {
+				const saved = this.setTasks(sessionId, args.items as SessionTaskItem[]);
 				const doneCount = saved.filter(t => t.status === "done").length;
 				return {
 					output: [{ type: "text", text: `Updated session checklist: ${doneCount}/${saved.length} done.` }],

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { getCaptainEndpoint, request, setCaptainEndpoint } from "../../api"
 import type { FactoryBlueprint, ModelProfileId } from "../../app-types"
 import type { Project } from "../../ProjectsView"
-import { useEventStream, useEventStreamListener } from "../hooks/EventStreamContext"
+import { useEventStream, useEventStreamListener } from "../hooks/useEventStream"
 import type { FactoryCapabilities, FactoryRunDetail } from "./types"
 
 const DEFAULT_PROFILES: { id: ModelProfileId; name: string; euCompliantByDefault: boolean }[] = [

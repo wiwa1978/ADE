@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { GitBranch, Maximize2, Send, X } from "lucide-react"
 import { request } from "../../api"
 import type { Conversation, ConversationTimelineSnapshot, WorkspaceGitSummary } from "../../app-types"
-import { useEventStreamListener } from "../hooks/EventStreamContext"
+import { useEventStreamListener } from "../hooks/useEventStream"
 import { DiffPanel } from "../panels/DiffPanel"
 
 const EMPTY_GIT: WorkspaceGitSummary = {

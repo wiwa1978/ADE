@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { request } from "../../api"
-import { useEventStream } from "./EventStreamContext"
+import { useEventStream } from "./useEventStream"
 import type {
   ApprovalPolicy,
   ApprovalRule,
@@ -90,9 +90,11 @@ export function useRuntimeStream(opts: {
   }
 
   const callbacksRef = useRef({ onSessionsChanged, onAgentBrowserDriving, onArtifactUpdated })
-  callbacksRef.current = { onSessionsChanged, onAgentBrowserDriving, onArtifactUpdated }
   const sessionIdRef = useRef(sessionId)
-  sessionIdRef.current = sessionId
+  useEffect(() => {
+    callbacksRef.current = { onSessionsChanged, onAgentBrowserDriving, onArtifactUpdated }
+    sessionIdRef.current = sessionId
+  })
 
   const refreshTimeline = useCallback(async (targetId: string) => {
     try {

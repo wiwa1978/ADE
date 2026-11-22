@@ -3,7 +3,7 @@ import { request } from "../../api"
 import type { Screen } from "../../app-types"
 import type { GitHubRepositoryPage, Project, ProjectActivity, ProjectInput } from "../../ProjectsView"
 import type { FactoryRunDetail } from "../factory/types"
-import { useEventStreamListener } from "./EventStreamContext"
+import { useEventStreamListener } from "./useEventStream"
 
 export function searchGitHubRepositories(login: string, query: string, page: number, signal?: AbortSignal) {
   return request<GitHubRepositoryPage>("/api/github/repositories", {

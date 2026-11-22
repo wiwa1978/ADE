@@ -1,9 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { request } from "../../api"
 import type { Conversation, GitHubIssue, PendingApproval, TaskStart } from "../../app-types"
 import { clearPendingStart, pendingStarts, storePendingStart } from "../../pending-task-starts"
 import type { Project } from "../../ProjectsView"
 import type { Settings } from "../../useSettings"
+
+const FALLBACK_SESSION: Conversation = {
+  id: "coding",
+  mode: "coding",
+  label: "Coding lead",
+  status: "idle",
+  messages: [],
+}
 
 function readStoredIds(key: string): string[] {
   try {
@@ -72,13 +80,10 @@ export function useSessions(params: {
   const [pinnedIds, setPinnedIds] = useState<string[]>(() => readStoredIds("ade.pinned-ids"))
   const [unreadIds, setUnreadIds] = useState<string[]>(() => readStoredIds("ade.unread-ids"))
 
-  const activeSession = sessions.find(s => s.id === activeSessionId) ?? sessions[0] ?? {
-    id: "coding",
-    mode: "coding" as const,
-    label: "Coding lead",
-    status: "idle" as const,
-    messages: [],
-  }
+  const activeSession = useMemo(
+    () => sessions.find(s => s.id === activeSessionId) ?? sessions[0] ?? FALLBACK_SESSION,
+    [sessions, activeSessionId],
+  )
   const isCodingTask = Boolean(
     activeSession.workspace || (activeSession.id !== "coding" && activeSession.id !== "personal" && !activeSession.chatThread),
   )

@@ -1,23 +1,10 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { resolveCaptainUrl } from "../../api"
-
-export type EventStreamListener = (event: MessageEvent) => void
-
-export type EventStreamContextValue = {
-  connected: boolean
-  subscribe: (eventName: string, listener: EventStreamListener) => () => void
-  reconnect: () => void
-}
-
-const noopUnsubscribe = () => {}
-
-const DEFAULT_CONTEXT: EventStreamContextValue = {
-  connected: false,
-  subscribe: () => noopUnsubscribe,
-  reconnect: () => {},
-}
-
-const EventStreamContext = createContext<EventStreamContextValue>(DEFAULT_CONTEXT)
+import {
+  EventStreamContext,
+  type EventStreamContextValue,
+  type EventStreamListener,
+} from "./useEventStream"
 
 export function EventStreamProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false)
@@ -104,7 +91,6 @@ export function EventStreamProvider({ children }: { children: ReactNode }) {
       }
       source.addEventListener("connected", onConnected)
 
-      // Attach listeners for all currently subscribed event names.
       for (const eventName of listenersRef.current.keys()) {
         source.addEventListener(eventName, getDispatcher(eventName))
       }
@@ -139,20 +125,4 @@ export function EventStreamProvider({ children }: { children: ReactNode }) {
   )
 
   return <EventStreamContext.Provider value={value}>{children}</EventStreamContext.Provider>
-}
-
-export function useEventStream(): EventStreamContextValue {
-  return useContext(EventStreamContext)
-}
-
-export function useEventStreamListener(eventName: string, listener: EventStreamListener): void {
-  const { subscribe } = useEventStream()
-  const listenerRef = useRef(listener)
-  useEffect(() => {
-    listenerRef.current = listener
-  })
-
-  useEffect(() => {
-    return subscribe(eventName, (ev) => listenerRef.current(ev))
-  }, [eventName, subscribe])
 }
