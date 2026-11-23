@@ -48,6 +48,8 @@ export function createAutomationRunner(deps: AutomationRunnerDeps) {
 	const running = new Set<string>();
 	let lastIssueCheck = 0;
 	let timer: ReturnType<typeof setInterval> | null = null;
+	let firstTick: ReturnType<typeof setTimeout> | null = null;
+	const safeTick = () => { void tick().catch(() => undefined); };
 
 	/** True while the automation's previous session is still working. */
 	const previousStillWorking = (automation: Automation) => {
@@ -128,13 +130,16 @@ export function createAutomationRunner(deps: AutomationRunnerDeps) {
 		},
 		start() {
 			if (timer) return;
-			timer = setInterval(() => void tick(), 60_000);
+			timer = setInterval(safeTick, 60_000);
 			timer.unref?.();
-			setTimeout(() => void tick(), 5_000).unref?.();
+			firstTick = setTimeout(safeTick, 5_000);
+			firstTick.unref?.();
 		},
 		stop() {
 			if (timer) clearInterval(timer);
+			if (firstTick) clearTimeout(firstTick);
 			timer = null;
+			firstTick = null;
 		},
 	};
 }

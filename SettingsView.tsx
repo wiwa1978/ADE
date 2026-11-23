@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react"
 import {
-  ArrowLeft, Bell, Bot, Gauge, GitPullRequest, Palette, Search, Server, Settings2, Sparkles, Terminal, X, type LucideIcon,
+  ArrowLeft, Bell, Blocks, Bot, Gauge, GitPullRequest, Palette, Search, Server, Settings2, Sparkles, Terminal, X, type LucideIcon,
 } from "lucide-react"
 import { EnvironmentSettings } from "./EnvironmentSettings"
 import { colorPalettes, paletteVariables, type Theme } from "./appearance-palettes"
@@ -11,10 +11,11 @@ import { modelCredentialProviders, type useConnections } from "./useConnections"
 import { McpAndSecuritySettings } from "./src/panels/McpSettingsSection"
 import { request } from "./api"
 import { UsageSettings } from "./src/usage/UsageSettings"
+import { IntegrationsSettings } from "./src/integrations/IntegrationsSettings"
 
 /** Settings categories. Every category here changes something real; nothing is a placeholder. */
 export type SettingsCategory =
-  | "general" | "appearance" | "models" | "agents" | "usage" | "github" | "terminal" | "notifications" | "environments"
+  | "general" | "appearance" | "models" | "agents" | "usage" | "integrations" | "github" | "terminal" | "notifications" | "environments"
 
 type SettingsItem = { id: SettingsCategory; label: string; icon: LucideIcon; description: string; keywords: string }
 
@@ -25,6 +26,7 @@ const groups: { label: string; items: SettingsItem[] }[] = [
       { id: "general", label: "General", icon: Settings2, description: "Session defaults, archiving, and keyboard shortcuts.", keywords: "worktree checkout branch archive startup restore shortcuts keyboard" },
       { id: "terminal", label: "Terminal", icon: Terminal, description: "The interactive terminal in coding sessions.", keywords: "shell font scrollback auto start" },
       { id: "notifications", label: "Notifications", icon: Bell, description: "Desktop notifications when agents need you.", keywords: "alert finished approval desktop" },
+      { id: "integrations", label: "Integrations", icon: Blocks, description: "Slack notifications and Linear issues.", keywords: "slack linear webhook notify issues jira" },
     ],
   },
   {
@@ -440,7 +442,8 @@ export function SettingsView({
   </>
 
   const usage = <UsageSettings budget={settings.monthlyBudget} onBudgetChange={value => update({ monthlyBudget: value })} projects={projects} sessionLabels={sessionLabels} />
-  const content = { general, appearance, models, agents, usage, github, terminal, notifications, environments }[selectedCategory]
+  const integrations = <IntegrationsSettings />
+  const content = { general, appearance, models, agents, usage, integrations, github, terminal, notifications, environments }[selectedCategory]
 
   return <main className="st-layout">
     <aside className="st-nav" aria-label="Settings navigation">

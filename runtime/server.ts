@@ -144,7 +144,7 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 	origins?: readonly (string | undefined)[];
 }) {
 	let githubConnectionRevision = 0;
-	const { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner } = createAgentWorkflow({ host, worktreeManager, sessionGit });
+	const { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner, integrations } = createAgentWorkflow({ host, worktreeManager, sessionGit });
 	/** Close terminals in an archived session's workspace and optionally remove its ADE worktree (keeping the branch). */
 	async function cleanUpArchivedWorkspace(session: { id: string; workspace: string | null; repository: string | null; kind: string | null }, removeWorktreeRequested: boolean) {
 		let terminalsClosed = 0;
@@ -191,6 +191,7 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 		runCheck,
 		automations,
 		automationRunner,
+		integrations,
 	});
 
 	const server = createServer((request, response) => {

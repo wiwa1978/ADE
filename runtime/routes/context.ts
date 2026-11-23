@@ -30,6 +30,7 @@ export type RouteDeps = {
 	runCheck: (sessionId: string) => void;
 	automations: import("../automations.ts").AutomationStore;
 	automationRunner: import("../automation-runner.ts").AutomationRunner;
+	integrations: import("../integrations.ts").Integrations;
 	cleanUpArchivedWorkspace: (
 		session: { id: string; workspace: string | null; repository: string | null; kind: string | null },
 		removeWorktreeRequested: boolean,

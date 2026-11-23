@@ -8,7 +8,7 @@ import { readInstructions, searchWorkspaceFiles, writeInstructions } from "../ag
 
 export function registerAgentWorkflowRoutes(
 	router: Router,
-	{ host, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, usage, secrets, automations, automationRunner }: RouteDeps,
+	{ host, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, usage, secrets, automations, automationRunner, integrations }: RouteDeps,
 ): void {
 	// --- Usage: tokens and cost per session, project and day ---
 	router.get("/api/usage", (ctx) => {
@@ -48,6 +48,34 @@ export function registerAgentWorkflowRoutes(
 		scripts.save(project.id, await ctx.readBody());
 		ctx.json(200, scriptsResponse(project.id, project.repository));
 	}, { originError: "Use ADE to change project scripts." });
+
+	// --- Integrations: Slack notifications and Linear issues ---
+	router.get("/api/integrations", (ctx) => {
+		ctx.json(200, integrations.status());
+	});
+	router.put("/api/integrations/slack", async (ctx) => {
+		const body = await ctx.readBody();
+		ctx.json(200, integrations.setSlack(body.webhook, body.events as Record<string, boolean> | undefined));
+	}, { originError: "Use ADE to change integrations." });
+	router.delete("/api/integrations/slack", (ctx) => {
+		ctx.json(200, integrations.removeSlack());
+	}, { originError: "Use ADE to change integrations." });
+	router.post("/api/integrations/slack/test", async (ctx) => {
+		await ctx.readBody();
+		const sent = await integrations.notify("👋 ADE is connected. You'll get messages here when agents finish or need you.");
+		if (!sent) throw badRequest("Add a Slack webhook first.");
+		ctx.json(200, { sent: true });
+	}, { originError: "Use ADE to test integrations." });
+	router.put("/api/integrations/linear", async (ctx) => {
+		const body = await ctx.readBody();
+		ctx.json(200, await integrations.setLinear(body.apiKey));
+	}, { originError: "Use ADE to change integrations." });
+	router.delete("/api/integrations/linear", (ctx) => {
+		ctx.json(200, integrations.removeLinear());
+	}, { originError: "Use ADE to change integrations." });
+	router.get("/api/integrations/linear/issues", async (ctx) => {
+		ctx.json(200, { issues: await integrations.linearIssues(ctx.url.searchParams.get("q") ?? "") });
+	});
 
 	// --- Automations: scheduled and issue-triggered background agents ---
 	router.get("/api/projects/:id/automations", (ctx) => {

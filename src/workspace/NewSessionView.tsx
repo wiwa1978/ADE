@@ -13,6 +13,7 @@ import type { ApprovalPolicy, GitHubIssue, ProviderCatalogEntry, StartFrom, Task
 import type { Project } from "../../ProjectsView"
 import { ModelPicker } from "../composer/ModelPicker"
 import { StartFromPicker, type StartChoice } from "./StartFromPicker"
+import { LinearIssuePicker, type LinearIssue } from "./LinearIssuePicker"
 
 type EngineId = "pi" | "claude-code" | "codex"
 type EngineOption = { id: EngineId; name: string; description: string; available: boolean }
@@ -91,6 +92,7 @@ export function NewSessionView({
   const [engines, setEngines] = useState<EngineOption[]>([])
   const [engine, setEngine] = useState<EngineId>("pi")
   const [startChoice, setStartChoice] = useState<StartChoice>({ mode: "new" })
+  const [linearIssue, setLinearIssue] = useState<LinearIssue | null>(null)
   // Best of N: run the same task several times, each in its own worktree, possibly with different agents.
   const [attemptCount, setAttemptCount] = useState(1)
   const [attemptEngines, setAttemptEngines] = useState<Array<EngineId | null>>([null, null, null])
@@ -196,7 +198,7 @@ export function NewSessionView({
       prompt: prompt.trim(),
       githubIssue: linkedIssue ?? undefined,
       engine: engineAllowed(engine) ? engine : "pi",
-      ...(startFrom ? { startFrom, title: startTitle } : {}),
+      ...(startFrom ? { startFrom, title: startTitle } : linearIssue ? { title: `${linearIssue.identifier}: ${linearIssue.title}` } : {}),
       ...(canAttempt && attemptCount > 1 ? { attempts: attemptEngines.slice(0, attemptCount).map(item => item ?? engine) } : {}),
     })
   }
@@ -423,6 +425,15 @@ export function NewSessionView({
               )}
             </div>
           ) : null}
+
+          <LinearIssuePicker
+            selected={linearIssue}
+            onClear={() => setLinearIssue(null)}
+            onPick={issue => {
+              setLinearIssue(issue)
+              if (!prompt.trim()) setPrompt(`Work on ${issue.identifier}: ${issue.title}\n${issue.url}${issue.description ? `\n\n${issue.description}` : ""}`)
+            }}
+          />
 
           {/* Main Task Prompt Composer */}
           <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] focus-within:border-[rgb(var(--primary))] transition-colors overflow-hidden">

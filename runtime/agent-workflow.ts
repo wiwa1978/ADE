@@ -9,6 +9,7 @@ import { createCheckpoints } from "./checkpoints.ts";
 import { EngineManager } from "./engines.ts";
 import { UsageTracker } from "./usage.ts";
 import { AutomationStore } from "./automations.ts";
+import { Integrations, type SlackEvents } from "./integrations.ts";
 import { createAutomationRunner } from "./automation-runner.ts";
 import type { LocalAgentHost } from "./host.ts";
 import type { WorktreeManager } from "./worktrees.ts";
@@ -92,6 +93,23 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 
 	// Hook: after an agent turn ends, run the project's check command (lint, typecheck, tests) in the
 	// workspace. With auto-fix on, a failing check goes back to the agent, at most twice in a row.
+	// Slack notifications (R14): turn finished or failed, approval needed, automation started.
+	const integrations = new Integrations(stateDirectory);
+	const lastNotified = new Map<string, number>();
+	const notify = (event: keyof SlackEvents, sessionId: string, describe: (label: string, project: string) => string) => {
+		if (!integrations.wants(event)) return;
+		const key = `${sessionId}:${event}`;
+		if (Date.now() - (lastNotified.get(key) ?? 0) < 30_000) return;
+		lastNotified.set(key, Date.now());
+		const session = viewSessions().find(item => item.id === sessionId);
+		if (!session || session.id === "coding" || session.id === "personal") return;
+		const project = host.projects?.().find(item => item?.id === session.projectId)?.name ?? "No project";
+		void integrations.notify(describe(session.label, project)).catch(() => undefined);
+	};
+	host.events?.subscribe?.(event => {
+		if (event.type === "approval.requested" && event.sessionId) notify("needsApproval", event.sessionId, (label, project) => `⏸ *${label}* (${project}) is waiting for your approval in ADE.`);
+	});
+
 	const agentBusy = new Map<string, boolean>();
 	const autoFixStreak = new Map<string, number>();
 	function runCheck(sessionId: string) {
@@ -121,7 +139,22 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		const was = agentBusy.get(event.sessionId) ?? false;
 		const now = Boolean(payload.busy);
 		agentBusy.set(event.sessionId, now);
-		if (was && !now) runCheck(event.sessionId);
+		if (was && !now) {
+			runCheck(event.sessionId);
+			const sessionId = event.sessionId;
+			// Give the turn's final status a moment to be stored before reading it.
+			if (integrations.wants("finished") || integrations.wants("failed")) {
+				setTimeout(() => {
+					try {
+						const failed = viewSessions().find(item => item.id === sessionId)?.lastTurnStatus === "failed";
+						if (failed) notify("failed", sessionId, (label, project) => `❌ *${label}* (${project}): the agent's turn failed.`);
+						else notify("finished", sessionId, (label, project) => `✅ *${label}* (${project}) is done and ready to review.`);
+					} catch {
+						// The runtime may be shutting down.
+					}
+				}, 1500).unref?.();
+			}
+		}
 	});
 
 	/** Every agent reports its running token/cost totals with each timeline update; keep a ledger of them. */
@@ -151,7 +184,8 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		sendToAgent: async (sessionId, content) => {
 			await sendToAgent(sessionId, content, { async: true });
 			host.events?.emit?.("sessions.changed", { id: sessionId, reason: "automation" });
+			notify("automations", sessionId, (label, project) => `🤖 Automation started *${label}* (${project}).`);
 		},
 	});
-	return { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner };
+	return { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner, integrations };
 }
