@@ -24,6 +24,7 @@ import { ModelPicker } from "../composer/ModelPicker"
 import { StartFromPicker, type StartChoice } from "./StartFromPicker"
 import { LinearIssuePicker, type LinearIssue } from "./LinearIssuePicker"
 import { runTargetDescriptions, targetLabel, targetUnavailable, useRunTargets, type RunTarget, type TargetSettings } from "../run-targets"
+import { DEFAULT_KEYBINDINGS, formatShortcut, matchesChord, type KeybindingMap } from "../keybindings"
 
 type EngineId = "pi" | "claude-code" | "codex"
 type OpenMenu = null | "project" | "workspace" | "runOn" | "attempts"
@@ -51,6 +52,7 @@ export function NewSessionView({
   onConfigureProject,
   onOpenEnvironmentPalette,
   environmentName,
+  keybindings = DEFAULT_KEYBINDINGS,
   modelCatalog,
   selectedProvider,
   selectedModel,
@@ -72,6 +74,7 @@ export function NewSessionView({
   onConfigureProject?: (projectId: string) => void
   onOpenEnvironmentPalette?: () => void
   environmentName: string
+  keybindings?: KeybindingMap
   modelCatalog: ProviderCatalogEntry[]
   selectedProvider: string
   selectedModel: string
@@ -291,7 +294,7 @@ export function NewSessionView({
               type="button"
               className="ade-ns-pill shrink-0"
               onClick={onOpenEnvironmentPalette}
-              title="Switch environment (Cmd+E)"
+              title={keybindings.switchEnvironment ? `Switch environment (${formatShortcut(keybindings.switchEnvironment)})` : "Switch environment"}
             >
               <Server className="size-3.5 opacity-70" />
               <span>{environmentName}</span>
@@ -635,11 +638,14 @@ export function NewSessionView({
             <textarea
               className="w-full bg-transparent border-0 outline-none resize-none px-4 pt-3.5 pb-2 text-[13.5px] leading-relaxed text-[rgb(var(--foreground))]"
               rows={5}
-              placeholder={startFrom ? "Optional: what should the agent do on this branch? Leave empty to just open it." : "Describe the task. Enter to start, Shift+Enter for a new line."}
+              placeholder={startFrom
+                ? "Optional: what should the agent do on this branch? Leave empty to just open it."
+                : `Describe the task. ${formatShortcut(keybindings.sendMessage)} to start, ${formatShortcut(keybindings.newLine)} for a new line.`}
               value={prompt}
               onChange={e => setPrompt(e.target.value)}
               onKeyDown={e => {
-                if (e.key === "Enter" && !e.shiftKey) {
+                if (matchesChord(e.nativeEvent, keybindings.newLine)) return
+                if (matchesChord(e.nativeEvent, keybindings.sendMessage)) {
                   e.preventDefault()
                   if (canSubmit) handleSubmit(e)
                 }

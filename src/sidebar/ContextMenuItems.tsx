@@ -104,6 +104,7 @@ export function ProjectContextMenuItems({
 export function SessionContextMenuItems({
   sess,
   projects,
+  pinShortcut = "⌥⌘P",
   pinned,
   unread,
   submenu,
@@ -122,6 +123,7 @@ export function SessionContextMenuItems({
 }: {
   sess: Conversation
   projects: Project[]
+  pinShortcut?: string
   pinned: boolean
   unread: boolean
   submenu: SubmenuKind
@@ -167,7 +169,7 @@ export function SessionContextMenuItems({
         onClick={() => { onTogglePin(sess.id); onClose() }}
       >
         <span>{pinned ? "Unpin" : "Pin"}</span>
-        <span className="ade-ctx-shortcut">⌥⌘P</span>
+        {pinShortcut ? <span className="ade-ctx-shortcut">{pinShortcut}</span> : null}
       </button>
 
       <button

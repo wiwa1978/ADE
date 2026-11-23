@@ -25,6 +25,7 @@ import { confirmRestore, restoreCheckpoint, type CheckpointInfo } from "../panel
 import type { PullRequestInfo } from "../panels/PullRequestPanel"
 import { WorkspaceHeaderBar } from "./WorkspaceHeaderBar"
 import { BesidePane } from "./BesidePane"
+import { DEFAULT_KEYBINDINGS, formatShortcut, matchesChord, type KeybindingMap } from "../keybindings"
 
 export function SplitWorkspace({
   session,
@@ -79,6 +80,7 @@ export function SplitWorkspace({
   externalOpenRequest,
   onClearExternalOpenRequest,
   textareaRef,
+  keybindings = DEFAULT_KEYBINDINGS,
 }: {
   session: Conversation
   timeline: ConversationTimelineSnapshot | null
@@ -134,6 +136,7 @@ export function SplitWorkspace({
   externalOpenRequest: WorkspaceTab | null
   onClearExternalOpenRequest: () => void
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>
+  keybindings?: KeybindingMap
 }) {
   const [besideTabs, setBesideTabs] = useState<WorkspaceTab[]>([])
   const [activeBesideId, setActiveBesideId] = useState<string | null>(null)
@@ -246,10 +249,10 @@ export function SplitWorkspace({
     }
   }, [])
 
-  // Keyboard shortcut: Cmd+J or Ctrl+` toggles bottom terminal drawer
+  // Dynamic keyboard shortcut (default Cmd+J / Ctrl+`) toggles bottom terminal drawer
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") || (e.ctrlKey && e.key === "`")) {
+      if (matchesChord(e, keybindings.toggleTerminal) || (e.ctrlKey && e.key === "`")) {
         e.preventDefault()
         setBottomTerminalMounted(true)
         setBottomTerminalOpen(v => !v)
@@ -257,7 +260,7 @@ export function SplitWorkspace({
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [])
+  }, [keybindings.toggleTerminal])
 
   const openSubagent = useCallback((subagentId: string) => {
     const found = subagents.find(s => s.id === subagentId)
@@ -370,6 +373,7 @@ export function SplitWorkspace({
         pullRequest={pullRequest}
         activeBesideTab={activeBesideTab}
         bottomTerminalOpen={bottomTerminalOpen}
+        terminalShortcut={keybindings.toggleTerminal ? formatShortcut(keybindings.toggleTerminal) : ""}
         onOpenExternalBrowser={onOpenExternalBrowser}
         onOpenSubagent={openSubagent}
         onOpenFiles={openFiles}
@@ -465,6 +469,8 @@ export function SplitWorkspace({
                 else if (panel === "pr") openPullRequest()
               }}
               textareaRef={textareaRef}
+              sendChord={keybindings.sendMessage}
+              newLineChord={keybindings.newLine}
               engineLabel={session.engine === "claude-code" ? "Claude Code" : session.engine === "codex" ? "Codex" : undefined}
               sessionId={session.id}
             />

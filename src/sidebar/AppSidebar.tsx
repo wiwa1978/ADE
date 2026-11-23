@@ -6,6 +6,7 @@ import type { FactoryRunDetail } from "../factory/types"
 import type { InboxEntry } from "../session-state"
 import { Sidebar, type SidebarSelection } from "./Sidebar"
 import type { ContextMenuTarget } from "./SidebarContextMenu"
+import { DEFAULT_KEYBINDINGS, formatShortcut, type KeybindingMap } from "../keybindings"
 
 type AppSidebarProps = {
   selection: SidebarSelection
@@ -25,6 +26,7 @@ type AppSidebarProps = {
   runtime: RuntimeHealth | null
   activeEnvironmentName: string
   sseConnected: boolean
+  keybindings?: KeybindingMap
   renamingId: string | null
   renameText: string
   onChangeRenameText: (text: string) => void
@@ -74,23 +76,29 @@ export function AppSidebar(props: AppSidebarProps) {
   const sortPinnedFirst = (list: Conversation[]) =>
     [...list].sort((a, b) => Number(props.pinnedIds.includes(b.id)) - Number(props.pinnedIds.includes(a.id)))
 
+  const kb = props.keybindings ?? DEFAULT_KEYBINDINGS
+  const searchBadge = kb.commandCenter ? formatShortcut(kb.commandCenter) : ""
+  const addProjectBadge = kb.addProject ? formatShortcut(kb.addProject) : ""
+  const inboxBadge = kb.openInbox ? formatShortcut(kb.openInbox) : ""
+  const settingsBadge = kb.openSettings ? formatShortcut(kb.openSettings) : ""
+
   if (!sidebarOpen) {
     return (
       <div className="flex flex-col items-center gap-2 py-3 px-1.5 border-r border-[rgb(var(--border))] bg-[rgb(var(--nav))]">
         <button type="button" className="ade-icon-btn" onClick={() => setSidebarOpen(true)} title="Expand sidebar" aria-label="Expand sidebar">
           <PanelLeft className="size-4" />
         </button>
-        <button type="button" className="ade-icon-btn" onClick={props.onOpenCommandCenter} title="Search (⌘K)" aria-label="Search">
+        <button type="button" className="ade-icon-btn" onClick={props.onOpenCommandCenter} title={searchBadge ? `Search (${searchBadge})` : "Search"} aria-label="Search">
           <Search className="size-4" />
         </button>
-        <button type="button" className="ade-icon-btn" onClick={props.onOpenAddProject} title="Add project" aria-label="Add project">
+        <button type="button" className="ade-icon-btn" onClick={props.onOpenAddProject} title={addProjectBadge ? `Add project (${addProjectBadge})` : "Add project"} aria-label="Add project">
           <FolderPlus className="size-4" />
         </button>
-        <button type="button" className="ade-icon-btn relative" onClick={props.onOpenInbox} title="Inbox" aria-label={`Inbox, ${props.inboxCount} need you`}>
+        <button type="button" className="ade-icon-btn relative" onClick={props.onOpenInbox} title={inboxBadge ? `Inbox (${inboxBadge})` : "Inbox"} aria-label={`Inbox, ${props.inboxCount} need you`}>
           <Inbox className="size-4" />
           {props.inboxCount > 0 ? <span className="ade-rail-badge">{props.inboxCount}</span> : null}
         </button>
-        <button type="button" className="ade-icon-btn mt-auto" onClick={props.onOpenSettings} title="Settings" aria-label="Settings">
+        <button type="button" className="ade-icon-btn mt-auto" onClick={props.onOpenSettings} title={settingsBadge ? `Settings (${settingsBadge})` : "Settings"} aria-label="Settings">
           <Settings2 className="size-4" />
         </button>
       </div>
@@ -120,6 +128,7 @@ export function AppSidebar(props: AppSidebarProps) {
         environmentName={props.activeEnvironmentName}
         runtimeOnline={Boolean(props.runtime?.online)}
         live={props.sseConnected}
+        keybindings={kb}
         onCollapse={() => setSidebarOpen(false)}
         onNewSession={props.onOpenNewSession}
         onSearch={props.onOpenCommandCenter}

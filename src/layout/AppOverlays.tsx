@@ -5,6 +5,7 @@ import { CommandCenter } from "../sidebar/CommandCenter"
 import { EnvironmentPalette } from "../sidebar/EnvironmentPalette"
 import { SidebarContextMenu, type ContextMenuTarget } from "../sidebar/SidebarContextMenu"
 import { AddProjectWizard } from "../projects/AddProjectWizard"
+import { formatShortcut, type KeybindingMap } from "../keybindings"
 
 type AppOverlaysProps = {
   commandOpen: boolean
@@ -22,6 +23,7 @@ type AppOverlaysProps = {
   pinnedIds: string[]
   unreadIds: string[]
   archivedIds: string[]
+  keybindings?: KeybindingMap
   onCloseCommand: () => void
   onCloseAddProject: () => void
   onCloseEnvPalette: () => void
@@ -63,6 +65,7 @@ export function AppOverlays({
   pinnedIds,
   unreadIds,
   archivedIds,
+  keybindings,
   onCloseCommand,
   onCloseAddProject,
   onCloseEnvPalette,
@@ -133,6 +136,7 @@ export function AppOverlays({
       <SidebarContextMenu
         target={contextMenu}
         projects={visibleProjects}
+        pinShortcut={keybindings?.pinSession ? formatShortcut(keybindings.pinSession) : ""}
         isPinned={id => pinnedIds.includes(id)}
         isUnread={id => unreadIds.includes(id)}
         isArchived={id => archivedIds.includes(id)}

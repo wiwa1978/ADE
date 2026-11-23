@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { isColorPalette, isTheme, paletteVariables, type ColorPalette, type Theme } from "./appearance-palettes"
 import { ensureGoogleFontLoaded } from "./src/appearance/fonts"
+import { CUSTOM_ACTION_OPTIONS, type CustomKeybinding } from "./src/keybindings"
 
 export type Settings = {
   theme: Theme
@@ -34,6 +35,10 @@ export type Settings = {
   restoreLastView: boolean
   /** Monthly spend (USD) to warn at; 0 = no budget. */
   monthlyBudget: number
+  /** Overrides for built-in keyboard shortcuts (action id -> canonical chord, "" = unbound). */
+  keybindings: Record<string, string>
+  /** User-defined custom keyboard shortcuts. */
+  customKeybindings: CustomKeybinding[]
 }
 
 const storageKey = "ade-settings-v1"
@@ -62,6 +67,8 @@ const defaults: Settings = {
   notifyOnApproval: false,
   restoreLastView: true,
   monthlyBudget: 0,
+  keybindings: {},
+  customKeybindings: [],
 }
 
 function readSettings(): { settings: Settings; error: string } {
@@ -97,6 +104,28 @@ function readSettings(): { settings: Settings; error: string } {
         notifyOnApproval: typeof value.notifyOnApproval === "boolean" ? value.notifyOnApproval : defaults.notifyOnApproval,
         restoreLastView: typeof value.restoreLastView === "boolean" ? value.restoreLastView : defaults.restoreLastView,
         monthlyBudget: typeof value.monthlyBudget === "number" && Number.isFinite(value.monthlyBudget) && value.monthlyBudget >= 0 && value.monthlyBudget <= 1_000_000 ? value.monthlyBudget : defaults.monthlyBudget,
+        keybindings: (() => {
+          if (!value.keybindings || typeof value.keybindings !== "object" || Array.isArray(value.keybindings)) return {}
+          const cleaned: Record<string, string> = {}
+          for (const [k, v] of Object.entries(value.keybindings)) {
+            if (typeof k === "string" && typeof v === "string" && v.length <= 64) cleaned[k] = v
+          }
+          return cleaned
+        })(),
+        customKeybindings: (() => {
+          if (!Array.isArray(value.customKeybindings)) return []
+          const allowedActions = new Set(CUSTOM_ACTION_OPTIONS.map(o => o.action))
+          return value.customKeybindings
+            .filter((item): item is CustomKeybinding =>
+              Boolean(item)
+              && typeof item === "object"
+              && typeof item.id === "string"
+              && typeof item.label === "string"
+              && typeof item.chord === "string"
+              && allowedActions.has(item.action),
+            )
+            .slice(0, 40)
+        })(),
       },
       error: "",
     }

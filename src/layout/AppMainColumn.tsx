@@ -19,6 +19,7 @@ import { ProjectStreamsWorkspace } from "../projects/ProjectStreamsWorkspace"
 import { FactoryView } from "../factory/FactoryView"
 import type { FactoryRunDetail } from "../factory/types"
 import { AttemptsView } from "../attempts/AttemptsView"
+import { resolveKeybindings } from "../keybindings"
 
 type AppMainColumnProps = {
   screen: Screen
@@ -165,6 +166,8 @@ export function AppMainColumn(props: AppMainColumnProps) {
     composerRef,
     update,
   } = props
+
+  const resolvedKeybindings = resolveKeybindings(settings.keybindings)
 
   return (
     <div className="ade-main-column">
@@ -388,6 +391,7 @@ export function AppMainColumn(props: AppMainColumnProps) {
           onConfigureProject={projectId => props.onOpenProject(projectId, true)}
           onOpenEnvironmentPalette={props.onOpenEnvironmentPalette}
           environmentName={activeEnvironmentName}
+          keybindings={resolvedKeybindings}
           modelCatalog={effectiveCatalog}
           selectedProvider={effectiveProvider}
           selectedModel={selectedModel}
@@ -466,6 +470,7 @@ export function AppMainColumn(props: AppMainColumnProps) {
           externalOpenRequest={externalOpenRequest}
           onClearExternalOpenRequest={props.onClearExternalOpenRequest}
           textareaRef={composerRef}
+          keybindings={resolvedKeybindings}
         />
       )}
     </div>

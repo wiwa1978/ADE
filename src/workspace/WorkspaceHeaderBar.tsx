@@ -37,6 +37,7 @@ export function WorkspaceHeaderBar({
   pullRequest,
   activeBesideTab,
   bottomTerminalOpen = false,
+  terminalShortcut = "⌘J",
   onOpenExternalBrowser,
   onOpenSubagent,
   onOpenFiles,
@@ -69,6 +70,7 @@ export function WorkspaceHeaderBar({
   pullRequest: PullRequestInfo | null
   activeBesideTab: WorkspaceTab | null
   bottomTerminalOpen?: boolean
+  terminalShortcut?: string
   onOpenExternalBrowser: (url: string) => Promise<void>
   onOpenSubagent: (id: string) => void
   onOpenFiles: () => void
@@ -233,7 +235,7 @@ export function WorkspaceHeaderBar({
           type="button"
           className={`ade-header-tool-btn ${bottomTerminalOpen || activeBesideTab?.kind === "terminal" ? "is-active" : ""}`}
           onClick={onOpenTerminal}
-          title="Toggle Terminal Drawer (Cmd+J)"
+          title={terminalShortcut ? `Toggle Terminal Drawer (${terminalShortcut})` : "Toggle Terminal Drawer"}
         >
           <Terminal className="size-3.5" />
           <span>Terminal</span>

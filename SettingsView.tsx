@@ -16,6 +16,7 @@ import { CODE_FONT_OPTIONS, INTERFACE_FONT_OPTIONS } from "./src/appearance/font
 import { FontPicker } from "./src/appearance/FontPicker"
 import { SubagentSettings } from "./src/subagents/SubagentSettings"
 import { ProvidersPanel } from "./src/settings/ProvidersPanel"
+import { KeybindingsSection } from "./src/settings/KeybindingsSection"
 
 /** Settings categories. Every category here changes something real; nothing is a placeholder. */
 export type SettingsCategory =
@@ -27,7 +28,7 @@ const groups: { label: string; items: SettingsItem[] }[] = [
   {
     label: "Workspace",
     items: [
-      { id: "general", label: "General", icon: Settings2, description: "Session defaults, archiving, and keyboard shortcuts.", keywords: "worktree checkout branch archive startup restore shortcuts keyboard" },
+      { id: "general", label: "General", icon: Settings2, description: "Session defaults, archiving, startup, and keyboard shortcuts.", keywords: "worktree checkout branch archive startup restore shortcuts keybindings keyboard hotkeys" },
       { id: "terminal", label: "Terminal", icon: Terminal, description: "The interactive terminal in coding sessions.", keywords: "shell font scrollback auto start" },
       { id: "notifications", label: "Notifications", icon: Bell, description: "Desktop notifications when agents need you.", keywords: "alert finished approval desktop" },
       { id: "integrations", label: "Integrations", icon: Blocks, description: "Slack notifications and Linear issues.", keywords: "slack linear webhook notify issues jira" },
@@ -70,14 +71,6 @@ const reasoningLevels = [
   { id: "high", label: "High" },
   { id: "xhigh", label: "Extra high" },
   { id: "max", label: "Max" },
-]
-
-const shortcuts: [string, string][] = [
-  ["Search sessions, projects, and commands", "⌘ K"],
-  ["Focus the message box", "⌥ L"],
-  ["Send message", "↵"],
-  ["New line in a message", "⇧ ↵"],
-  ["Commit in Changes", "↵"],
 ]
 
 type SettingsViewProps = {
@@ -262,9 +255,12 @@ export function SettingsView({
         <Switch label="Reopen the last view" checked={settings.restoreLastView} onChange={value => update({ restoreLastView: value })} />
       </Row>
     </Section>
-    <Section title="Keyboard shortcuts">
-      {shortcuts.map(([label, keys]) => <Row key={label} title={label}><kbd className="st-kbd">{keys}</kbd></Row>)}
-    </Section>
+    <KeybindingsSection
+      overrides={settings.keybindings}
+      customBindings={settings.customKeybindings}
+      onChangeOverrides={next => update({ keybindings: next })}
+      onChangeCustomBindings={next => update({ customKeybindings: next })}
+    />
   </>
 
   // --- Appearance ---

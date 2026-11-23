@@ -3,6 +3,7 @@ import type { Conversation } from "../../app-types"
 import type { FactoryRunDetail } from "../factory/types"
 import type { Project } from "../../ProjectsView"
 import { sessionStateInfo, type InboxEntry } from "../session-state"
+import { DEFAULT_KEYBINDINGS, formatShortcut, type KeybindingMap } from "../keybindings"
 
 export type SidebarSelection =
   | { kind: "inbox" }
@@ -37,6 +38,7 @@ export type SidebarProps = {
   environmentName: string
   runtimeOnline: boolean
   live: boolean
+  keybindings?: KeybindingMap
   onCollapse: () => void
   onNewSession: (projectId?: string) => void
   onSearch: () => void
@@ -112,6 +114,10 @@ function SessionRow({ session, props, child }: { session: Conversation; props: S
 
 export function Sidebar(props: SidebarProps) {
   const { selection } = props
+  const kb = props.keybindings ?? DEFAULT_KEYBINDINGS
+  const searchKbd = kb.commandCenter ? formatShortcut(kb.commandCenter) : ""
+  const addProjectKbd = kb.addProject ? formatShortcut(kb.addProject) : ""
+  const inboxKbd = kb.openInbox ? formatShortcut(kb.openInbox) : ""
   return (
     <aside className="ade-sidebar" style={{ width: `${props.width}px` }} aria-label="Workspace navigation">
       <div className="ade-sidebar-top">
@@ -131,24 +137,29 @@ export function Sidebar(props: SidebarProps) {
               type="button"
               className="ade-sidebar-search-box"
               onClick={props.onSearch}
-              title="Search projects, sessions, and commands (⌘K)"
+              title={searchKbd ? `Search projects, sessions, and commands (${searchKbd})` : "Search projects, sessions, and commands"}
               aria-label="Search"
             >
               <Search className="size-3.5 shrink-0 opacity-65" />
               <span className="flex-1 text-left truncate opacity-70">Search…</span>
-              <kbd className="ade-nav-kbd">⌘K</kbd>
+              {searchKbd ? <kbd className="ade-nav-kbd">{searchKbd}</kbd> : null}
             </button>
             <button
               type="button"
               className="ade-sidebar-add-btn"
               onClick={props.onAddProject}
-              title="Add project"
+              title={addProjectKbd ? `Add project (${addProjectKbd})` : "Add project"}
               aria-label="Add project"
             >
               <FolderPlus className="size-4" />
             </button>
           </div>
-          <button type="button" className={`ade-nav-row ${selection.kind === "inbox" ? "is-selected" : ""}`} onClick={props.onOpenInbox}>
+          <button
+            type="button"
+            className={`ade-nav-row ${selection.kind === "inbox" ? "is-selected" : ""}`}
+            onClick={props.onOpenInbox}
+            title={inboxKbd ? `Inbox (${inboxKbd})` : "Inbox"}
+          >
             <Inbox className="size-3.5 shrink-0 opacity-75" />
             <span className="flex-1">Inbox</span>
             {props.inboxCount > 0 ? <span className="ade-count-badge is-accent" aria-label={`${props.inboxCount} sessions need you`}>{props.inboxCount}</span> : null}

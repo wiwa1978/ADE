@@ -19,6 +19,7 @@ import {
 import type { ApprovalPolicy, ProviderCatalogEntry, SkillsAndRulesCatalog } from "../../app-types"
 import { ModelPicker } from "./ModelPicker"
 import { insertMention, mentionAt, useFileMentions } from "./file-mentions"
+import { matchesChord } from "../keybindings"
 
 export function ComposerDock({
   draft,
@@ -46,6 +47,8 @@ export function ComposerDock({
   onCompact,
   onQuickOpenPanel,
   textareaRef,
+  sendChord = "Enter",
+  newLineChord = "Shift+Enter",
   engineLabel,
   sessionId,
 }: {
@@ -74,6 +77,8 @@ export function ComposerDock({
   onCompact?: () => void
   onQuickOpenPanel?: (panel: "files" | "diff" | "browser" | "terminal") => void
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>
+  sendChord?: string
+  newLineChord?: string
   /** Set for Claude Code / Codex sessions: they pick their own model, so no model picker is shown. */
   engineLabel?: string
   /** Enables @-mentions of files in the session's workspace. */
@@ -267,7 +272,17 @@ export function ComposerDock({
                 return
               }
             }
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (matchesChord(e.nativeEvent, newLineChord)) {
+              if (e.key !== "Enter") {
+                e.preventDefault()
+                const el = e.currentTarget
+                const start = el.selectionStart ?? draft.length
+                const end = el.selectionEnd ?? draft.length
+                onDraftChange(`${draft.slice(0, start)}\n${draft.slice(end)}`)
+              }
+              return
+            }
+            if (matchesChord(e.nativeEvent, sendChord)) {
               e.preventDefault()
               expandAndDispatch(busy ? (e.altKey ? "follow-up" : "steer") : "normal")
             }

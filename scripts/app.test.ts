@@ -455,3 +455,47 @@ test("Create Project wizard steps through Environments -> Sources and Skip creat
   assert.ok(rightSettings, "Expected right-side Project settings panel")
   assert.equal(rightSettings.hasAttribute("hidden"), false, "Expected right-side Project settings to be open after Skip")
 })
+
+test("Keybindings editor rebinds built-in shortcuts, reflects them in the UI, and creates custom shortcuts", async () => {
+  await act(async () => root.render(React.createElement(App)))
+
+  await click("Settings")
+  // Rebind Search shortcut from Mod+K to Mod+P
+  const rebindBtn = container.querySelector('button[aria-label="Change shortcut for Search sessions, projects, and commands"]')
+  assert.ok(rebindBtn, "Expected rebind button for Search shortcut")
+  await act(async () => { (rebindBtn as HTMLElement).click() })
+  assert.match(rebindBtn.textContent ?? "", /Press keys…/)
+
+  const isMac = /mac/i.test(browser.navigator.platform ?? "")
+  const mod = isMac ? { metaKey: true } : { ctrlKey: true }
+
+  await act(async () => {
+    browser.window.dispatchEvent(new browser.KeyboardEvent("keydown", { key: "p", code: "KeyP", ...mod, bubbles: true }))
+  })
+
+  // Persisted and reflected in Settings
+  const savedAfterRebind = JSON.parse(browser.localStorage.getItem("ade-settings-v1") ?? "{}") as { keybindings?: Record<string, string> }
+  assert.equal(savedAfterRebind.keybindings?.commandCenter, "Mod+P")
+
+  // Add a custom shortcut
+  await click("Add shortcut")
+  const recordCustom = container.querySelector('button[aria-label="Record custom shortcut"]')
+  assert.ok(recordCustom, "Expected custom shortcut record button")
+  await act(async () => { (recordCustom as HTMLElement).click() })
+  await act(async () => {
+    browser.window.dispatchEvent(new browser.KeyboardEvent("keydown", { key: "d", code: "KeyD", ...mod, shiftKey: true, bubbles: true }))
+  })
+  const addBtn = [...container.querySelectorAll("button")].find(el => el.textContent?.trim() === "Add")
+  assert.ok(addBtn, "Expected Add button for custom shortcut")
+  await act(async () => { (addBtn as HTMLElement).click() })
+
+  const savedWithCustom = JSON.parse(browser.localStorage.getItem("ade-settings-v1") ?? "{}") as { customKeybindings?: { chord: string; action: string }[] }
+  assert.equal(savedWithCustom.customKeybindings?.length, 1)
+  assert.equal(savedWithCustom.customKeybindings?.[0]?.chord, "Mod+Shift+D")
+
+  // Go back to app and verify sidebar Search badge reflects the rebound shortcut (⌘P or Ctrl+P)
+  await click("Back to app")
+  const searchBox = container.querySelector(".ade-sidebar-search-box")
+  assert.ok(searchBox, "Expected sidebar search box")
+  assert.match(searchBox.textContent ?? "", /P/)
+})

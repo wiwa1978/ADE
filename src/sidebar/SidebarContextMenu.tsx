@@ -10,6 +10,7 @@ export type ContextMenuTarget =
 export function SidebarContextMenu({
   target,
   projects,
+  pinShortcut = "⌥⌘P",
   isPinned,
   isUnread,
   isArchived,
@@ -30,6 +31,7 @@ export function SidebarContextMenu({
 }: {
   target: ContextMenuTarget | null
   projects: Project[]
+  pinShortcut?: string
   isPinned: (id: string) => boolean
   isUnread: (id: string) => boolean
   isArchived: (id: string) => boolean
@@ -142,6 +144,7 @@ export function SidebarContextMenu({
         <SessionContextMenuItems
           sess={target.session}
           projects={projects}
+          pinShortcut={pinShortcut}
           pinned={isPinned(target.session.id)}
           unread={isUnread(target.session.id)}
           submenu={submenu}

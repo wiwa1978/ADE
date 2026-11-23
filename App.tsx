@@ -17,6 +17,7 @@ import { useInbox } from "./src/session-state"
 import type { ContextMenuTarget } from "./src/sidebar/SidebarContextMenu"
 import { AppMainColumn } from "./src/layout/AppMainColumn"
 import { AppOverlays } from "./src/layout/AppOverlays"
+import { isEditableTarget, matchesChord, resolveKeybindings } from "./src/keybindings"
 
 type LastView = { screen?: Screen; activeSessionId?: string; selectedProjectId?: string | null; expandedProjects?: string[] }
 
@@ -187,23 +188,88 @@ function AppInner() {
     }
   }, [settings.restoreLastView, screen, activeSessionId, selectedProjectId, expandedProjects])
 
-  // Keyboard shortcuts: Cmd+K (Command Center), Option+Cmd+P (Pin active session), Alt+L (focus composer).
+  const keybindings = resolveKeybindings(settings.keybindings)
+
+  // Dynamic global keyboard shortcuts (built-in + user-defined custom keybindings).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "k") {
+      if (e.defaultPrevented) return
+      const editing = isEditableTarget(e.target)
+      const hasModifier = e.metaKey || e.ctrlKey || e.altKey
+
+      if (matchesChord(e, keybindings.commandCenter)) {
         e.preventDefault()
         setCommandOpen(v => !v)
-      } else if ((e.metaKey || e.ctrlKey) && e.altKey && e.key.toLowerCase() === "p") {
-        e.preventDefault()
-        if (sess.activeSession?.id) sess.togglePin(sess.activeSession.id)
-      } else if (e.altKey && e.key.toLowerCase() === "l") {
+        return
+      }
+      if (matchesChord(e, keybindings.focusComposer)) {
         e.preventDefault()
         composerRef.current?.focus()
+        return
+      }
+      if (matchesChord(e, keybindings.addProject)) {
+        e.preventDefault()
+        setAddProjectOpen(true)
+        return
+      }
+      if (matchesChord(e, keybindings.openInbox)) {
+        e.preventDefault()
+        setScreen("inbox")
+        return
+      }
+      if (matchesChord(e, keybindings.switchEnvironment)) {
+        e.preventDefault()
+        setEnvPaletteOpen(v => !v)
+        return
+      }
+      if (matchesChord(e, keybindings.openSettings)) {
+        e.preventDefault()
+        setScreen(prev => {
+          if (prev === "settings") return previousScreen.current === "settings" ? "work" : previousScreen.current
+          previousScreen.current = prev
+          return "settings"
+        })
+        return
+      }
+      if (matchesChord(e, keybindings.pinSession)) {
+        e.preventDefault()
+        if (sess.activeSession?.id) sess.togglePin(sess.activeSession.id)
+        return
+      }
+
+      // User-defined custom shortcuts
+      for (const custom of settings.customKeybindings) {
+        if (!custom.chord) continue
+        if (editing && !hasModifier) continue
+        if (!matchesChord(e, custom.chord)) continue
+        e.preventDefault()
+        if (custom.action === "new-session") {
+          setNewSessionOpen(true)
+          setScreen("work")
+        } else if (custom.action === "new-chat") {
+          void sess.createChatThread("coding")
+        } else if (custom.action === "toggle-theme") {
+          update({ theme: resolved === "dark" ? "light" : "dark" })
+        } else if (custom.action === "slash") {
+          const cmd = (custom.arg || "/plan").trim()
+          if (cmd) {
+            setNewSessionOpen(false)
+            setScreen("work")
+            void sess.sendMessage(cmd, id => void stream.refreshTimeline(id))
+          }
+        } else if (custom.action.startsWith("panel:")) {
+          const kind = custom.action.slice("panel:".length) as WorkspaceTab["kind"]
+          const title = kind === "pr" ? "Pull Request" : kind[0].toUpperCase() + kind.slice(1)
+          setNewSessionOpen(false)
+          setScreen("work")
+          setExternalOpenRequest({ id: kind, kind, title })
+        }
+        return
       }
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [sess])
+  }, [keybindings, settings.customKeybindings, sess, stream, resolved, update])
 
   const openSettingsSection = useCallback((category: SettingsCategory, autoOpenAdd = false) => {
     previousScreen.current = screen
@@ -274,6 +340,7 @@ function AppInner() {
           runtime={model.runtime}
           activeEnvironmentName={env.activeEnvironmentName}
           sseConnected={stream.sseConnected}
+          keybindings={keybindings}
           renamingId={renamingId}
           renameText={renameText}
           onChangeRenameText={setRenameText}
@@ -411,6 +478,7 @@ function AppInner() {
         pinnedIds={sess.pinnedIds}
         unreadIds={sess.unreadIds}
         archivedIds={sess.archivedIds}
+        keybindings={keybindings}
         onCloseCommand={() => setCommandOpen(false)}
         onCloseAddProject={() => setAddProjectOpen(false)}
         onCloseEnvPalette={() => setEnvPaletteOpen(false)}
