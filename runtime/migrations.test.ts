@@ -114,7 +114,9 @@ test("migrations upgrade a legacy pre-migration database to the exact same schem
 	// Pre-existing legacy data is preserved and new column defaults apply
 	const project = legacyDb.prepare("SELECT * FROM projects WHERE id='proj-1'").get() as Record<string, unknown>;
 	assert.equal(project.name, "Legacy Project");
-	assert.equal(project.blueprintId, "automated-factory");
+	// Projects that only had the old default ("automated-factory") move to Vibe: sessions ignored it before.
+	assert.equal(project.blueprintId, "vibe");
+	assert.equal(project.blueprintLocked, 0);
 	assert.equal(project.modelProfile, "balanced");
 	assert.equal(project.archivedAt, null);
 

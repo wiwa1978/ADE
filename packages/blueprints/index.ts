@@ -97,3 +97,49 @@ export function resolveProjectBlueprint(
     disabledStageIds: [...new Set(override.disabledStageIds ?? [])],
   };
 }
+
+/**
+ * Vibe coding: the way of working without stages. A session on Vibe is a free conversation with
+ * the main agent (subagents, checks, diff and PR when you choose). It's offered for sessions only;
+ * the stage engine never runs it.
+ */
+export const VIBE_BLUEPRINT_ID = "vibe";
+
+export type SessionBlueprintOption = {
+  id: string;
+  name: string;
+  description: string;
+  bestFor: string;
+  stages: { id: string; name: string; approvalGate: FactoryBlueprint["stages"][number]["approvalGate"] }[];
+};
+
+const BEST_FOR: Record<string, string> = {
+  fast: "bug fixes and small or medium features",
+  brownfield: "changes to an existing codebase",
+  greenfield: "new projects and new features from scratch",
+  enterprise: "complex or regulated systems",
+};
+
+/** Ways of working a session can use: Vibe first, then the built-in blueprints. */
+export function sessionBlueprintOptions(): SessionBlueprintOption[] {
+  return [
+    {
+      id: VIBE_BLUEPRINT_ID,
+      name: "Vibe coding",
+      description: "No stages: you and the agent decide the work as you go.",
+      bestFor: "exploring, prototypes and anything that doesn't fit a recipe",
+      stages: [],
+    },
+    ...BUILTIN_BLUEPRINTS.map((blueprint) => ({
+      id: blueprint.id,
+      name: blueprint.name,
+      description: blueprint.description,
+      bestFor: BEST_FOR[blueprint.bestFor] ?? blueprint.bestFor,
+      stages: blueprint.stages.map((stage) => ({ id: stage.id, name: stage.name, approvalGate: stage.approvalGate })),
+    })),
+  ];
+}
+
+export function isSessionBlueprint(id: string) {
+  return id === VIBE_BLUEPRINT_ID || BLUEPRINT_MAP.has(id);
+}

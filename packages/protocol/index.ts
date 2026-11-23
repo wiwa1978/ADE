@@ -416,12 +416,26 @@ export type TokenSavingsReport = {
 // Shared Runtime HTTP API Contract Types (imported by both runtime/ and UI)
 // ---------------------------------------------------------------------------
 
+/** Where a blueprint session is: shown on the drawer's slim bar, the Inbox and the sidebar. */
+export type SessionBlueprintSummary = {
+  id: string;
+  name: string;
+  status: BlueprintRunStatus;
+  /** The stage being worked on or waiting for you; absent once all stages are done. */
+  stage?: { id: string; name: string; status: StageStatus; index: number };
+  done: number;
+  total: number;
+};
+
 export type Project = {
   id: string;
   name: string;
   githubUrl: string | null;
   repository: string | null;
+  /** Default way of working for new sessions: "vibe" or a blueprint id. */
   blueprintId?: string;
+  /** Sessions must use the project's blueprint. */
+  blueprintLocked?: boolean;
   modelProfile?: string;
   euOnlyMode?: boolean;
   cloudActFree?: boolean;
@@ -437,6 +451,7 @@ export type ProjectInput = {
   githubUrl: string;
   repository: string;
   blueprintId?: string;
+  blueprintLocked?: boolean;
   modelProfile?: string;
   euOnlyMode?: boolean;
   cloudActFree?: boolean;
@@ -505,6 +520,8 @@ export type Conversation = {
   engine?: "claude-code" | "codex";
   /** Set on sessions started together as parallel attempts at one task. */
   attemptGroup?: string;
+  /** The session's way of working when it isn't Vibe: the blueprint and where it is. */
+  blueprint?: SessionBlueprintSummary;
   workspace?: ConversationWorkspace;
   messages: ConversationMessage[];
 };

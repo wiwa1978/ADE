@@ -1,18 +1,5 @@
 import { clock, useSessionHold } from "../subagents/session-hold"
-import {
-  Play,
-  ScrollText,
-  Activity,
-  Bot,
-  ExternalLink,
-  FileDiff,
-  FileText,
-  FolderTree,
-  GitBranch,
-  GitPullRequest,
-  Globe,
-  Terminal,
-} from "lucide-react"
+import { ExternalLink, GitBranch } from "lucide-react"
 import type {
   BrowserState,
   Conversation,
@@ -27,31 +14,9 @@ import type { PullRequestInfo } from "../panels/PullRequestPanel"
 export function WorkspaceHeaderBar({
   session,
   isBusy,
-  hasWorkspace,
   approvals,
-  subagents,
-  gitSummary,
-  browserState,
-  artifacts,
-  runningSubagentsCount,
-  runningProcessesCount,
-  pullRequest,
-  activeBesideTab,
-  bottomTerminalOpen = false,
-  terminalShortcut = "⌘J",
   onOpenExternalBrowser,
-  onOpenSubagent,
-  onOpenFiles,
-  onOpenDiff,
-  onOpenTerminal,
-  onOpenPullRequest,
-  onOpenBrowser,
-  onOpenArtifact,
-  onOpenProcesses,
   onOpenRun,
-  onOpenTranscript,
-  onOpenProgress,
-  progressCount,
   runStatus,
   projectName,
   onOpenProject,
@@ -60,27 +25,27 @@ export function WorkspaceHeaderBar({
 }: {
   session: Conversation
   isBusy: boolean
-  hasWorkspace: boolean
+  hasWorkspace?: boolean
   approvals: PendingApproval[]
-  subagents: SubagentInfo[]
-  gitSummary: WorkspaceGitSummary
-  browserState: BrowserState
-  artifacts: SessionArtifact[]
-  runningSubagentsCount: number
-  runningProcessesCount: number
-  pullRequest: PullRequestInfo | null
-  activeBesideTab: WorkspaceTab | null
+  subagents?: SubagentInfo[]
+  gitSummary?: WorkspaceGitSummary
+  browserState?: BrowserState
+  artifacts?: SessionArtifact[]
+  runningSubagentsCount?: number
+  runningProcessesCount?: number
+  pullRequest?: PullRequestInfo | null
+  activeBesideTab?: WorkspaceTab | null
   bottomTerminalOpen?: boolean
   terminalShortcut?: string
   onOpenExternalBrowser: (url: string) => Promise<void>
-  onOpenSubagent: (id: string) => void
-  onOpenFiles: () => void
-  onOpenDiff: () => void
-  onOpenTerminal: () => void
-  onOpenPullRequest: () => void
-  onOpenBrowser: () => void
-  onOpenArtifact: () => void
-  onOpenProcesses: () => void
+  onOpenSubagent?: (id: string) => void
+  onOpenFiles?: () => void
+  onOpenDiff?: () => void
+  onOpenTerminal?: () => void
+  onOpenPullRequest?: () => void
+  onOpenBrowser?: () => void
+  onOpenArtifact?: () => void
+  onOpenProcesses?: () => void
   onOpenRun: () => void
   onOpenTranscript?: () => void
   onOpenProgress?: () => void
@@ -150,153 +115,6 @@ export function WorkspaceHeaderBar({
         ) : null}
       </div>
 
-      <div className="ade-workspace-header-tools">
-        {onOpenProgress && (subagents.length > 0 || (progressCount?.total ?? 0) > 1) ? (
-          <button
-            type="button"
-            className={`ade-header-tool-btn ${activeBesideTab?.kind === "progress" || activeBesideTab?.kind === "subagent" ? "is-active" : ""}`}
-            onClick={onOpenProgress}
-            title="Progress: every agent this session started and what each has done"
-          >
-            <Bot className="size-3.5" />
-            <span>Progress</span>
-            {progressCount ? (
-              <span className={`ade-count-badge ${runningSubagentsCount > 0 ? "is-accent" : ""}`}>{progressCount.done}/{progressCount.total}</span>
-            ) : null}
-          </button>
-        ) : subagents.length > 0 ? (
-          <button
-            type="button"
-            className={`ade-header-tool-btn ${activeBesideTab?.kind === "subagent" ? "is-active" : ""}`}
-            onClick={() => onOpenSubagent(subagents[subagents.length - 1].id)}
-            title="Open Subagents beside lead"
-          >
-            <Bot className="size-3.5" />
-            <span>Subagents</span>
-          </button>
-        ) : null}
-
-        {hasWorkspace ? (
-          <>
-            <button
-              type="button"
-              className={`ade-header-tool-btn ${activeBesideTab?.kind === "files" ? "is-active" : ""}`}
-              onClick={onOpenFiles}
-              title="Workspace Files"
-            >
-              <FolderTree className="size-3.5" />
-              <span>Files</span>
-            </button>
-            <button
-              type="button"
-              className={`ade-header-tool-btn ${activeBesideTab?.kind === "diff" ? "is-active" : ""}`}
-              onClick={onOpenDiff}
-              title="Git Changes & Diff Review"
-            >
-              <FileDiff className="size-3.5" />
-              <span>Changes</span>
-              {gitSummary.files.length > 0 ? (
-                <span className="ade-count-badge">{gitSummary.files.length}</span>
-              ) : null}
-            </button>
-            <button
-              type="button"
-              className={`ade-header-tool-btn ${activeBesideTab?.kind === "run" ? "is-active" : ""}`}
-              onClick={onOpenRun}
-              title="Run the app with the project's run script"
-            >
-              <Play className="size-3.5" />
-              <span>Run</span>
-              {runStatus?.run === "running" ? <span className="ade-state-dot is-running" aria-label="App running" /> : null}
-            </button>
-            {session.workspace?.kind !== "none" ? (
-              <button
-                type="button"
-                className={`ade-header-tool-btn ${activeBesideTab?.kind === "pr" ? "is-active" : ""}`}
-                onClick={onOpenPullRequest}
-                title="Push, open and merge a pull request"
-              >
-                <GitPullRequest className="size-3.5" />
-                <span>{pullRequest ? `PR #${pullRequest.number}` : "Pull request"}</span>
-                {pullRequest ? (
-                  <span
-                    className={`ade-pr-dot is-${
-                      pullRequest.state === "OPEN"
-                        ? pullRequest.checksSummary === "failure"
-                          ? "failure"
-                          : pullRequest.checksSummary === "pending"
-                            ? "pending"
-                            : pullRequest.isDraft
-                              ? "draft"
-                              : "open"
-                        : pullRequest.state.toLowerCase()
-                    }`}
-                    aria-hidden="true"
-                  />
-                ) : null}
-              </button>
-            ) : null}
-          </>
-        ) : null}
-
-        <button
-          type="button"
-          className={`ade-header-tool-btn ${bottomTerminalOpen || activeBesideTab?.kind === "terminal" ? "is-active" : ""}`}
-          onClick={onOpenTerminal}
-          title={terminalShortcut ? `Toggle Terminal Drawer (${terminalShortcut})` : "Toggle Terminal Drawer"}
-        >
-          <Terminal className="size-3.5" />
-          <span>Terminal</span>
-        </button>
-
-        <button
-          type="button"
-          className={`ade-header-tool-btn ${activeBesideTab?.kind === "browser" ? "is-active" : ""}`}
-          onClick={onOpenBrowser}
-          title="Built-in Browser"
-        >
-          <Globe className="size-3.5" />
-          <span>Browser</span>
-          {browserState.agentDriving ? <span className="ade-dot ade-dot-running" /> : null}
-        </button>
-
-        {onOpenTranscript ? (
-          <button
-            type="button"
-            className={`ade-header-tool-btn ${activeBesideTab?.kind === "transcript" ? "is-active" : ""}`}
-            onClick={onOpenTranscript}
-            title="Transcript: step through what the agent did, or export the session"
-            aria-label="Transcript"
-          >
-            <ScrollText className="size-3.5" />
-          </button>
-        ) : null}
-
-        {artifacts.length > 0 || hasWorkspace ? (
-          <button
-            type="button"
-            className={`ade-header-tool-btn ${activeBesideTab?.kind === "artifact" ? "is-active" : ""}`}
-            onClick={onOpenArtifact}
-            title="Show session artefacts (files, plans, images)"
-          >
-            <FileText className="size-3.5" />
-            <span>Artefacts</span>
-            {artifacts.length > 0 ? <span className="ade-count-badge">{artifacts.length}</span> : null}
-          </button>
-        ) : null}
-
-        {runningProcessesCount > 0 ? (
-          <button
-            type="button"
-            className={`ade-header-tool-btn ${activeBesideTab?.kind === "processes" ? "is-active" : ""}`}
-            onClick={onOpenProcesses}
-            title="Agent Background Processes"
-          >
-            <Activity className="size-3.5" />
-            <span className="ade-count-badge is-accent">{runningProcessesCount}</span>
-          </button>
-        ) : null}
-      </div>
     </header>
   )
 }

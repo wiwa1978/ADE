@@ -9,10 +9,12 @@ import {
   GitBranch,
   Layers,
   Link2,
+  Lock,
   MessageSquare,
   Search,
   Server,
   Settings2,
+  Workflow,
   X,
 } from "lucide-react"
 import { request } from "../../api"
@@ -21,13 +23,14 @@ import type { Project } from "../../ProjectsView"
 import { ComposerDock } from "../composer/ComposerDock"
 import { StartFromPicker, type StartChoice } from "./StartFromPicker"
 import { LinearIssuePicker, type LinearIssue } from "./LinearIssuePicker"
+import { shortBlueprintName, stagesLine, useBlueprintOptions, VIBE_ID } from "../blueprints/blueprint-options"
 import { runTargetDescriptions, targetLabel, targetUnavailable, useRunTargets, type RunTarget, type TargetSettings } from "../run-targets"
 import { DEFAULT_KEYBINDINGS, formatShortcut, type KeybindingMap } from "../keybindings"
 import { ConversationLayout } from "./ConversationLayout"
 import { WorkspaceEmptyHero } from "./WorkspaceEmptyHero"
 
 type EngineId = "pi" | "claude-code" | "codex"
-type OpenMenu = null | "project" | "workspace" | "runOn" | "attempts"
+type OpenMenu = null | "project" | "workspace" | "blueprint" | "runOn" | "attempts"
 
 type OpenIssueOption = {
   repository: string
@@ -67,6 +70,7 @@ export function NewSessionView({
   error,
   onStart,
   onLookupIssue,
+  initialIssue,
 }: {
   projects: Project[]
   selectedProjectId: string | null
@@ -99,22 +103,33 @@ export function NewSessionView({
     title?: string
     attempts?: EngineId[]
     runOn?: RunTarget
+    blueprintId?: string
   }) => Promise<void>
   onLookupIssue?: (projectId: string, url: string) => Promise<GitHubIssue>
+  /** Opened from an issue: link it and fill in the task. */
+  initialIssue?: GitHubIssue | null
 }) {
   const unarchivedProjects = projects.filter(p => !p.archivedAt)
   const activeProject = unarchivedProjects.find(p => p.id === selectedProjectId) ?? null
   const [sessionTitle, setSessionTitle] = useState("")
   const [kind, setKind] = useState<TaskStart["kind"]>(activeProject?.repository ? "worktree" : "checkout")
   const [repository, setRepository] = useState(activeProject?.repository ?? "")
-  const [prompt, setPrompt] = useState("")
+  const [prompt, setPrompt] = useState(initialIssue ? `Work on #${initialIssue.number}: ${initialIssue.title}` : "")
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
   const [projectQuery, setProjectQuery] = useState("")
   const [issueOpen, setIssueOpen] = useState(false)
   const [issueUrl, setIssueUrl] = useState("")
   const [openIssues, setOpenIssues] = useState<OpenIssueOption[]>([])
   const [loadingIssues, setLoadingIssues] = useState(false)
-  const [linkedIssue, setLinkedIssue] = useState<GitHubIssue | null>(null)
+  const [linkedIssue, setLinkedIssue] = useState<GitHubIssue | null>(initialIssue ?? null)
+  const [prevInitialIssue, setPrevInitialIssue] = useState(initialIssue ?? null)
+  if ((initialIssue ?? null) !== prevInitialIssue) {
+    setPrevInitialIssue(initialIssue ?? null)
+    if (initialIssue) {
+      setLinkedIssue(initialIssue)
+      setPrompt(`Work on #${initialIssue.number}: ${initialIssue.title}`)
+    }
+  }
   const [issueError, setIssueError] = useState("")
   const [lookingUp, setLookingUp] = useState(false)
   const [startChoice, setStartChoice] = useState<StartChoice>({ mode: "new" })
@@ -122,6 +137,8 @@ export function NewSessionView({
   const [runOn, setRunOn] = useState<RunTarget | null>(null)
   const [projectRunOn, setProjectRunOn] = useState<({ projectId: string } & TargetSettings) | null>(null)
   const [attemptCount, setAttemptCount] = useState(1)
+  const [blueprintChoice, setBlueprintChoice] = useState<string | null>(null)
+  const blueprintOptions = useBlueprintOptions()
 
   const pillBarRef = useRef<HTMLDivElement>(null)
   const runTargets = useRunTargets()
@@ -156,11 +173,17 @@ export function NewSessionView({
   const defaultRunOn = projectRunOn && projectRunOn.projectId === selectedProjectId ? projectRunOn.target : "local"
   const effectiveRunOn = runOn ?? defaultRunOn
   const effectiveRepo = activeProject?.repository || repository
+  // Way of working: the project's default unless chosen here; a locked project decides.
+  const projectBlueprint = activeProject?.blueprintId || VIBE_ID
+  const blueprintLocked = Boolean(activeProject?.blueprintLocked)
+  const effectiveBlueprint = blueprintLocked ? projectBlueprint : blueprintChoice ?? projectBlueprint
+  const effectiveBlueprintOption = blueprintOptions.find(option => option.id === effectiveBlueprint)
 
   const handleProjectChange = (nextId: string | null) => {
     onSelectProject(nextId)
     setStartChoice({ mode: "new" })
     setRunOn(null)
+    setBlueprintChoice(null)
     const proj = unarchivedProjects.find(p => p.id === nextId)
     setRepository(proj?.repository ?? "")
     setKind(proj?.repository ? "worktree" : "checkout")
@@ -254,7 +277,7 @@ export function NewSessionView({
       engine: "pi",
       ...(startFrom ? { startFrom } : {}),
       ...(resolvedTitle ? { title: resolvedTitle } : {}),
-      ...(kind !== "none" ? { runOn: effectiveRunOn } : {}),
+      ...(kind !== "none" ? { runOn: effectiveRunOn, blueprintId: effectiveBlueprint } : {}),
       ...(canAttempt && attemptCount > 1 ? { attempts: Array.from({ length: attemptCount }, () => "pi" as const) } : {}),
     })
   }
@@ -408,6 +431,50 @@ export function NewSessionView({
                 </div>
               ) : null}
             </div>
+
+            {/* Way of working: Vibe or a blueprint */}
+            {kind !== "none" ? (
+              <div className="ade-ns-menu-anchor">
+                <button
+                  type="button"
+                  className={`ade-ns-pill ${openMenu === "blueprint" ? "is-open" : ""}`}
+                  aria-haspopup="listbox"
+                  aria-expanded={openMenu === "blueprint"}
+                  title={blueprintLocked ? "This project's sessions all use its blueprint (project settings)." : "Way of working"}
+                  onClick={() => setOpenMenu(m => (m === "blueprint" ? null : "blueprint"))}
+                >
+                  <Workflow className="size-3.5 opacity-70" />
+                  <span>{effectiveBlueprintOption ? shortBlueprintName(effectiveBlueprintOption.name) : "Vibe coding"}</span>
+                  {blueprintLocked ? <Lock className="size-3 opacity-55" /> : <ChevronDown className="size-3 opacity-55" />}
+                </button>
+
+                {openMenu === "blueprint" ? (
+                  <div className="ade-ns-popover !w-[320px]" role="dialog" aria-label="Way of working">
+                    <div className="ade-ns-popover-list">
+                      {blueprintOptions.map(option => {
+                        const blocked = blueprintLocked && option.id !== projectBlueprint
+                        return (
+                          <button
+                            key={option.id}
+                            type="button"
+                            disabled={blocked}
+                            title={blocked ? "This project's sessions all use its blueprint." : option.description}
+                            className={`ade-ns-popover-item ${effectiveBlueprint === option.id ? "is-selected" : ""}`}
+                            onClick={() => { setBlueprintChoice(option.id); setOpenMenu(null) }}
+                          >
+                            <span className="flex-1 min-w-0">
+                              <span className="block font-medium">{shortBlueprintName(option.name)}{option.id === projectBlueprint ? <span className="opacity-55 font-normal"> · project default</span> : null}</span>
+                              <span className="block text-[11px] opacity-60 leading-snug">{option.id === VIBE_ID ? option.description : `${stagesLine(option)}. Best for ${option.bestFor}.`}</span>
+                            </span>
+                            {effectiveBlueprint === option.id ? <Check className="size-3.5 text-[rgb(var(--primary))] shrink-0" /> : null}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             {/* Run On Pill */}
             {kind !== "none" ? (

@@ -3,6 +3,7 @@ import { lookupGitHubIssue } from "../github-issues.ts";
 import { badGateway, badRequest, conflict, notFound } from "../http-error.ts";
 import { logger } from "../log.ts";
 import { resolveCheckout } from "../worktrees.ts";
+import { isSessionBlueprint } from "../../packages/blueprints/index.ts";
 import { dbAll, dbGet } from "./schema.ts";
 import { detectGitHubRemoteFromCheckout, type ProjectRow, type SerializedProject } from "./types.ts";
 
@@ -30,7 +31,8 @@ export class ProjectStore {
 			name: row.name,
 			githubUrl: row.githubUrl ?? null,
 			repository: row.repository ?? null,
-			blueprintId: row.blueprintId || "automated-factory",
+			blueprintId: row.blueprintId || "vibe",
+			blueprintLocked: Boolean(row.blueprintLocked),
 			modelProfile: row.modelProfile || "balanced",
 			euOnlyMode: Boolean(row.euOnlyMode),
 			cloudActFree: Boolean(row.cloudActFree),
@@ -78,6 +80,8 @@ export class ProjectStore {
 		}
 		const name = input.name.trim();
 		const blueprintId = typeof input.blueprintId === "string" && input.blueprintId.trim() ? input.blueprintId.trim() : undefined;
+		if (blueprintId && !isSessionBlueprint(blueprintId)) throw badRequest(`Unknown way of working "${blueprintId}".`);
+		const blueprintLocked = typeof input.blueprintLocked === "boolean" ? (input.blueprintLocked ? 1 : 0) : undefined;
 		const modelProfile = typeof input.modelProfile === "string" && input.modelProfile.trim() ? input.modelProfile.trim() : undefined;
 		const euOnlyMode = typeof input.euOnlyMode === "boolean" ? (input.euOnlyMode ? 1 : 0) : undefined;
 		const cloudActFree = typeof input.cloudActFree === "boolean" ? (input.cloudActFree ? 1 : 0) : undefined;
@@ -93,6 +97,7 @@ export class ProjectStore {
 				`UPDATE projects SET
 					name=?, githubUrl=?, repository=?,
 					blueprintId=COALESCE(?, blueprintId),
+					blueprintLocked=COALESCE(?, blueprintLocked),
 					modelProfile=COALESCE(?, modelProfile),
 					euOnlyMode=COALESCE(?, euOnlyMode),
 					cloudActFree=COALESCE(?, cloudActFree),
@@ -104,6 +109,7 @@ export class ProjectStore {
 				githubUrl,
 				repository,
 				blueprintId ?? null,
+				blueprintLocked ?? null,
 				modelProfile ?? null,
 				euOnlyMode ?? null,
 				cloudActFree ?? null,
@@ -119,7 +125,7 @@ export class ProjectStore {
 		} else {
 			const now = Date.now();
 			this.#db.prepare(
-				"INSERT INTO projects (id, name, githubUrl, repository, createdAt, updatedAt, blueprintId, modelProfile, euOnlyMode, cloudActFree, stageOverridesJson) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+				"INSERT INTO projects (id, name, githubUrl, repository, createdAt, updatedAt, blueprintId, blueprintLocked, modelProfile, euOnlyMode, cloudActFree, stageOverridesJson) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
 			).run(
 				projectId,
 				name,
@@ -127,7 +133,8 @@ export class ProjectStore {
 				repository,
 				now,
 				now,
-				blueprintId ?? "automated-factory",
+				blueprintId ?? "vibe",
+				blueprintLocked ?? 0,
 				modelProfile ?? "balanced",
 				euOnlyMode ?? 0,
 				cloudActFree ?? 0,

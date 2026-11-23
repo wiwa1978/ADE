@@ -12,6 +12,7 @@ export type {
   CaptainEventType,
   ContextIsolation,
   Conversation,
+  SessionBlueprintSummary,
   ConversationMessage,
   ConversationWorkspace,
   CopilotSignIn,
@@ -72,6 +73,8 @@ export type TaskStart = {
   attemptGroup?: string
   /** Where the session's commands run; defaults to the project's choice. */
   runOn?: "local" | "docker" | "wsl" | "ssh" | "boat"
+  /** Way of working: "vibe" or a blueprint id; empty = the project's default. */
+  blueprintId?: string
   initialMessage?: { id: string; content: string; provider: string; model: string; reasoning: string }
 }
 
@@ -183,6 +186,12 @@ export type WorkspaceTabKind =
   | "run"
   | "transcript"
   | "progress"
+  /** The side panel's menu: everything it can open. */
+  | "tools"
+  /** The project's open GitHub issues. */
+  | "issues"
+  /** Every agent in the session side by side. */
+  | "agents"
 
 export type WorkspaceTab = {
   id: string

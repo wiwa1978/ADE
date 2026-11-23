@@ -34,10 +34,13 @@ export type ProjectRow = {
 	cloudActFree: number | null;
 	stageOverridesJson: string | null;
 	archivedAt: number | null;
+	/** 1 = every session in the project uses the project's blueprint. */
+	blueprintLocked: number;
 };
 
 export type SerializedProject = SharedProject & {
 	blueprintId: string;
+	blueprintLocked: boolean;
 	modelProfile: string;
 	euOnlyMode: boolean;
 	cloudActFree: boolean;
@@ -73,6 +76,10 @@ export type CodingTaskRow = {
 	existingBranch: number;
 	/** Sessions started together as attempts at the same task (best of N). */
 	attemptGroup: string | null;
+	/** The session's way of working: "vibe" (no stages) or a blueprint id. Null = vibe (older sessions). */
+	blueprintId: string | null;
+	/** The session's stage progress (JSON of SessionStageRecord); null for vibe. */
+	blueprintRunJson: string | null;
 };
 
 export type ChatThreadRow = {

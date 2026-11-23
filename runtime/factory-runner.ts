@@ -158,7 +158,8 @@ export class LocalFactoryRunner {
     cloudActFree?: boolean;
     disabledStageIds?: string[];
   }): Promise<FactoryRunDetail> {
-    const blueprintId = params.blueprintId ?? "automated-factory";
+    // Vibe has no stages to run; the (to be retired) Factory screen falls back to Automated Factory.
+    const blueprintId = params.blueprintId && params.blueprintId !== "vibe" ? params.blueprintId : "automated-factory";
     const blueprint = getBlueprint(blueprintId);
     if (!blueprint) throw new Error(`Unknown blueprint "${blueprintId}".`);
 

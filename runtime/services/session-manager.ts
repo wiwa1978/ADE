@@ -32,6 +32,7 @@ import { createSearchTools } from "../search-tools.ts";
 import { createShellTools, type ProcessManager } from "../shell-tools.ts";
 import { buildSkillsAndRulesPrompt, createSkillsExtension, discoverSkillsAndRules } from "../skills.ts";
 import { createSubagentTools } from "../subagents.ts";
+import type { SessionBlueprints } from "../session-blueprints.ts";
 import {
 	projectTimeline,
 	type ConversationTimelineSnapshot,
@@ -55,6 +56,7 @@ export class SessionManager {
 	#turns: TurnStore;
 	#worktreeManager?: WorktreeManager;
 	#safeErrorMessage: (error: unknown) => string;
+	#blueprints?: SessionBlueprints;
 	#sessions = new Map<string, OpenSession>();
 	#watches = new Map<string, WatchHandle>();
 
@@ -72,6 +74,7 @@ export class SessionManager {
 		turns: TurnStore;
 		worktreeManager?: WorktreeManager;
 		safeErrorMessage: (error: unknown) => string;
+		blueprints?: SessionBlueprints;
 	}) {
 		this.#stateDirectory = opts.stateDirectory;
 		this.#events = opts.events;
@@ -86,6 +89,7 @@ export class SessionManager {
 		this.#turns = opts.turns;
 		this.#worktreeManager = opts.worktreeManager;
 		this.#safeErrorMessage = opts.safeErrorMessage;
+		this.#blueprints = opts.blueprints;
 	}
 
 	setWorktreeManager(manager: WorktreeManager): void {
@@ -154,7 +158,9 @@ export class SessionManager {
 		const baseInstructions = task
 			? `You are ADE's coding lead inside an Agentic Development Environment. ${task.workspace ? "You have full workspace tools (list_files, read, write, edit, grep_search, find_files) and shell command tools (run_command, manage_process) in the bound workspace." : "This session has no bound local workspace: do not claim local file access."} You can spawn 1 or more parallel subagents using spawn_subagent (readonly, workspace, or isolated worktree mode; foreground or background) and coordinate with message_subagent, wait_subagent, list_subagents, and stop_subagent. You also have built-in browser tools (browser_navigate, browser_snapshot, browser_click, browser_type, browser_scroll, browser_screenshot, browser_eval, browser_open_external), structured artifact tools (write_artifact, update_tasks), and skills (read_skill). Keep responses concise and well-structured.`
 			: MODES[mode].instructions;
-		const instructions = skillsPrompt ? `${baseInstructions}\n\n${skillsPrompt}` : baseInstructions;
+		// The session's blueprint: which stage it's in and what to do there (none for Vibe).
+		const stagePrompt = task ? this.#blueprints?.instructions(task.id) ?? null : null;
+		const instructions = [baseInstructions, skillsPrompt, stagePrompt].filter(Boolean).join("\n\n");
 		const openSession = this.#sessions.get(key);
 		const thinkingLevel = reasoning as "none" | "off" | "low" | "medium" | "high" | "xhigh" | "max";
 		if (openSession) {
@@ -197,6 +203,7 @@ export class SessionManager {
 			registry.install(createBrowserTools(this.#browser));
 		}
 		registry.install(this.#artifacts.createExtension(key));
+		if (task && this.#blueprints) registry.install(this.#blueprints.createExtension(key));
 		registry.install(createSkillsExtension(task?.workspace ?? null));
 		const mcpExt = this.#mcp.createExtension();
 		if (mcpExt) registry.install(mcpExt);

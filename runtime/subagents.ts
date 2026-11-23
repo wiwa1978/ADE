@@ -88,7 +88,8 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 		}
 		if (mode === "worktree" && opts.worktreeManager && opts.repository) {
 			const branch = `ade/sub-${subId.slice(0, 8)}`;
-			const base = await resolveBaseCommit(opts.repository, "HEAD");
+			// Start from the session's current commit, so the subagent builds on the session's work so far.
+			const base = await resolveBaseCommit(opts.workspace ?? opts.repository, "HEAD");
 			const op = await opts.worktreeManager.create({
 				id: subId,
 				repository: opts.repository,

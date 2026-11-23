@@ -658,3 +658,5 @@ body.panel-resizing:has(.panel-resize-bottom){cursor:row-resize}
   .new-workspace-send-enter{display:none}
   .new-workspace-send-arrow{display:block}
 }
+.project-form .project-check{display:flex;flex-direction:row;align-items:center;gap:8px;margin-top:10px;font-weight:500}
+.project-form .project-check input{width:auto;margin:0}

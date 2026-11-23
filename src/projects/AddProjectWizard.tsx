@@ -115,7 +115,7 @@ export function AddProjectWizard({
 
   const [activeGhLogin, setActiveGhLogin] = useState<string | null>(githubLogin)
   const [projectName, setProjectName] = useState("")
-  const [blueprintId, setBlueprintId] = useState("automated-factory")
+  const [blueprintId, setBlueprintId] = useState("vibe")
   const [modelProfile, setModelProfile] = useState<ModelProfileId>("balanced")
   const [ghRepo, setGhRepo] = useState("")
   const [cloneLocally, setCloneLocally] = useState(true)
@@ -761,14 +761,14 @@ export function AddProjectWizard({
                 onClick={() => setShowAdvanced(v => !v)}
               >
                 {showAdvanced ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-                <span>Blueprint &amp; model defaults</span>
+                <span>Way of working &amp; model defaults</span>
               </button>
               {showAdvanced ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2.5">
                   <label className="sf-label">
-                    <span>Factory Blueprint</span>
+                    <span>Way of working</span>
                     <select className="sf-field" value={blueprintId} onChange={e => setBlueprintId(e.target.value)}>
-                      {BUILTIN_BLUEPRINTS.map(bp => (
+                      {[{ id: "vibe", name: "Vibe coding" }, ...BUILTIN_BLUEPRINTS].map(bp => (
                         <option key={bp.id} value={bp.id}>{bp.name}</option>
                       ))}
                     </select>

@@ -135,6 +135,12 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	};
 	host.events?.subscribe?.(event => {
 		if (event.type === "approval.requested" && event.sessionId) notify("needsApproval", event.sessionId, (label, project) => `⏸ *${label}* (${project}) is waiting for your approval in ADE.`);
+		// A blueprint stage waits for Approve / Request changes.
+		if (event.type === "stages.update" && event.sessionId) {
+			inbox.invalidate(event.sessionId);
+			const stage = (event.payload as { summary?: { stage?: { name: string; status: string } } | null } | null)?.summary?.stage;
+			if (stage?.status === "awaiting_approval") notify("needsApproval", event.sessionId, (label, project) => `⏸ *${label}* (${project}): stage “${stage.name}” is ready for your approval in ADE.`);
+		}
 	});
 
 	const agentBusy = new Map<string, boolean>();

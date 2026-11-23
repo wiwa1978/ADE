@@ -4,7 +4,7 @@ import type { Project } from "../../ProjectsView"
 import { relativeTime, sessionStateInfo, type InboxEntry, type SessionState } from "../session-state"
 import { budgetState, formatCost, useUsage } from "../usage/usage-data"
 
-const urgency: SessionState[] = ["needs-approval", "failed", "checks-failing", "replied", "ready-to-review", "pr-open", "working", "merged", "idle"]
+const urgency: SessionState[] = ["stage-approval", "needs-approval", "failed", "checks-failing", "replied", "ready-to-review", "pr-open", "working", "merged", "idle"]
 
 /**
  * Every coding session across projects, grouped by what it needs from you. This is the home

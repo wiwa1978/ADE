@@ -1,6 +1,18 @@
 import { CheckCircle2, CircleDashed, CircleSlash, Loader2, PauseCircle, XCircle } from "lucide-react"
 import type { ConversationTimelineSnapshot, SessionTaskItem, SubagentInfo, TimelineItem } from "../../app-types"
 import { clock, type SessionHold } from "../subagents/session-hold"
+import { stageStatusLabel, type SessionStages, type StageStatus } from "../blueprints/session-stages"
+import { shortBlueprintName } from "../blueprints/blueprint-options"
+
+const stageTone: Record<StageStatus, Status> = {
+  completed: "done",
+  running: "working",
+  awaiting_approval: "waiting",
+  changes_requested: "failed",
+  failed: "failed",
+  skipped: "blocked",
+  pending: "pending",
+}
 
 type Status = "done" | "working" | "waiting" | "failed" | "blocked" | "pending"
 
@@ -75,6 +87,7 @@ export function ProgressPanel({
   subagentTimelines,
   tasks,
   hold,
+  stages,
   onOpenSubagent,
 }: {
   leadLabel: string
@@ -85,6 +98,8 @@ export function ProgressPanel({
   subagentTimelines: Record<string, ConversationTimelineSnapshot>
   tasks: SessionTaskItem[]
   hold?: SessionHold
+  /** The session's blueprint stages; null or empty for Vibe. */
+  stages?: SessionStages | null
   onOpenSubagent: (id: string) => void
 }) {
   const leadAsked = [...leadItems].reverse().find(item => item.kind === "user")
@@ -131,6 +146,30 @@ export function ProgressPanel({
           {failed ? <span className="is-failed" style={{ width: `${(failed / total) * 100}%` }} /> : null}
         </div>
       </header>
+
+      {stages?.stages.length ? (
+        <section aria-label="Stages">
+          <h3>Stages · {shortBlueprintName(stages.name)}</h3>
+          <table className="ade-progress-table">
+            <thead><tr><th>#</th><th>Stage</th><th>Status</th><th>Result</th></tr></thead>
+            <tbody>
+              {stages.stages.map((stage, index) => (
+                <tr key={stage.id}>
+                  <td className="ade-muted">{index + 1}</td>
+                  <td>
+                    <strong>{stage.name}</strong>
+                    <div className="ade-muted ade-xs">{[stage.gate !== "never" ? (stage.gate === "before" ? "You approve before it starts" : "You approve its result") : "", stage.goldfish ? "Independent review" : "", stage.executor === "parallel_subagents" ? "Parallel subagents" : ""].filter(Boolean).join(" · ")}</div>
+                  </td>
+                  <td>
+                    <StatusCell status={stageTone[stage.status]} note={stage.status === "awaiting_approval" ? "Approve in the Stages tab" : stage.status !== "completed" && stage.status !== "running" && stage.status !== "pending" ? stageStatusLabel[stage.status] : stage.attempt > 1 ? `Round ${stage.attempt}` : undefined} />
+                  </td>
+                  <td title={stage.summary ?? ""}><span className="ade-progress-clamp">{stage.verdict ? `${stage.verdict.outcome === "pass" ? "Passed" : "Changes asked"}: ${stage.verdict.summary}` : stage.summary ? firstLine(stage.summary) : <span className="ade-muted">—</span>}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      ) : null}
 
       <section aria-label="Agents">
         <h3>Agents</h3>

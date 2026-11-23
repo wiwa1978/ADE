@@ -15,6 +15,7 @@ import { ProjectInstructionsSettings } from "./src/projects/ProjectInstructionsS
 import { ProjectSecretsSettings } from "./src/projects/ProjectSecretsSettings"
 import { ProjectRunOnSettings } from "./src/projects/ProjectRunOnSettings"
 
+import { useBlueprintOptions } from "./src/blueprints/blueprint-options"
 export type { GitHubConnection, GitHubRepository, GitHubRepositoryPage, Project, ProjectInput }
 type Feature = { id: string; label: string; status: string; workspace?: { kind: string; branch: string | null; status: string } }
 export type ProjectActivity = { agents: (FeatureAgent & { sessionId: string; sessionName: string })[]; errors: { sessionId: string; sessionName: string; message: string }[]; observedAt: number }
@@ -320,7 +321,9 @@ export function ProjectSettings({ project, open, initialDraft, githubConnection,
   const [name, setName] = useState(initialDraft?.name ?? project.name)
   const [githubUrl, setGithubUrl] = useState(repositoryName(initialDraft?.githubUrl ?? project.githubUrl ?? ""))
   const [repository, setRepository] = useState(initialDraft?.repository ?? project.repository ?? "")
-  const [blueprintId, setBlueprintId] = useState(initialDraft?.blueprintId ?? project.blueprintId ?? "automated-factory")
+  const [blueprintId, setBlueprintId] = useState(initialDraft?.blueprintId ?? project.blueprintId ?? "vibe")
+  const [blueprintLocked, setBlueprintLocked] = useState(initialDraft?.blueprintLocked ?? project.blueprintLocked ?? false)
+  const blueprintOptions = useBlueprintOptions()
   const [modelProfile, setModelProfile] = useState(initialDraft?.modelProfile ?? project.modelProfile ?? "balanced")
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState("")
@@ -330,9 +333,10 @@ export function ProjectSettings({ project, open, initialDraft, githubConnection,
     name !== project.name ||
     githubUrl !== repositoryName(project.githubUrl ?? "") ||
     repository !== (project.repository ?? "") ||
-    blueprintId !== (project.blueprintId ?? "automated-factory") ||
+    blueprintId !== (project.blueprintId ?? "vibe") ||
+    blueprintLocked !== (project.blueprintLocked ?? false) ||
     modelProfile !== (project.modelProfile ?? "balanced")
-  const openConnectionSettings = () => onOpenSettings({ id: project.id, name, githubUrl, repository, blueprintId, modelProfile })
+  const openConnectionSettings = () => onOpenSettings({ id: project.id, name, githubUrl, repository, blueprintId, blueprintLocked, modelProfile })
   const searchableAccount = githubStatusError ? null : githubAccount
 
   async function save(event: FormEvent<HTMLFormElement>) {
@@ -347,12 +351,14 @@ export function ProjectSettings({ project, open, initialDraft, githubConnection,
         githubUrl: githubUrl.trim(),
         repository: repository.trim(),
         blueprintId,
+        blueprintLocked,
         modelProfile,
       })
       setName(updated.name)
       setGithubUrl(repositoryName(updated.githubUrl ?? ""))
       setRepository(updated.repository ?? "")
-      setBlueprintId(updated.blueprintId ?? "automated-factory")
+      setBlueprintId(updated.blueprintId ?? "vibe")
+      setBlueprintLocked(updated.blueprintLocked ?? false)
       setModelProfile(updated.modelProfile ?? "balanced")
       setSaved(true)
     } catch (cause) {
@@ -419,13 +425,19 @@ export function ProjectSettings({ project, open, initialDraft, githubConnection,
       </div>
       <div className="project-field">
         <label>
-          Factory Blueprint
+          Way of working
           <select className="sf-field" style={{ marginTop: 6 }} value={blueprintId} onChange={e => setBlueprintId(e.target.value)} disabled={saving}>
-            {BUILTIN_BLUEPRINTS.map(bp => (
+            {(blueprintOptions.length ? blueprintOptions : [{ id: "vibe", name: "Vibe coding" }, ...BUILTIN_BLUEPRINTS]).map(bp => (
               <option key={bp.id} value={bp.id}>{bp.name}</option>
             ))}
           </select>
         </label>
+        <p className="hint">The default for new sessions in this project. Vibe coding has no stages; a blueprint takes each session through its stages, and you approve the gated ones.</p>
+        <label className="project-check">
+          <input type="checkbox" checked={blueprintLocked} onChange={e => setBlueprintLocked(e.target.checked)} disabled={saving} />
+          Every session uses this way of working
+        </label>
+        <p className="hint">For team or regulated repositories: sessions can't pick another one (Vibe included).</p>
       </div>
       <div className="project-field">
         <label>

@@ -1,5 +1,7 @@
 import {
   Activity,
+  Bot,
+  CircleDot,
   Columns2,
   FileCode2,
   FileDiff,
@@ -7,13 +9,19 @@ import {
   FolderTree,
   GitPullRequest,
   Globe,
+  LayoutGrid,
   PanelRightClose,
   Plus,
   Terminal,
   X,
 } from "lucide-react"
 import { useSessionHold } from "../subagents/session-hold"
+import { SidePanelMenu, type SidePanelItem } from "./SidePanelMenu"
+import { IssuesPanel } from "../panels/IssuesPanel"
+import { AgentsView } from "../agents/AgentsView"
+import { useSessionStages } from "../blueprints/session-stages"
 import type {
+  GitHubIssue,
   BrowserState,
   Conversation,
   ConversationTimelineSnapshot,
@@ -45,6 +53,11 @@ export function BesidePane({
   hasWorkspace,
   besideTabs,
   activeBesideTab,
+  menuItems,
+  onOpenMenu,
+  onStartFromIssue,
+  agentsWide = false,
+  onToggleAgentsWide,
   subagents,
   subagentTimelines,
   gitSummary,
@@ -92,6 +105,12 @@ export function BesidePane({
   hasWorkspace: boolean
   besideTabs: WorkspaceTab[]
   activeBesideTab: WorkspaceTab
+  /** What the side panel's menu offers. */
+  menuItems: SidePanelItem[]
+  onOpenMenu: () => void
+  onStartFromIssue?: (issue: GitHubIssue) => void
+  agentsWide?: boolean
+  onToggleAgentsWide?: () => void
   subagents: SubagentInfo[]
   subagentTimelines: Record<string, ConversationTimelineSnapshot>
   gitSummary: WorkspaceGitSummary
@@ -133,7 +152,8 @@ export function BesidePane({
   onRunStatusChange?: (status: RunStatus) => void
   onOpenProjectSettings?: () => void
 }) {
-  const hold = useSessionHold(activeBesideTab?.kind === "progress" ? session.id : null, agentBusy)
+  const hold = useSessionHold(activeBesideTab?.kind === "progress" || activeBesideTab?.kind === "agents" ? session.id : null, agentBusy)
+  const { stages: progressStages } = useSessionStages(activeBesideTab?.kind === "progress" && session.blueprint ? session.id : null, `${JSON.stringify(session.blueprint ?? null)}:${agentBusy}`)
   const tabIcon = (tab: WorkspaceTab) => {
     switch (tab.kind) {
       case "subagent": {
@@ -148,6 +168,9 @@ export function BesidePane({
       case "terminal": return <Terminal className="size-3.5" />
       case "processes": return <Activity className="size-3.5" />
       case "pr": return <GitPullRequest className="size-3.5" />
+      case "tools": return <LayoutGrid className="size-3.5" />
+      case "issues": return <CircleDot className="size-3.5" />
+      case "agents": return <Bot className="size-3.5" />
       default: return <Columns2 className="size-3.5" />
     }
   }
@@ -179,21 +202,13 @@ export function BesidePane({
               </button>
             </div>
           ))}
-          {activeBesideTab.kind === "terminal" ? (
-            <button type="button" className="ade-tab-add" title="New terminal" aria-label="New terminal" onClick={() => onOpenTerminal(true)}>
+          {activeBesideTab.kind !== "tools" ? (
+            <button type="button" className="ade-tab-add" title="Open something else in the side panel" aria-label="Open something else" onClick={onOpenMenu}>
               <Plus className="size-3.5" />
             </button>
           ) : null}
-          {subagents.some(s => !besideTabs.some(t => t.subagentId === s.id)) ? (
-            <button
-              type="button"
-              className="ade-tab-add"
-              title="Open next subagent tab"
-              onClick={() => {
-                const nextSub = subagents.find(s => !besideTabs.some(t => t.subagentId === s.id))
-                if (nextSub) onOpenSubagent(nextSub.id)
-              }}
-            >
+          {activeBesideTab.kind === "terminal" ? (
+            <button type="button" className="ade-tab-add" title="New terminal" aria-label="New terminal" onClick={() => onOpenTerminal(true)}>
               <Plus className="size-3.5" />
             </button>
           ) : null}
@@ -204,6 +219,32 @@ export function BesidePane({
       </div>
 
       <div className="ade-beside-content">
+        {activeBesideTab.kind === "tools" ? <SidePanelMenu items={menuItems} /> : null}
+        {activeBesideTab.kind === "agents" ? (
+          <AgentsView
+            sessionId={session.id}
+            leadBusy={agentBusy}
+            leadItems={timelineItems}
+            subagents={subagents}
+            subagentTimelines={subagentTimelines}
+            hold={hold}
+            wide={agentsWide}
+            onToggleWide={() => onToggleAgentsWide?.()}
+            onMessage={onMessageSubagent}
+            onStop={onStopSubagent}
+            onOpenFile={hasWorkspace ? onOpenFile : undefined}
+            onOpenBrowser={onOpenBrowser}
+            onOpenExternalBrowser={onOpenExternalBrowser}
+          />
+        ) : null}
+        {activeBesideTab.kind === "issues" ? (
+          <IssuesPanel
+            projectId={session.projectId ?? null}
+            linkedIssueNumber={session.githubIssue?.number ?? null}
+            onStartSession={issue => onStartFromIssue?.(issue)}
+            onOpenExternal={url => void onOpenExternalBrowser(url)}
+          />
+        ) : null}
         {activeBesideTab.kind === "subagent" && activeBesideTab.subagentId ? (() => {
           const sub = subagents.find(s => s.id === activeBesideTab.subagentId)
           if (!sub) return <div className="ade-pane-empty"><p>Subagent not found.</p></div>
@@ -282,6 +323,7 @@ export function BesidePane({
             subagentTimelines={subagentTimelines}
             tasks={tasks}
             hold={hold}
+            stages={progressStages}
             onOpenSubagent={onOpenSubagent}
           />
         ) : null}

@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Columns2, Terminal, X } from "lucide-react"
+import { Activity, Bot, CircleDot, Columns2, ListChecks, FileDiff, FileText, FolderTree, GitPullRequest, Globe, Play, ScrollText, Terminal, Workflow, X } from "lucide-react"
+import type { SidePanelItem } from "./SidePanelMenu"
+import { publishSessionTools } from "../layout/session-tools"
 import { TerminalPanel } from "../../TerminalPanel"
 import type {
+  GitHubIssue,
   ApprovalPolicy,
   BrowserState,
   Conversation,
@@ -24,6 +27,9 @@ import type { RunStatus } from "../panels/RunPanel"
 import { confirmRestore, restoreCheckpoint, type CheckpointInfo } from "../panels/checkpoint-actions"
 import type { PullRequestInfo } from "../panels/PullRequestPanel"
 import { WorkspaceHeaderBar } from "./WorkspaceHeaderBar"
+import { StagesPanel, WayOfWorkingSelect } from "../blueprints/StagesPanel"
+import { StageBar } from "../blueprints/StageBar"
+import { useSessionStages } from "../blueprints/session-stages"
 import { BesidePane } from "./BesidePane"
 import { ConversationLayout } from "./ConversationLayout"
 import { DEFAULT_KEYBINDINGS, formatShortcut, matchesChord, type KeybindingMap } from "../keybindings"
@@ -74,6 +80,8 @@ export function SplitWorkspace({
   terminalAutoStart = true,
   prDraftDefault = true,
   projectName,
+  blueprintLocked = false,
+  onStartFromIssue,
   onOpenProject,
   onOpenProjectSettings,
   stateLabel,
@@ -129,6 +137,10 @@ export function SplitWorkspace({
   prDraftDefault?: boolean
   /** Breadcrumb back to the session's project. */
   projectName?: string
+  /** The project fixes the way of working for its sessions. */
+  blueprintLocked?: boolean
+  /** Open New session on an issue (from the Issues panel). */
+  onStartFromIssue?: (issue: GitHubIssue) => void
   onOpenProject?: () => void
   onOpenProjectSettings?: () => void
   /** Attention state from the inbox (e.g. "Ready to review"). */
@@ -140,9 +152,14 @@ export function SplitWorkspace({
   keybindings?: KeybindingMap
 }) {
   const [besideTabs, setBesideTabs] = useState<WorkspaceTab[]>([])
+  const [besideHidden, setBesideHidden] = useState(false)
   const [activeBesideId, setActiveBesideId] = useState<string | null>(null)
   const [bottomTerminalOpen, setBottomTerminalOpen] = useState(false)
   const [bottomTerminalMounted, setBottomTerminalMounted] = useState(false)
+  // The drawer has two tabs in a blueprint session: Stages and Terminal. The terminal starts the
+  // first time its tab is shown, and stays mounted after that so its shell survives.
+  const [drawerTab, setDrawerTab] = useState<"stages" | "terminal">(session.blueprint ? "stages" : "terminal")
+  const [terminalStarted, setTerminalStarted] = useState(false)
   const [bottomTerminalHeight, setBottomTerminalHeight] = useState(() => {
     const saved = Number(localStorage.getItem("ade.terminal-height"))
     return saved >= 140 && saved <= 520 ? saved : 240
@@ -163,9 +180,34 @@ export function SplitWorkspace({
   const workspacePath = session.workspace?.path ?? null
   const terminalCwd = workspacePath ?? "~"
   const isBusy = session.status === "working" || Boolean(timeline?.busy)
+  const blueprint = session.blueprint ?? null
+  const { stages, setStages } = useSessionStages(hasWorkspace ? session.id : null, `${JSON.stringify(blueprint)}:${session.status}`)
+  // Stages stays visible right after switching to Vibe, so the panel can say what happened.
+  const showStagesTab = Boolean(blueprint) || (drawerTab === "stages" && Boolean(stages))
+  const activeDrawerTab = showStagesTab ? drawerTab : "terminal"
+  if (activeDrawerTab === "terminal" && bottomTerminalOpen && !terminalStarted) setTerminalStarted(true)
+  // Open the drawer on Stages by itself when a stage starts waiting for you (not on other changes).
+  const waitingKey = blueprint?.stage?.status === "awaiting_approval" ? `${session.id}:${blueprint.stage.id}` : null
+  const [prevWaitingKey, setPrevWaitingKey] = useState(waitingKey)
+  if (prevWaitingKey !== waitingKey) {
+    setPrevWaitingKey(waitingKey)
+    if (waitingKey) {
+      setBottomTerminalMounted(true)
+      setBottomTerminalOpen(true)
+      setDrawerTab("stages")
+    }
+  }
+  const openStagesDrawer = () => {
+    setBottomTerminalMounted(true)
+    setBottomTerminalOpen(true)
+    setDrawerTab("stages")
+  }
 
   const openBeside = useCallback((tab: WorkspaceTab) => {
-    setBesideTabs(prev => {
+    setBesideHidden(false)
+    setBesideTabs(prevTabs => {
+      // Picking something from the menu replaces the menu tab.
+      const prev = tab.kind === "tools" ? prevTabs : prevTabs.filter(t => t.kind !== "tools")
       const existing = prev.find(t => t.id === tab.id)
       if (existing) return prev.map(t => (t.id === tab.id ? { ...t, ...tab } : t))
       return [...prev, { ...tab, closable: true }]
@@ -216,7 +258,7 @@ export function SplitWorkspace({
     if (grew) {
       const newest = subagents[subagents.length - 1]
       if (newest && newest.status === "running" && besideTabs.length === 0) {
-        const tab: WorkspaceTab = { id: `subagent:${newest.id}`, kind: "subagent", title: newest.name, subagentId: newest.id, closable: true }
+        const tab: WorkspaceTab = { id: "agents", kind: "agents", title: "Agents", closable: true }
         setBesideTabs([tab])
         setActiveBesideId(tab.id)
       }
@@ -282,6 +324,15 @@ export function SplitWorkspace({
   const openRun = useCallback(() => openBeside({ id: "run", kind: "run", title: "Run" }), [openBeside])
   const openTranscript = useCallback(() => openBeside({ id: "transcript", kind: "transcript", title: "Transcript" }), [openBeside])
   const openProgress = useCallback(() => openBeside({ id: "progress", kind: "progress", title: "Progress" }), [openBeside])
+  const openAgents = useCallback(() => openBeside({ id: "agents", kind: "agents", title: "Agents" }), [openBeside])
+  // "Wider" in the Agents view gives the side panel most of the room (and back).
+  const [narrowRatio, setNarrowRatio] = useState<number | null>(null)
+  const toggleAgentsWide = () => {
+    if (narrowRatio !== null) { setSplitRatio(narrowRatio); setNarrowRatio(null) }
+    else { setNarrowRatio(splitRatio); setSplitRatio(30) }
+  }
+  const openIssues = useCallback(() => openBeside({ id: "issues", kind: "issues", title: "Issues" }), [openBeside])
+  const openSideMenu = useCallback(() => openBeside({ id: "tools", kind: "tools", title: "Open…" }), [openBeside])
   const progressCount = {
     done: (timeline?.items.length && !isBusy && session.lastTurnStatus !== "failed" ? 1 : 0) + subagents.filter(sub => sub.status === "completed").length + tasks.filter(task => task.status === "done").length,
     total: 1 + subagents.length + tasks.length,
@@ -354,9 +405,35 @@ export function SplitWorkspace({
   const openProcesses = useCallback(() => openBeside({ id: "processes", kind: "processes", title: "Processes" }), [openBeside])
 
   const activeBesideTab = besideTabs.find(t => t.id === activeBesideId) ?? null
-  const showBeside = besideTabs.length > 0 && activeBesideTab !== null
+  const showBeside = besideTabs.length > 0 && activeBesideTab !== null && !besideHidden
   const runningSubagentsCount = subagents.filter(s => s.status === "running" || s.status === "waiting").length
   const runningProcessesCount = processes.filter(p => p.status === "running").length
+  // Everything the side panel can open, with live status (the panel's menu lists these).
+  const is = (kind: WorkspaceTab["kind"]) => showBeside && activeBesideTab?.kind === kind
+  const sidePanelItems: SidePanelItem[] = [
+    ...(subagents.length ? [{ id: "agents", label: "Agents", description: "Every agent side by side: what each is doing, thinking and changed", icon: Bot, onOpen: openAgents, badge: runningSubagentsCount || undefined, live: runningSubagentsCount > 0, active: is("agents") || is("subagent") }] : []),
+    ...(subagents.length || progressCount.total > 1 ? [{ id: "progress", label: "Progress", description: "A table of every agent and task and how far each is", icon: ListChecks, onOpen: openProgress, badge: `${progressCount.done}/${progressCount.total}`, active: is("progress"), menuOnly: true }] : []),
+    ...(blueprint ? [{ id: "stages", label: "Stages", description: `${blueprint.name.replace(/\s*\(.*\)$/, "")}: where the work is and what waits for you`, icon: Workflow, onOpen: () => { closeBesideTab("tools"); openStagesDrawer() }, badge: `${blueprint.done}/${blueprint.total}`, attention: blueprint.stage?.status === "awaiting_approval", active: bottomTerminalOpen && activeDrawerTab === "stages" }] : []),
+    ...(hasWorkspace ? [
+      { id: "files", label: "Files", description: "Browse and open the workspace's files", icon: FolderTree, onOpen: openFiles, active: is("files") },
+      { id: "changes", label: "Changes", description: "Review the agent's changes and the branch diff", icon: FileDiff, onOpen: () => openDiff(), badge: gitSummary.files.length || undefined, active: is("diff") },
+      { id: "run", label: "Run", description: "Start the app with the project's run script", icon: Play, onOpen: openRun, live: runStatus?.run === "running", active: is("run") },
+      ...(session.projectId ? [{ id: "issues", label: "Issues", description: "The project's open GitHub issues; start a session on one", icon: CircleDot, onOpen: openIssues, active: is("issues") }] : []),
+      ...(session.workspace?.kind !== "none" ? [{ id: "pr", label: pullRequest ? `Pull request #${pullRequest.number}` : "Pull request", description: "Push, open and merge a pull request", icon: GitPullRequest, onOpen: openPullRequest, active: is("pr") }] : []),
+    ] : []),
+    { id: "terminal", label: "Terminal", description: `A shell in the workspace (${keybindings.toggleTerminal ? formatShortcut(keybindings.toggleTerminal) : "⌘J"} opens it in the drawer)`, icon: Terminal, onOpen: () => openTerminal(false), active: is("terminal") },
+    { id: "browser", label: "Browser", description: "The built-in browser the agent can drive", icon: Globe, onOpen: () => openBrowser(), live: browserState.agentDriving, active: is("browser") },
+    ...(artifacts.length || hasWorkspace ? [{ id: "artifacts", label: "Artefacts", description: "Session artefacts: files, plans and images", icon: FileText, onOpen: () => openArtifact(), badge: artifacts.length || undefined, active: is("artifact") }] : []),
+    { id: "transcript", label: "Transcript", description: "Step through what the agent did, or export the session", icon: ScrollText, onOpen: openTranscript, active: is("transcript") },
+    ...(runningProcessesCount ? [{ id: "processes", label: "Processes", description: "Commands the agent left running", icon: Activity, onOpen: openProcesses, badge: runningProcessesCount, live: true, active: is("processes") }] : []),
+  ]
+  // The activity bar on the far left shows the same tools; clicking the open one hides it again.
+  useEffect(() => {
+    publishSessionTools(sidePanelItems.map(item => item.active
+      ? { ...item, onOpen: item.id === "stages" ? () => setBottomTerminalOpen(false) : () => setBesideHidden(true) }
+      : item))
+  })
+  useEffect(() => () => publishSessionTools([]), [])
 
   return (
     <ConversationLayout
@@ -366,36 +443,14 @@ export function SplitWorkspace({
       <WorkspaceHeaderBar
         session={session}
         isBusy={isBusy}
-        hasWorkspace={hasWorkspace}
         approvals={approvals}
-        subagents={subagents}
-        gitSummary={gitSummary}
-        browserState={browserState}
-        artifacts={artifacts}
-        runningSubagentsCount={runningSubagentsCount}
-        runningProcessesCount={runningProcessesCount}
-        pullRequest={pullRequest}
-        activeBesideTab={activeBesideTab}
-        bottomTerminalOpen={bottomTerminalOpen}
-        terminalShortcut={keybindings.toggleTerminal ? formatShortcut(keybindings.toggleTerminal) : ""}
-        onOpenExternalBrowser={onOpenExternalBrowser}
-        onOpenSubagent={openSubagent}
-        onOpenFiles={openFiles}
-        onOpenDiff={() => openDiff()}
-        onOpenTerminal={toggleBottomTerminal}
-        onOpenPullRequest={openPullRequest}
-        onOpenRun={openRun}
-        onOpenTranscript={openTranscript}
-        onOpenProgress={openProgress}
-        progressCount={progressCount}
         runStatus={hasWorkspace ? runStatus : null}
         projectName={projectName}
         onOpenProject={onOpenProject}
         stateLabel={stateLabel}
         onOpenAttempts={onOpenAttempts}
-        onOpenBrowser={() => openBrowser()}
-        onOpenArtifact={() => openArtifact()}
-        onOpenProcesses={openProcesses}
+        onOpenExternalBrowser={onOpenExternalBrowser}
+        onOpenRun={openRun}
       />
       }
       aboveComposer={
@@ -466,6 +521,11 @@ export function SplitWorkspace({
               title="Drag to resize split panes"
             />
             <BesidePane
+              menuItems={sidePanelItems}
+              onOpenMenu={openSideMenu}
+              onStartFromIssue={onStartFromIssue}
+              agentsWide={narrowRatio !== null}
+              onToggleAgentsWide={toggleAgentsWide}
               splitRatio={splitRatio}
               session={session}
               workspacePath={workspacePath}
@@ -516,13 +576,13 @@ export function SplitWorkspace({
           </>
         ) : null
       }
-      footer={
-        bottomTerminalMounted ? (
+      footer={<>
+        {bottomTerminalMounted ? (
         <section
           className="ade-bottom-drawer"
           style={{ height: `${bottomTerminalHeight}px` }}
           hidden={!bottomTerminalOpen}
-          aria-label="Terminal drawer"
+          aria-label="Stages and terminal"
         >
           <div
             className="ade-bottom-resize-handle"
@@ -532,34 +592,63 @@ export function SplitWorkspace({
             title="Drag to resize terminal"
           />
           <div className="ade-bottom-drawer-head">
-            <div className="flex items-center gap-2 min-w-0">
-              <Terminal className="size-3.5 text-[rgb(var(--primary))]" />
-              <strong>Terminal</strong>
-              <span className="ade-pill ade-mono ade-truncate">{terminalCwd}</span>
+            <div className="flex items-center gap-1 min-w-0" role="tablist" aria-label="Drawer">
+              {showStagesTab ? (
+                <button type="button" role="tab" aria-selected={activeDrawerTab === "stages"} className={`ade-drawer-tab ${activeDrawerTab === "stages" ? "is-active" : ""}`} onClick={() => setDrawerTab("stages")}>
+                  <Workflow className="size-3.5" /> Stages
+                  {blueprint?.stage?.status === "awaiting_approval" ? <span className="ade-drawer-tab-dot" aria-label="Waiting for you" /> : null}
+                </button>
+              ) : null}
+              <button type="button" role="tab" aria-selected={activeDrawerTab === "terminal"} className={`ade-drawer-tab ${activeDrawerTab === "terminal" ? "is-active" : ""}`} onClick={() => setDrawerTab("terminal")}>
+                <Terminal className="size-3.5" /> Terminal
+              </button>
+              {activeDrawerTab === "terminal" ? <span className="ade-pill ade-mono ade-truncate">{terminalCwd}</span> : null}
             </div>
             <div className="flex items-center gap-1.5">
-              <button type="button" className="ade-chip-btn" onClick={() => openTerminal(false)} title="Open terminal in a side-by-side split pane">
-                <Columns2 className="size-3" /> Side pane
-              </button>
-              <button type="button" className="ade-icon-btn" onClick={() => setBottomTerminalOpen(false)} aria-label="Close terminal drawer" title="Close terminal drawer (Cmd+J)">
+              {!blueprint && stages && hasWorkspace ? (
+                <WayOfWorkingSelect sessionId={session.id} current={stages.blueprintId} currentName={stages.name} locked={blueprintLocked} busy={isBusy} onChanged={next => { setStages(next); setDrawerTab("stages") }} />
+              ) : null}
+              {activeDrawerTab === "terminal" ? (
+                <button type="button" className="ade-chip-btn" onClick={() => openTerminal(false)} title="Open terminal in a side-by-side split pane">
+                  <Columns2 className="size-3" /> Side pane
+                </button>
+              ) : null}
+              <button type="button" className="ade-icon-btn" onClick={() => setBottomTerminalOpen(false)} aria-label="Close drawer" title="Close drawer (Cmd+J)">
                 <X className="size-3.5" />
               </button>
             </div>
           </div>
-          <div className="ade-terminal-pane-wrap">
-            <TerminalPanel
-              environmentId={environmentId}
-              workspaceKey={`${session.id}:bottom`}
-              cwd={terminalCwd}
-              visible={bottomTerminalOpen}
-              autoStart={terminalAutoStart}
-              fontSize={terminalFontSize}
-              scrollback={terminalScrollback}
-            />
-          </div>
+          {activeDrawerTab === "stages" && stages ? (
+            <div className="ade-drawer-body">
+              <StagesPanel
+                sessionId={session.id}
+                stages={stages}
+                busy={isBusy}
+                locked={blueprintLocked}
+                onChanged={setStages}
+                onOpenFile={hasWorkspace ? openFile : undefined}
+                onOpenProgress={openProgress}
+              />
+            </div>
+          ) : null}
+          {terminalStarted ? (
+            <div className="ade-terminal-pane-wrap" hidden={activeDrawerTab !== "terminal"}>
+              <TerminalPanel
+                environmentId={environmentId}
+                workspaceKey={`${session.id}:bottom`}
+                cwd={terminalCwd}
+                visible={bottomTerminalOpen && activeDrawerTab === "terminal"}
+                autoStart={terminalAutoStart}
+                fontSize={terminalFontSize}
+                scrollback={terminalScrollback}
+              />
+            </div>
+          ) : null}
         </section>
-      ) : null
-      }
+      ) : null}
+        {/* When the drawer is closed, a blueprint session keeps its current stage in view. */}
+        {blueprint && !bottomTerminalOpen ? <StageBar blueprint={blueprint} onOpen={openStagesDrawer} /> : null}
+      </>}
     >
       <TimelineView
         timeline={timeline}

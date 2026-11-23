@@ -6,6 +6,7 @@ import type { PullRequestInfo, SessionGit } from "./session-git.ts";
 
 export type SessionState =
 	| "working"
+	| "stage-approval"
 	| "needs-approval"
 	| "failed"
 	| "checks-failing"
@@ -25,6 +26,8 @@ export type InboxEntry = {
 	commitsAhead: number;
 	pullRequest: Pick<PullRequestInfo, "number" | "url" | "state" | "isDraft" | "checksSummary" | "reviewDecision"> | null;
 	updatedAt: number | null;
+	/** The blueprint stage waiting for the user's approval, if any. */
+	stage?: string;
 };
 
 type SessionLike = {
@@ -34,6 +37,7 @@ type SessionLike = {
 	updatedAt?: number | null;
 	lastTurnStatus?: string | null;
 	workspace?: { kind: string; path: string | null; status: string } | undefined;
+	blueprint?: { stage?: { name: string; status: string } } | undefined;
 };
 
 type HostLike = {
@@ -47,10 +51,12 @@ const PR_TTL_MS = 60_000;
 const GIT_TTL_MS = 10_000;
 
 /** Ordered by urgency: the first states need the user most. */
-export const stateOrder: SessionState[] = ["needs-approval", "failed", "checks-failing", "replied", "ready-to-review", "pr-open", "working", "merged", "idle"];
+export const stateOrder: SessionState[] = ["stage-approval", "needs-approval", "failed", "checks-failing", "replied", "ready-to-review", "pr-open", "working", "merged", "idle"];
 
 export function deriveState(input: {
 	working: boolean;
+	/** A blueprint stage is waiting for the user's Approve / Request changes. */
+	stageWaiting?: boolean;
 	pendingApprovals: number;
 	lastTurnStatus: string | null | undefined;
 	uncommitted: number;
@@ -61,6 +67,7 @@ export function deriveState(input: {
 	const pr = input.pullRequest;
 	if (input.pendingApprovals > 0) return { state: "needs-approval", needsYou: true };
 	if (input.working) return { state: "working", needsYou: false };
+	if (input.stageWaiting) return { state: "stage-approval", needsYou: true };
 	if (input.lastTurnStatus === "failed" || input.lastTurnStatus === "blocked") return { state: "failed", needsYou: !input.seen };
 	if (pr?.state === "MERGED") return { state: "merged", needsYou: false };
 	if (pr?.state === "OPEN" && pr.checksSummary === "failure") return { state: "checks-failing", needsYou: true };
@@ -135,8 +142,10 @@ export function createInbox(host: HostLike, sessionGit: SessionGit) {
 				const pullRequest = prCache.get(session.id)?.value ?? null;
 				const pendingApprovals = approvals.filter(item => item.sessionId === session.id).length;
 				const seen = (seenAt.get(session.id) ?? 0) >= (session.updatedAt ?? 0);
+				const waitingStage = session.blueprint?.stage?.status === "awaiting_approval" ? session.blueprint.stage.name : undefined;
 				const { state, needsYou } = deriveState({
 					working: session.status === "working",
+					stageWaiting: Boolean(waitingStage),
 					pendingApprovals,
 					lastTurnStatus: session.lastTurnStatus,
 					uncommitted: git?.uncommitted ?? 0,
@@ -153,6 +162,7 @@ export function createInbox(host: HostLike, sessionGit: SessionGit) {
 					commitsAhead: git?.commitsAhead ?? 0,
 					pullRequest,
 					updatedAt: session.updatedAt ?? null,
+					...(waitingStage ? { stage: waitingStage } : {}),
 				};
 			});
 		},

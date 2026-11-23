@@ -103,6 +103,11 @@ export class UsageTracker {
 		this.#scheduleSave();
 	}
 
+	/** One conversation's running totals (the main agent's or a subagent's), as last reported. */
+	conversationTotals(sessionId: string, conversationId: string): UsageTotals | null {
+		return this.#ledger.seen[`${sessionId}:${conversationId}`] ?? null;
+	}
+
 	/** Everything a session has cost so far. */
 	sessionCost(sessionId: string) {
 		return this.#ledger.sessions[sessionId]?.cost ?? 0;

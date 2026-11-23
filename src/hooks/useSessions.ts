@@ -361,6 +361,7 @@ export function useSessions(params: {
     /** Best of N: one agent per attempt; each gets its own worktree and the same task. */
     attempts?: Array<"pi" | "claude-code" | "codex">
     runOn?: "local" | "docker" | "wsl" | "ssh" | "boat"
+    blueprintId?: string
   }) => {
     setCreatingSession(true)
     setLaunchError("")
@@ -384,6 +385,7 @@ export function useSessions(params: {
         ...(input.startFrom ? { startFrom: input.startFrom } : {}),
         ...(attemptGroup ? { attemptGroup } : {}),
         ...(input.runOn ? { runOn: input.runOn } : {}),
+        ...(input.blueprintId ? { blueprintId: input.blueprintId } : {}),
         ...(!external && modelReady && input.prompt.trim()
           ? {
               initialMessage: {

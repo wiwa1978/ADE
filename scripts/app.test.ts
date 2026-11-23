@@ -218,6 +218,8 @@ beforeEach(() => {
         ],
         liveTools: [],
       }
+    } else if (url.endsWith("/agents/work")) {
+      payload = { lead: { cost: 0.42 }, agents: [{ id: "sub-1", cost: 0.18, inputTokens: 1000, outputTokens: 200, changes: { base: "abc", files: [{ path: "server.ts", added: 12, removed: 3, status: "modified" }], added: 12, removed: 3, commits: 1 } }] }
     } else if (url.includes("/agents")) {
       payload = { agents: subagentRecords }
     } else if (url.startsWith("/api/approvals") && method === "GET") {
@@ -351,8 +353,28 @@ test("renders Paseo split-pane workspace with live multi-subagent tracks, side-b
   assert.match(container.textContent ?? "", /Build SSE stream and approval signals/)
 })
 
+test("Agents view shows every agent side by side with what each is doing and changed", async () => {
+  await act(async () => root.render(React.createElement(App)))
+  const taskRow = [...container.querySelectorAll('[role="button"]')].find(el => el.textContent?.includes("Build split-pane ADE"))
+  assert.ok(taskRow, "Missing Build split-pane ADE session in sidebar")
+  await act(async () => { (taskRow as HTMLElement).click() })
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+  if (!container.querySelector(".ade-agents")) await click("Agents")
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+  const cards = [...container.querySelectorAll(".ade-agent-card")].map(card => card.textContent ?? "")
+  assert.ok(cards.some(text => /Main agent/.test(text)), "the main agent has a card")
+  const backend = cards.find(text => /Backend Worker/.test(text)) ?? ""
+  assert.match(backend, /Working/)
+  assert.match(backend, /Running npm test/, "shows what it's doing right now")
+  assert.match(backend, /\+12[\s\S]*−3[\s\S]*1 file/, "shows what it changed")
+  assert.match(backend, /\$0\.18/)
+  // The selected agent's changes and full timeline open below the cards.
+  assert.match(container.querySelector(".ade-agent-changes")?.textContent ?? "", /Changes on ade\/sub-1/)
+})
+
 test("opens Built-in Browser pane and triggers external system browser launch", async () => {
   await act(async () => root.render(React.createElement(App)))
+  // Session tools are in the activity bar on the far left.
   await click("Browser")
   assert.match(container.textContent ?? "", /Built-in Interactive Browser/)
   await click("External")
@@ -441,8 +463,8 @@ test("Appearance searchable FontPicker filters Google Fonts, loads stylesheet, a
 test("Create Project wizard steps through Environments -> Sources and Skip creates an empty project with right-side settings open", async () => {
   await act(async () => root.render(React.createElement(App)))
 
-  const addProjectBtn = container.querySelector('button[aria-label="Add project"]')
-  assert.ok(addProjectBtn, "Expected Add project icon button next to sidebar search box")
+  const addProjectBtn = container.querySelector('.ade-activity-bar button[aria-label="Add project"]')
+  assert.ok(addProjectBtn, "Expected Add project in the activity bar")
   await act(async () => { (addProjectBtn as HTMLElement).click() })
 
   const dialog = container.querySelector('[role="dialog"][aria-label="Create Project"]')
@@ -511,11 +533,11 @@ test("Keybindings editor rebinds built-in shortcuts, reflects them in the UI, an
   assert.equal(savedWithCustom.customKeybindings?.length, 1)
   assert.equal(savedWithCustom.customKeybindings?.[0]?.chord, "Mod+Shift+D")
 
-  // Go back to app and verify sidebar Search badge reflects the rebound shortcut (⌘P or Ctrl+P)
+  // Go back to app and verify the activity bar's Search shows the rebound shortcut (⌘P or Ctrl+P)
   await click("Back to app")
-  const searchBox = container.querySelector(".ade-sidebar-search-box")
-  assert.ok(searchBox, "Expected sidebar search box")
-  assert.match(searchBox.textContent ?? "", /P/)
+  const searchButton = container.querySelector('.ade-activity-bar button[aria-label="Search"]')
+  assert.ok(searchButton, "Expected Search in the activity bar")
+  assert.match(searchButton.getAttribute("data-shortcut") ?? "", /P/)
 })
 
 test("Pinning a project via right-click moves it above unpinned projects in the sidebar", async () => {

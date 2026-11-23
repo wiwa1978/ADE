@@ -86,7 +86,9 @@ type AppMainColumnProps = {
   onOpenStreamPane: (projectId: string, streamId: string) => void
   onOpenSession: (id: string) => void
   onClearUnread: (id: string) => void
-  onOpenNewSession: (projectId?: string) => void
+  onOpenNewSession: (projectId?: string, issue?: GitHubIssue) => void
+  /** New session was opened from this issue. */
+  newSessionIssue?: GitHubIssue | null
   onOpenAddProject: () => void
   onOpenEnvironmentPalette: () => void
   onQuickStartStream: (project: Project, prompt: string) => Promise<void>
@@ -94,7 +96,7 @@ type AppMainColumnProps = {
   onStartFactoryRun: (project: Project, opts?: { issueNumber?: number; issueTitle?: string; issueBody?: string }) => Promise<void>
   onFactoryRunAction: (runId: string, action: "step" | "approve" | "pause" | "steer", note?: string) => Promise<void>
   onUnarchiveSession: (id: string) => void
-  onStartNewSession: (input: { projectId: string | null; kind: "none" | "checkout" | "worktree"; repository: string; prompt: string; githubIssue?: GitHubIssue; engine?: "pi" | "claude-code" | "codex"; startFrom?: StartFrom; title?: string; attempts?: Array<"pi" | "claude-code" | "codex">; runOn?: "local" | "docker" | "wsl" | "ssh" | "boat" }) => Promise<void>
+  onStartNewSession: (input: { projectId: string | null; kind: "none" | "checkout" | "worktree"; repository: string; prompt: string; githubIssue?: GitHubIssue; engine?: "pi" | "claude-code" | "codex"; startFrom?: StartFrom; title?: string; attempts?: Array<"pi" | "claude-code" | "codex">; runOn?: "local" | "docker" | "wsl" | "ssh" | "boat"; blueprintId?: string }) => Promise<void>
   onDeleteSession: (sess: Conversation) => void
   onOpenExternalRequest: (tab: WorkspaceTab) => void
   onClearExternalOpenRequest: () => void
@@ -405,6 +407,7 @@ export function AppMainColumn(props: AppMainColumnProps) {
         </div>
       ) : newSessionOpen ? (
         <NewSessionView
+          initialIssue={props.newSessionIssue ?? null}
           projects={visibleProjects}
           selectedProjectId={selectedProjectId}
           onSelectProject={props.onSelectProject}
@@ -437,8 +440,10 @@ export function AppMainColumn(props: AppMainColumnProps) {
         />
       ) : (
         <SplitWorkspace
+          onStartFromIssue={issue => props.onOpenNewSession(activeSession.projectId ?? undefined, issue)}
           session={activeSession}
           projectName={projects.find(p => p.id === activeSession.projectId)?.name}
+          blueprintLocked={Boolean(projects.find(p => p.id === activeSession.projectId)?.blueprintLocked)}
           onOpenProject={activeSession.projectId ? () => props.onOpenProject(activeSession.projectId!, false) : undefined}
           onOpenProjectSettings={activeSession.projectId ? () => props.onOpenProject(activeSession.projectId!, true) : undefined}
           stateLabel={(() => {

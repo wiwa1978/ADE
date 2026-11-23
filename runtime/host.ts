@@ -27,6 +27,7 @@ import { ProcessManager } from "./shell-tools.ts";
 import type { ConversationTimelineSnapshot } from "./timeline.ts";
 import type { WorktreeManager } from "./worktrees.ts";
 import { createStartFrom } from "./start-from.ts";
+import { SessionBlueprints } from "./session-blueprints.ts";
 
 const startFromService = createStartFrom();
 
@@ -51,6 +52,8 @@ export class LocalAgentHost {
 	readonly mcp: McpManager;
 	readonly factory: CaptainCore;
 	readonly factoryRunner: LocalFactoryRunner;
+	/** Each session's way of working (Vibe or a blueprint) and its stage progress. */
+	readonly blueprints: SessionBlueprints;
 
 	constructor({ stateDirectory, environment = process.env, modelConfigFactory, githubIssueFetcher = fetch, worktreeManager }: {
 		stateDirectory: string;
@@ -68,6 +71,7 @@ export class LocalAgentHost {
 		this.browser = new BrowserManager(stateDirectory, this.events);
 		this.mcp = new McpManager(this.#db, this.events);
 
+		this.blueprints = new SessionBlueprints(this.#db, this.events);
 		this.#models = new ModelConfigService({ db: this.#db, stateDirectory, environment, modelConfigFactory });
 		this.#projects = new ProjectStore(this.#db, githubIssueFetcher);
 		this.#turns = new TurnStore(this.#db);
@@ -97,6 +101,7 @@ export class LocalAgentHost {
 			turns: this.#turns,
 			worktreeManager,
 			safeErrorMessage: (error) => this.safeErrorMessage(error),
+			blueprints: this.blueprints,
 		});
 		this.#turnExecutor = new TurnExecutor({
 			db: this.#db,
@@ -179,11 +184,17 @@ export class LocalAgentHost {
 	// --- Sessions, Tasks & Chat Threads ---
 
 	sessions() {
+		const tasks = this.#tasks.list();
+		const byId = new Map(tasks.map(task => [task.id, task]));
 		return this.#turns.listSessions(
-			this.#tasks.list(),
+			tasks,
 			this.#chats.list(),
 			(id) => this.#turnExecutor.isActiveOrRecovering(id),
-		);
+		).map(session => {
+			const row = byId.get(session.id);
+			const blueprint = row ? this.blueprints.summaryOf(row) : null;
+			return blueprint ? { ...session, blueprint } : session;
+		});
 	}
 
 	async createCodingTask(input: CreateCodingTaskInput | null | undefined, manager: WorktreeManager) {

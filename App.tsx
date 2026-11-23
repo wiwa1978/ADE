@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import type { Conversation, Screen, SessionArtifact, WorkspaceTab } from "./app-types"
+import type {
+  GitHubIssue, Conversation, Screen, SessionArtifact, WorkspaceTab } from "./app-types"
 import type { SettingsCategory } from "./SettingsView"
 import { useConnections } from "./useConnections"
 import { useSettings } from "./useSettings"
@@ -46,6 +47,8 @@ function AppInner() {
   const { settings, error: settingsError, resolved, update } = useSettings()
   const [screen, setScreen] = useState<Screen>(() => lastView.screen === "project" || lastView.screen === "factory" || lastView.screen === "work" ? lastView.screen : "inbox")
   const [newSessionOpen, setNewSessionOpen] = useState(false)
+  // Set when New session is opened from an issue (Issues panel): linked and filled in.
+  const [newSessionIssue, setNewSessionIssue] = useState<GitHubIssue | null>(null)
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
     try {
       const param = new URLSearchParams(window.location.search).get("session")
@@ -368,7 +371,7 @@ function AppInner() {
           onChangeRenameText={setRenameText}
           onCancelRename={() => setRenamingId(null)}
           onSubmitRename={async s => { setRenamingId(null); await sess.renameSession(s, renameText) }}
-          onOpenNewSession={projectId => { if (projectId) setSelectedProjectId(projectId); setNewSessionOpen(true); setScreen("work") }}
+          onOpenNewSession={(projectId?: string, issue?: GitHubIssue) => { if (projectId) setSelectedProjectId(projectId); setNewSessionIssue(issue ?? null); setNewSessionOpen(true); setScreen("work") }}
           onOpenCreateWorktree={() => setCreateWorktreeOpen(true)}
           onOpenCommandCenter={() => setCommandOpen(true)}
           onOpenInbox={() => setScreen("inbox")}
@@ -463,9 +466,10 @@ function AppInner() {
         onOpenStreamPane={proj.openStreamPane}
         onOpenSession={openSessionInWork}
         onClearUnread={sess.clearUnread}
-        onOpenNewSession={projectId => { if (projectId) setSelectedProjectId(projectId); setNewSessionOpen(true); setScreen("work") }}
+        onOpenNewSession={(projectId?: string, issue?: GitHubIssue) => { if (projectId) setSelectedProjectId(projectId); setNewSessionIssue(issue ?? null); setNewSessionOpen(true); setScreen("work") }}
         onOpenAddProject={() => setAddProjectOpen(true)}
         onOpenEnvironmentPalette={() => setEnvPaletteOpen(true)}
+        newSessionIssue={newSessionIssue}
         onQuickStartStream={sess.quickStartStream}
         onSendQuickMessage={sess.sendQuickStreamMessage}
         onStartFactoryRun={proj.startFactoryRunForProject}

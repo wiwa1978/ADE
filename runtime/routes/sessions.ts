@@ -17,13 +17,14 @@ import {
 import { restoreWorktree } from "../worktrees.ts";
 import type { RouteDeps } from "./context.ts";
 import { redactForCwd } from "../project-secrets.ts";
+import { mergeSubagentBranch, subagentChanges, subagentFileDiff } from "../subagent-work.ts";
 import { transcriptMarkdown, type TranscriptItem } from "../../packages/protocol/transcript.ts";
 import { RUN_TARGETS, type RunTarget } from "../execution-targets.ts";
 import { getWorkspaceGitSummary, listWorkspaceFilesFlat } from "../workspace-files.ts";
 
 export function registerSessionRoutes(
 	router: Router,
-	{ host, worktreeManager, sessionGit, cleanUpArchivedWorkspace, engines, inbox, viewSessions, prepareWorktree, sendToAgent, executionTargets, subagentKey, scheduler, usageWaiter }: RouteDeps,
+	{ host, worktreeManager, sessionGit, cleanUpArchivedWorkspace, engines, inbox, viewSessions, prepareWorktree, sendToAgent, executionTargets, subagentKey, scheduler, usageWaiter, usage }: RouteDeps,
 ): void {
 	router.get("/api/sessions", (ctx) => {
 		ctx.json(200, { sessions: viewSessions() });
@@ -219,6 +220,44 @@ export function registerSessionRoutes(
 			};
 		}) });
 	});
+
+	// The Agents view: what each agent cost and, for worktree subagents, what it changed on its branch.
+	router.get("/api/sessions/:id/agents/work", async (ctx) => {
+		const id = ctx.params.id;
+		const session = viewSessions().find(item => item.id === id);
+		if (!session) throw notFound("Session not found.");
+		const sessionBranch = session.workspace?.branch ?? null;
+		const agents = await host.featureAgents(id).catch(() => []);
+		const work = await Promise.all(agents.map(async agent => {
+			const totals = usage.conversationTotals(id, String(agent.id));
+			const changes = agent.mode === "worktree" && agent.workspacePath ? await subagentChanges(agent.workspacePath, sessionBranch).catch(() => null) : null;
+			return { id: String(agent.id), cost: totals?.cost ?? null, inputTokens: totals?.inputTokens ?? null, outputTokens: totals?.outputTokens ?? null, changes };
+		}));
+		const subagentCost = work.reduce((sum, item) => sum + (item.cost ?? 0), 0);
+		ctx.json(200, { lead: { cost: Math.max(0, usage.sessionCost(id) - subagentCost) }, agents: work });
+	});
+
+	router.get("/api/sessions/:id/agents/:agentId/diff", async (ctx) => {
+		const agent = (await host.featureAgents(ctx.params.id)).find(item => String(item.id) === ctx.params.agentId);
+		if (!agent?.workspacePath || agent.mode !== "worktree") throw notFound("That subagent has no branch of its own.");
+		const session = viewSessions().find(item => item.id === ctx.params.id);
+		ctx.json(200, { diff: await subagentFileDiff(agent.workspacePath, session?.workspace?.branch ?? null, ctx.url.searchParams.get("file") ?? "") });
+	});
+
+	// Bring a finished worktree subagent's branch into the session's branch.
+	router.post("/api/sessions/:id/agents/:agentId/merge", async (ctx) => {
+		const id = ctx.params.id;
+		const agent = (await host.featureAgents(id)).find(item => String(item.id) === ctx.params.agentId);
+		if (!agent?.workspacePath || agent.mode !== "worktree" || !agent.branch) throw notFound("That subagent has no branch of its own.");
+		if (agent.status === "running" || agent.status === "waiting") throw conflict("The subagent is still working. Wait until it's done, or stop it first.");
+		if (viewSessions().find(item => item.id === id)?.status === "working") throw conflict("The main agent is working in the session's branch. Wait until it stops.");
+		const workspace = host.getWorkspacePath(id);
+		if (!workspace) throw notFound("Session has no workspace.");
+		const result = await mergeSubagentBranch(workspace, agent.workspacePath, agent.branch, agent.name || "the subagent");
+		inbox.invalidate(id);
+		host.events?.emit?.("sessions.changed", { id, reason: "subagent-merged" }, id);
+		ctx.json(200, result);
+	}, { originError: "Use ADE to merge a subagent's work." });
 
 	router.post(
 		"/api/coding-tasks",

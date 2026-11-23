@@ -1,9 +1,11 @@
+import { Circle, Eye, GitMerge, GitPullRequest, Loader2, MessageCircle, ShieldQuestion, Stamp, TriangleAlert, XCircle, type LucideIcon } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { request } from "../api"
 
 /** Mirrors runtime/inbox.ts. One vocabulary for session status everywhere in the UI. */
 export type SessionState =
   | "working"
+  | "stage-approval"
   | "needs-approval"
   | "failed"
   | "checks-failing"
@@ -22,11 +24,28 @@ export type InboxEntry = {
   commitsAhead: number
   pullRequest: { number: number; url: string; state: "OPEN" | "CLOSED" | "MERGED"; isDraft: boolean; checksSummary: "none" | "pending" | "success" | "failure"; reviewDecision: string | null } | null
   updatedAt: number | null
+  /** The blueprint stage waiting for your approval, if any. */
+  stage?: string
+}
+
+/** Compact icon per state, for narrow places like the sidebar (the label is its tooltip). */
+export const sessionStateIcon: Record<SessionState, LucideIcon> = {
+  "working": Loader2,
+  "stage-approval": Stamp,
+  "needs-approval": ShieldQuestion,
+  "failed": XCircle,
+  "checks-failing": TriangleAlert,
+  "ready-to-review": Eye,
+  "pr-open": GitPullRequest,
+  "replied": MessageCircle,
+  "merged": GitMerge,
+  "idle": Circle,
 }
 
 /** Label, tone (dot color), and a one-line hint for each state. */
 export const sessionStateInfo: Record<SessionState, { label: string; tone: "running" | "waiting" | "failed" | "ok" | "review" | "merged" | "idle"; hint: string }> = {
   "working": { label: "Working", tone: "running", hint: "The agent is working." },
+  "stage-approval": { label: "Approve stage", tone: "waiting", hint: "A blueprint stage is ready for your review: approve it or ask for changes." },
   "needs-approval": { label: "Needs approval", tone: "waiting", hint: "A command is waiting for you to allow or deny it." },
   "failed": { label: "Failed", tone: "failed", hint: "The last turn ended with an error." },
   "checks-failing": { label: "Checks failing", tone: "failed", hint: "The pull request's checks are failing." },
@@ -69,7 +88,7 @@ export function useInbox(refreshKey: unknown, enabled = true) {
   }, [enabled, refreshKey])
 
   const markSeen = useCallback(async (sessionId: string) => {
-    setEntries(prev => prev[sessionId] ? { ...prev, [sessionId]: { ...prev[sessionId], needsYou: prev[sessionId].state === "needs-approval" || prev[sessionId].state === "checks-failing" } } : prev)
+    setEntries(prev => prev[sessionId] ? { ...prev, [sessionId]: { ...prev[sessionId], needsYou: prev[sessionId].state === "needs-approval" || prev[sessionId].state === "stage-approval" || prev[sessionId].state === "checks-failing" } } : prev)
     try {
       await request(`/api/sessions/${encodeURIComponent(sessionId)}/seen`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
     } catch {

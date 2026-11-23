@@ -6,11 +6,59 @@ import type { Router } from "../router.ts";
 import type { RouteDeps } from "./context.ts";
 import { readInstructions, searchWorkspaceFiles, writeInstructions } from "../agent-context.ts";
 import { harnessGuidance } from "../subagent-policy.ts";
+import { sessionBlueprintOptions, VIBE_BLUEPRINT_ID } from "../../packages/blueprints/index.ts";
+import { resolveSessionBlueprint } from "../session-blueprints.ts";
 
 export function registerAgentWorkflowRoutes(
 	router: Router,
-	{ host, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, usage, secrets, automations, automationRunner, integrations, executionTargets, subagentPolicies, limitGuard, usageWaiter, subagentKey, scheduler }: RouteDeps,
+	{ host, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, usage, secrets, automations, automationRunner, integrations, executionTargets, subagentPolicies, limitGuard, usageWaiter, subagentKey, scheduler, sendToAgent }: RouteDeps,
 ): void {
+	// --- Ways of working: Vibe or a blueprint, per project (default) and per session ---
+	router.get("/api/blueprints/session-options", (ctx) => {
+		ctx.json(200, { blueprints: sessionBlueprintOptions() });
+	});
+
+	router.get("/api/sessions/:id/stages", (ctx) => {
+		ctx.json(200, host.blueprints.view(ctx.params.id));
+	});
+
+	// Approve a gated stage, or send it back with feedback; the agent continues by itself.
+	router.post("/api/sessions/:id/stages/decision", async (ctx) => {
+		const body = await ctx.readBody() as { decision?: unknown; feedback?: unknown } | null;
+		if (body?.decision !== "approve" && body?.decision !== "request_changes") throw badRequest("Approve, or request changes.");
+		if (body.feedback != null && typeof body.feedback !== "string") throw badRequest("Feedback must be text.");
+		const id = ctx.params.id;
+		if (viewSessions().find(item => item.id === id)?.status === "working") throw conflict("The agent is still working. Wait until it stops, or stop it first.");
+		const message = host.blueprints.decide(id, body.decision, typeof body.feedback === "string" ? body.feedback : "");
+		// The decision is saved either way; the stage's instructions (and feedback) reach the agent with its next message.
+		let notice: string | null = null;
+		if (message) {
+			try {
+				await sendToAgent(id, message, { async: true });
+			} catch (error) {
+				notice = `Saved, but the agent couldn't start: ${error instanceof Error ? error.message : String(error)} Send it a message (for example “continue”) once that's fixed.`;
+			}
+		}
+		ctx.json(200, { ...host.blueprints.view(id), notice });
+	}, { originError: "Use ADE to approve stages." });
+
+	// Switch the way of working. A blueprint starts at its first stage, with the work so far as context.
+	router.put("/api/sessions/:id/blueprint", async (ctx) => {
+		const body = await ctx.readBody() as { blueprintId?: unknown } | null;
+		const id = ctx.params.id;
+		const session = viewSessions().find(item => item.id === id);
+		if (!session?.workspace) throw notFound("Session not found.");
+		if (session.status === "working") throw conflict("The agent is still working. Wait until it stops, or stop it first.");
+		const project = session.projectId ? host.projects().find(item => item?.id === session.projectId) ?? null : null;
+		const blueprintId = resolveSessionBlueprint(project, body?.blueprintId);
+		const record = host.blueprints.begin(id, blueprintId);
+		const view = host.blueprints.view(id);
+		if (record && session.messages.length) {
+			await sendToAgent(id, `From now on this session follows ${view.name}. Start with its first stage, "${view.stages[0]?.name}", and use what was done so far as context.`, { async: true });
+		}
+		ctx.json(200, { ...view, switchedTo: blueprintId === VIBE_BLUEPRINT_ID ? "vibe" : blueprintId });
+	}, { originError: "Use ADE to change the way of working." });
+
 	// --- Usage: tokens and cost per session, project and day ---
 	router.get("/api/usage", (ctx) => {
 		ctx.json(200, usage.report());

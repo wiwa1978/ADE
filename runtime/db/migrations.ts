@@ -209,6 +209,20 @@ export const HOST_MIGRATIONS: readonly SchemaMigration[] = [
 			ensureColumn(db, "coding_tasks", "attemptGroup", "TEXT");
 		},
 	},
+	{
+		version: 5,
+		name: "session_blueprints",
+		up(db) {
+			// Blueprints run inside sessions: each session has a way of working (Vibe = no stages) and
+			// its stage progress. Projects set the default and can lock it.
+			ensureColumn(db, "coding_tasks", "blueprintId", "TEXT");
+			ensureColumn(db, "coding_tasks", "blueprintRunJson", "TEXT");
+			ensureColumn(db, "projects", "blueprintLocked", "INTEGER NOT NULL DEFAULT 0");
+			// Sessions ignored the project blueprint until now, and "automated-factory" was only the
+			// default. Keep existing projects working as before: Vibe.
+			db.exec("UPDATE projects SET blueprintId='vibe' WHERE blueprintId IS NULL OR blueprintId='automated-factory'");
+		},
+	},
 ];
 
 export const LATEST_HOST_SCHEMA_VERSION = HOST_MIGRATIONS[HOST_MIGRATIONS.length - 1].version;

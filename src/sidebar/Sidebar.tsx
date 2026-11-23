@@ -1,10 +1,10 @@
 import { useState } from "react"
-import { Archive, ChevronDown, ChevronRight, Folder, FolderGit2, FolderPlus, GitBranch, Inbox, MessageCircle, MessageSquare, PanelLeft, Pin, Plus, Search, Server, Settings2, Workflow, X } from "lucide-react"
+import { Archive, ChevronDown, ChevronRight, Folder, FolderGit2, GitBranch, MessageCircle, MessageSquare, Pin, Plus, Server, Workflow, X } from "lucide-react"
 import type { Conversation } from "../../app-types"
 import type { FactoryRunDetail } from "../factory/types"
 import type { Project } from "../../ProjectsView"
-import { sessionStateInfo, type InboxEntry } from "../session-state"
-import { DEFAULT_KEYBINDINGS, formatShortcut, type KeybindingMap } from "../keybindings"
+import { sessionStateIcon, sessionStateInfo, type InboxEntry } from "../session-state"
+import type { KeybindingMap } from "../keybindings"
 import type { AddProjectSource } from "../projects/AddProjectWizard"
 import { ProjectsHeaderControls } from "./ProjectsHeaderControls"
 import { loadSidebarPrefs, saveSidebarPrefs, type SidebarPrefs } from "./sidebar-prefs"
@@ -72,6 +72,13 @@ function StateDot({ entry, session }: { entry?: InboxEntry; session: Conversatio
   return <span className={`ade-state-dot is-${info.tone}`} title={info.label} aria-label={info.label} />
 }
 
+/** The session's state as a small colored icon; the label is its tooltip and accessible name. */
+function StateIcon({ state }: { state: InboxEntry["state"] }) {
+  const info = sessionStateInfo[state]
+  const Icon = sessionStateIcon[state]
+  return <span className={`ade-row-icon is-${info.tone}`} role="img" aria-label={info.label} title={`${info.label} — ${info.hint}`}><Icon className="size-3.5" /></span>
+}
+
 function RowLabel({ session, props, unread }: { session: Conversation; props: SidebarProps; unread: boolean }) {
   if (props.renamingId === session.id) {
     return <input
@@ -114,7 +121,7 @@ function SessionRow({ session, props, child }: { session: Conversation; props: S
       {props.pinnedIds.includes(session.id) ? <Pin className="size-3 shrink-0 opacity-60" aria-label="Pinned" /> : null}
       <RowLabel session={session} props={props} unread={unread} />
       {pr ? <span className={`ade-row-tag is-${pr.state === "OPEN" ? (pr.checksSummary === "failure" ? "failed" : "ok") : pr.state === "MERGED" ? "merged" : "idle"}`}>#{pr.number}</span>
-        : showState ? <span className={`ade-row-tag is-${sessionStateInfo[entry.state].tone}`}>{sessionStateInfo[entry.state].label}</span> : null}
+        : showState ? <StateIcon state={entry.state} /> : null}
     </div>
   )
 }
@@ -123,10 +130,7 @@ export function Sidebar(props: SidebarProps) {
   const { selection } = props
   const [prefs, setPrefs] = useState<SidebarPrefs>(loadSidebarPrefs)
   const [filterText, setFilterText] = useState("")
-  const kb = props.keybindings ?? DEFAULT_KEYBINDINGS
-  const searchKbd = kb.commandCenter ? formatShortcut(kb.commandCenter) : ""
-  const addProjectKbd = kb.addProject ? formatShortcut(kb.addProject) : ""
-  const inboxKbd = kb.openInbox ? formatShortcut(kb.openInbox) : ""
+  // Search, Inbox, collapse and Settings live in the activity bar on the far left.
 
   const updatePrefs = (patch: Partial<SidebarPrefs>) => {
     setPrefs(prev => {
@@ -198,47 +202,9 @@ export function Sidebar(props: SidebarProps) {
           <div className="ade-brand-badge">A</div>
           <div className="ade-truncate"><div className="ade-brand-title">ADE</div></div>
         </div>
-        <button type="button" className="ade-icon-btn" onClick={props.onCollapse} title="Collapse sidebar" aria-label="Collapse sidebar">
-          <PanelLeft className="size-4" />
-        </button>
       </div>
 
       <div className="ade-sidebar-scroll">
-        <div className="ade-nav-list ade-nav-primary">
-          <div className="ade-sidebar-search-row">
-            <button
-              type="button"
-              className="ade-sidebar-search-box"
-              onClick={props.onSearch}
-              title={searchKbd ? `Search projects, sessions, and commands (${searchKbd})` : "Search projects, sessions, and commands"}
-              aria-label="Search"
-            >
-              <Search className="size-3.5 shrink-0 opacity-65" />
-              <span className="flex-1 text-left truncate opacity-70">Search…</span>
-              {searchKbd ? <kbd className="ade-nav-kbd">{searchKbd}</kbd> : null}
-            </button>
-            <button
-              type="button"
-              className="ade-sidebar-add-btn"
-              onClick={() => props.onAddProject("menu")}
-              title={addProjectKbd ? `Add project (${addProjectKbd})` : "Add project"}
-              aria-label="Add project"
-            >
-              <FolderPlus className="size-4" />
-            </button>
-          </div>
-          <button
-            type="button"
-            className={`ade-nav-row ${selection.kind === "inbox" ? "is-selected" : ""}`}
-            onClick={props.onOpenInbox}
-            title={inboxKbd ? `Inbox (${inboxKbd})` : "Inbox"}
-          >
-            <Inbox className="size-3.5 shrink-0 opacity-75" />
-            <span className="flex-1">Inbox</span>
-            {props.inboxCount > 0 ? <span className="ade-count-badge is-accent" aria-label={`${props.inboxCount} sessions need you`}>{props.inboxCount}</span> : null}
-          </button>
-        </div>
-
         <div>
           <ProjectsHeaderControls
             inboxCount={props.inboxCount}
@@ -461,10 +427,6 @@ export function Sidebar(props: SidebarProps) {
       </div>
 
       <div className="ade-sidebar-footer">
-        <button type="button" className={`ade-nav-row ${selection.kind === "settings" ? "is-selected" : ""}`} onClick={props.onOpenSettings}>
-          <Settings2 className="size-3.5 opacity-75" />
-          <span>Settings</span>
-        </button>
         <button type="button" className="ade-host-status w-full text-left cursor-pointer" onClick={props.onOpenEnvironments} title="Switch environment">
           <span className={`ade-state-dot is-${props.runtimeOnline ? "ok" : "waiting"}`} />
           <Server className="size-3 shrink-0" />
