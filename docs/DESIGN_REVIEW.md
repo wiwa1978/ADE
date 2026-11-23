@@ -273,7 +273,7 @@ Choose in New session → Run on, as a project default in Project settings → R
 | Target | Status | How it works |
 | --- | --- | --- |
 | This computer | ✅ | The default. |
-| Docker | ✅ Tested with a real container | A container per session; the worktree, the repository's Git metadata, ADE's worktree folder and the Claude Code/Codex sign-in folders are mounted at the same paths. Run gets a published port and `HOST=0.0.0.0`. Removed on archive. |
+| Docker | ✅ Tested with a real container, including a real Codex turn (installed on first use, signed in through the mounted `~/.codex`) | A container per session; the worktree, the repository's Git metadata, ADE's worktree folder and the Claude Code/Codex sign-in folders are mounted at the same paths. Run gets a published port and `HOST=0.0.0.0`. Removed on archive. |
 | SSH host | ✅ Tested with real rsync and a stand-in ssh | The worktree is copied with rsync before each command and back after it (ignored files like node_modules stay put; background commands never undo local edits). Plain `git` commands run on this computer. Run forwards its port. Needs an SSH key (no password prompt) and rsync on the host. |
 | Boat.dev | ✅ Built to Boat's API docs, not tried with a real account | Settings → Integrations → Boat.dev API key. ADE creates a VM per session, authorizes its own SSH key, pins the VM's host key, resumes the VM when Boat has stopped it, and deletes it on archive. Then it works like an SSH host. |
 | WSL2 | ✅ Built, not tried on Windows | Only offered on Windows. Commands run with `wsl.exe` in the chosen distribution; Windows paths become `/mnt/<drive>/…` and secrets pass through `WSLENV`. |
