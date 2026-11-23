@@ -272,16 +272,16 @@ export function WorkspaceHeaderBar({
           </button>
         ) : null}
 
-        {artifacts.length > 0 ? (
+        {artifacts.length > 0 || hasWorkspace ? (
           <button
             type="button"
             className={`ade-header-tool-btn ${activeBesideTab?.kind === "artifact" ? "is-active" : ""}`}
             onClick={onOpenArtifact}
-            title="Artifacts & Plans"
+            title="Show session artefacts (files, plans, images)"
           >
             <FileText className="size-3.5" />
-            <span>Artifacts</span>
-            <span className="ade-count-badge">{artifacts.length}</span>
+            <span>Artefacts</span>
+            {artifacts.length > 0 ? <span className="ade-count-badge">{artifacts.length}</span> : null}
           </button>
         ) : null}
 

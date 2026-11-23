@@ -22,6 +22,7 @@ import {
 } from "lucide-react"
 import { MessageContent } from "../../MessageContent"
 import { WorkspaceEmptyHero } from "../workspace/WorkspaceEmptyHero"
+import { extractToolCallFilePaths, isFileToolName } from "../panels/file-preview-utils"
 import type {
   ConversationMessage,
   ConversationTimelineSnapshot,
@@ -34,6 +35,7 @@ import type {
 function ToolCallCard({
   tool,
   subagents,
+  workspacePath,
   onOpenFile,
   onOpenSubagent,
   onOpenBrowser,
@@ -41,6 +43,7 @@ function ToolCallCard({
 }: {
   tool: TimelineToolCall
   subagents: SubagentInfo[]
+  workspacePath?: string | null
   onOpenFile?: (path: string) => void
   onOpenSubagent?: (subagentId: string) => void
   onOpenBrowser?: (url?: string) => void
@@ -53,7 +56,7 @@ function ToolCallCard({
   const details = (tool.details && typeof tool.details === "object" ? tool.details : {}) as Record<string, unknown>
   const isSubagentTool = tool.name === "spawn_subagent" || tool.name === "delegate"
   const isBrowserTool = tool.name.startsWith("browser_")
-  const isFileTool = ["read", "write", "edit", "list_files"].includes(tool.name)
+  const isFileTool = isFileToolName(tool.name)
   const isSearchTool = tool.name === "grep_search" || tool.name === "find_files"
   const isShellTool = tool.name === "run_command" || tool.name === "manage_process"
   const isArtifactTool = tool.name === "write_artifact"
@@ -61,7 +64,8 @@ function ToolCallCard({
   const subagentId = typeof details.conversationId === "string" ? details.conversationId : undefined
   const matchedSubagent = subagentId ? subagents.find(s => s.id === subagentId) : undefined
 
-  const filePath = typeof tool.arguments.path === "string" ? tool.arguments.path : undefined
+  const filePaths = extractToolCallFilePaths(tool, workspacePath)
+  const filePath = filePaths[0]
   const commandText = typeof tool.arguments.command === "string" ? tool.arguments.command : undefined
   const queryText = typeof tool.arguments.query === "string" ? tool.arguments.query : (typeof tool.arguments.pattern === "string" ? tool.arguments.pattern : undefined)
   const urlText = typeof tool.arguments.url === "string" ? tool.arguments.url : (typeof details.url === "string" ? details.url : undefined)
@@ -139,7 +143,7 @@ function ToolCallCard({
           <details open={open} onToggle={e => setOpen((e.target as HTMLDetailsElement).open)} className="ade-subagent-inline-report">
             <summary>{open ? "Hide report" : "View report"}</summary>
             <div className="ade-tool-output-md">
-              <MessageContent content={tool.output} />
+              <MessageContent content={tool.output} onOpenFile={onOpenFile} workspacePath={workspacePath} />
             </div>
           </details>
         ) : null}
@@ -154,8 +158,12 @@ function ToolCallCard({
         <span className="ade-tool-icon">{icon}</span>
         <span className="ade-tool-label" title={label}>{label}</span>
         <div className="ade-tool-head-right" onClick={e => e.stopPropagation()}>
-          {isFileTool && filePath && onOpenFile ? (
-            <button type="button" className="ade-chip-btn" onClick={() => onOpenFile(filePath)}>Open file</button>
+          {filePaths.length > 0 && onOpenFile ? (
+            filePaths.slice(0, 2).map(fp => (
+              <button key={fp} type="button" className="ade-chip-btn" onClick={() => onOpenFile(fp)} title={`View ${fp} in right sidebar`}>
+                {filePaths.length === 1 ? "Open file" : fp.split("/").pop() || fp}
+              </button>
+            ))
           ) : null}
           {isBrowserTool && onOpenBrowser ? (
             <button type="button" className="ade-chip-btn" onClick={() => onOpenBrowser(urlText)}>Open browser</button>
@@ -273,6 +281,7 @@ export function TimelineView({
   approvals,
   subagents,
   busy,
+  workspacePath,
   emptyTitle,
   emptySubtitle,
   onResolveApproval,
@@ -288,6 +297,7 @@ export function TimelineView({
   approvals: PendingApproval[]
   subagents: SubagentInfo[]
   busy: boolean
+  workspacePath?: string | null
   emptyTitle?: string
   emptySubtitle?: string
   onResolveApproval?: (id: string, decision: { allow: boolean; alwaysAllow?: boolean; prefix?: string; reason?: string }) => Promise<void>
@@ -367,6 +377,7 @@ export function TimelineView({
                     key={tc.callId}
                     tool={tc}
                     subagents={subagents}
+                    workspacePath={workspacePath}
                     onOpenFile={onOpenFile}
                     onOpenSubagent={onOpenSubagent}
                     onOpenBrowser={onOpenBrowser}
@@ -377,7 +388,7 @@ export function TimelineView({
             ) : null}
             {item.text ? (
               <div className="ade-msg-markdown">
-                <MessageContent content={item.text} />
+                <MessageContent content={item.text} onOpenFile={onOpenFile} workspacePath={workspacePath} />
               </div>
             ) : null}
             {localUrls.length > 0 && (onOpenBrowser || onOpenExternalBrowser) ? (

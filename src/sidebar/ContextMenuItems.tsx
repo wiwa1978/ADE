@@ -38,6 +38,7 @@ export function ProjectContextMenuItems({
   onClose,
   onTogglePinProject,
   onNewProjectStream,
+  onShowProjectArtifacts,
   onOpenExternalApp,
   onOpenProjectSettings,
   onToggleArchiveProject,
@@ -53,6 +54,7 @@ export function ProjectContextMenuItems({
   onClose: () => void
   onTogglePinProject: (project: Project) => void
   onNewProjectStream: (project: Project) => void
+  onShowProjectArtifacts: (project: Project) => void
   onOpenExternalApp: (app: "cursor" | "vscode" | "windsurf" | "finder", path?: string | null) => void
   onOpenProjectSettings: (project: Project) => void
   onToggleArchiveProject: (project: Project) => void
@@ -63,6 +65,10 @@ export function ProjectContextMenuItems({
       <button type="button" className="ade-ctx-item" role="menuitem" onMouseEnter={() => onSetSubmenu(null)} onClick={() => { onNewProjectStream(project); onClose() }}>
         <span>New session</span>
         <span className="ade-ctx-shortcut">N</span>
+      </button>
+
+      <button type="button" className="ade-ctx-item" role="menuitem" onMouseEnter={() => onSetSubmenu(null)} onClick={() => { onShowProjectArtifacts(project); onClose() }}>
+        <span>Show all project artefacts</span>
       </button>
 
       <button type="button" className="ade-ctx-item" role="menuitem" onMouseEnter={() => onSetSubmenu(null)} onClick={() => { onTogglePinProject(project); onClose() }}>
@@ -128,6 +134,7 @@ export function SessionContextMenuItems({
   onContinueInCloud,
   onTogglePin,
   onToggleUnread,
+  onShowSessionArtifacts,
   onRenameSession,
   onStopSession,
   onDeleteSession,
@@ -147,6 +154,7 @@ export function SessionContextMenuItems({
   onContinueInCloud: (session: Conversation) => void
   onTogglePin: (id: string) => void
   onToggleUnread: (id: string) => void
+  onShowSessionArtifacts: (session: Conversation) => void
   onRenameSession: (session: Conversation) => void
   onStopSession: (session: Conversation) => void
   onDeleteSession: (session: Conversation) => void
@@ -191,6 +199,16 @@ export function SessionContextMenuItems({
         onClick={() => { onToggleUnread(sess.id); onClose() }}
       >
         <span>{unread ? "Mark Read" : "Mark Unread"}</span>
+      </button>
+
+      <button
+        type="button"
+        className="ade-ctx-item"
+        role="menuitem"
+        onMouseEnter={() => onSetSubmenu(null)}
+        onClick={() => { onShowSessionArtifacts(sess); onClose() }}
+      >
+        <span>Show all session artefacts</span>
       </button>
 
       <div className="ade-ctx-divider" />

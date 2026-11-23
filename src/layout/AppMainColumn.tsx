@@ -1,8 +1,9 @@
 import type { RefObject } from "react"
 import { InboxView } from "../inbox/InboxView"
 import { sessionStateInfo, type InboxEntry } from "../session-state"
-import { FolderTree, PanelRight, Settings2, Sparkles } from "lucide-react"
+import { FolderTree, Layers, PanelRight, Settings2, Sparkles } from "lucide-react"
 import { FilesPanel } from "../panels/FilesPanel"
+import { ArtefactsBrowserPanel } from "../panels/ArtefactsBrowserPanel"
 import { request } from "../../api"
 import type { Conversation, EnvironmentDirectory, GitHubIssue, StartFrom, ProviderCatalogEntry, RuntimeHealth, Screen, SessionArtifact, WorkspaceTab } from "../../app-types"
 import { ProjectSettings, ProjectsView, type Project, type ProjectActivity, type ProjectInput } from "../../ProjectsView"
@@ -47,7 +48,7 @@ type AppMainColumnProps = {
   projectDrafts: Record<string, ProjectInput>
   projectActivity: ProjectActivity | null
   projectActivityError: string
-  projectRightPane: "files" | "settings" | null
+  projectRightPane: "files" | "artifacts" | "settings" | null
   factoryRuns: FactoryRunDetail[]
   openStreamIdsByProject: Record<string, string[]>
   focusedStreamId: string | null
@@ -76,7 +77,7 @@ type AppMainColumnProps = {
   onProjectSaved: (saved: Project) => void
   onSaveProject: (input: ProjectInput, existingId?: string) => Promise<Project>
   onSetProjectDraft: (projectId: string, draftInput: ProjectInput) => void
-  onSetProjectRightPane: (pane: "files" | "settings" | null) => void
+  onSetProjectRightPane: (pane: "files" | "artifacts" | "settings" | null) => void
   onToggleProjectFiles: () => void
   onToggleProjectSettings: () => void
   onCloseProjectSettings: () => void
@@ -307,18 +308,28 @@ export function AppMainColumn(props: AppMainColumnProps) {
           <aside
             id="project-files-panel"
             className="inspector ade-project-files-inspector"
-            aria-label="Project files"
-            hidden={projectRightPane !== "files"}
+            aria-label={projectRightPane === "artifacts" ? "Project artefacts" : "Project files"}
+            hidden={projectRightPane !== "files" && projectRightPane !== "artifacts"}
           >
             <div className="ade-project-right-head">
               <div className="ade-project-right-tabs" role="tablist" aria-label="Right panel view">
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={true}
-                  className="ade-project-right-tab is-active"
+                  aria-selected={projectRightPane === "files"}
+                  className={`ade-project-right-tab ${projectRightPane === "files" ? "is-active" : ""}`}
+                  onClick={() => props.onSetProjectRightPane("files")}
                 >
                   <FolderTree className="size-3.5" /> Files
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={projectRightPane === "artifacts"}
+                  className={`ade-project-right-tab ${projectRightPane === "artifacts" ? "is-active" : ""}`}
+                  onClick={() => props.onSetProjectRightPane("artifacts")}
+                >
+                  <Layers className="size-3.5" /> Artefacts
                 </button>
                 <button
                   type="button"
@@ -333,19 +344,29 @@ export function AppMainColumn(props: AppMainColumnProps) {
               <button
                 type="button"
                 className="ade-icon-btn"
-                aria-label="Close project files"
+                aria-label="Close right panel"
                 title="Close panel"
                 onClick={props.onCloseProjectSettings}
               >
                 <PanelRight className="size-4" />
               </button>
             </div>
-            <FilesPanel
-              key={selectedProject.id}
-              projectId={selectedProject.id}
-              workspacePath={selectedProject.repository ?? null}
-              onOpenSettings={() => props.onSetProjectRightPane("settings")}
-            />
+            {projectRightPane === "artifacts" ? (
+              <ArtefactsBrowserPanel
+                key={`proj-artefacts:${selectedProject.id}`}
+                scope="project"
+                projectId={selectedProject.id}
+                workspacePath={selectedProject.repository ?? null}
+                onOpenSession={id => { props.onClearUnread(id); props.onOpenSession(id) }}
+              />
+            ) : (
+              <FilesPanel
+                key={selectedProject.id}
+                projectId={selectedProject.id}
+                workspacePath={selectedProject.repository ?? null}
+                onOpenSettings={() => props.onSetProjectRightPane("settings")}
+              />
+            )}
           </aside>
           <ProjectSettings
             key={selectedProject.id}

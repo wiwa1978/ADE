@@ -21,10 +21,12 @@ export function SidebarContextMenu({
   onContinueInCloud,
   onTogglePin,
   onToggleUnread,
+  onShowSessionArtifacts,
   onRenameSession,
   onStopSession,
   onDeleteSession,
   onNewProjectStream,
+  onShowProjectArtifacts,
   onOpenProjectSettings,
   onToggleArchiveProject,
   onDeleteProject,
@@ -42,10 +44,12 @@ export function SidebarContextMenu({
   onContinueInCloud: (session: Conversation) => void
   onTogglePin: (id: string) => void
   onToggleUnread: (id: string) => void
+  onShowSessionArtifacts: (session: Conversation) => void
   onRenameSession: (session: Conversation) => void
   onStopSession: (session: Conversation) => void
   onDeleteSession: (session: Conversation) => void
   onNewProjectStream: (project: Project) => void
+  onShowProjectArtifacts: (project: Project) => void
   onOpenProjectSettings: (project: Project) => void
   onToggleArchiveProject: (project: Project) => void
   onDeleteProject: (project: Project) => void
@@ -146,6 +150,7 @@ export function SidebarContextMenu({
           onClose={onClose}
           onTogglePinProject={p => onTogglePin(`project:${p.id}`)}
           onNewProjectStream={onNewProjectStream}
+          onShowProjectArtifacts={onShowProjectArtifacts}
           onOpenExternalApp={onOpenExternalApp}
           onOpenProjectSettings={onOpenProjectSettings}
           onToggleArchiveProject={onToggleArchiveProject}
@@ -168,6 +173,7 @@ export function SidebarContextMenu({
           onContinueInCloud={onContinueInCloud}
           onTogglePin={onTogglePin}
           onToggleUnread={onToggleUnread}
+          onShowSessionArtifacts={onShowSessionArtifacts}
           onRenameSession={onRenameSession}
           onStopSession={onStopSession}
           onDeleteSession={onDeleteSession}

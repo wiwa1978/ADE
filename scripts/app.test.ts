@@ -214,7 +214,7 @@ beforeEach(() => {
         busy: false,
         items: [
           { id: "u1", kind: "user", content: "Build the split-pane ADE", createdAt: Date.now() },
-          { id: "a1", kind: "assistant", thinking: "Planning the architecture", text: "Server running at http://localhost:1420", toolCalls: [], createdAt: Date.now() },
+          { id: "a1", kind: "assistant", thinking: "Planning the architecture", text: "Server running at http://localhost:1420\n\nCreated [poem.txt](poem.txt) for review.", toolCalls: [], createdAt: Date.now() },
         ],
         liveTools: [],
       }
@@ -229,8 +229,26 @@ beforeEach(() => {
       payload = { processes: [] }
     } else if (url.startsWith("/api/workspace/git")) {
       payload = { isGitRepo: true, branch: "ade/task-1", ahead: 0, behind: 0, additions: 42, deletions: 7, files: [{ path: "App.tsx", status: "modified", staged: false, unstaged: true, additions: 42, deletions: 7 }] }
+    } else if (url.startsWith("/api/workspace/file") && method === "GET") {
+      const parsed = new URL(url, "http://127.0.0.1")
+      const p = parsed.searchParams.get("path") ?? ""
+      if (p.endsWith(".jpg")) {
+        payload = { path: p, content: "", language: "jpg", size: 4096, binary: true, mimeType: "image/jpeg" }
+      } else if (p.endsWith(".md")) {
+        payload = { path: p, content: "# Notes\n\nMarkdown **preview** works.", language: "markdown", size: 36, binary: false, mimeType: "text/markdown" }
+      } else if (p.endsWith(".py")) {
+        payload = { path: p, content: "def greet(name):\n    return f'hi {name}'\n", language: "python", size: 42, binary: false, mimeType: "text/x-python" }
+      } else {
+        payload = { path: p, content: "Two branches reach into the sky,\nWhere quiet autumn breezes sigh.\n", language: "text", size: 68, binary: false, mimeType: "text/plain" }
+      }
     } else if (url.includes("/artifacts") && method === "GET") {
-      payload = { artifacts: artifactRecords }
+      const mockFiles = [
+        { path: "poem.txt", name: "poem.txt", ext: "txt", size: 68, modifiedAt: Date.now(), mimeType: "text/plain", gitStatus: "untracked" },
+        { path: "script.py", name: "script.py", ext: "py", size: 42, modifiedAt: Date.now() - 10, mimeType: "text/x-python", gitStatus: "modified" },
+        { path: "notes.md", name: "notes.md", ext: "md", size: 36, modifiedAt: Date.now() - 20, mimeType: "text/markdown", gitStatus: null },
+        { path: "assets/chart.jpg", name: "chart.jpg", ext: "jpg", size: 4096, modifiedAt: Date.now() - 30, mimeType: "image/jpeg", gitStatus: "untracked" },
+      ]
+      payload = { artifacts: artifactRecords, files: mockFiles }
     } else if (url.includes("/artifacts/") && url.endsWith("/review")) {
       artifactRecords = artifactRecords.map(a => ({ ...a, status: body?.decision }))
       payload = { artifact: artifactRecords[0] }
@@ -569,4 +587,73 @@ test("Projects header exposes Filters popover (Show search), Add project quick m
   assert.ok(wtDialog, "Expected Create worktree modal dialog")
   assert.match(wtDialog.textContent ?? "", /Create worktree/)
   assert.match(wtDialog.textContent ?? "", /Create more/)
+})
+
+test("Right-sidebar artefacts viewer previews txt/py/md/jpg, chat file links open in sidebar, and project/session context menus show all artefacts", async () => {
+  projectRecords.push({ id: "proj-1", name: "Alpha Project", githubUrl: null, repository: "/tmp/alpha" })
+  sessionRecords[0] = { ...sessionRecords[0], projectId: "proj-1" }
+  browser.localStorage.setItem("ade.last-view", JSON.stringify({ screen: "work", activeSessionId: "task-1", expandedProjects: ["proj-1"] }))
+  await act(async () => root.render(React.createElement(App)))
+
+  // 1. Clicking inline file link `poem.txt` in chat opens RichFilePreview in right sidebar
+  const poemLink = [...container.querySelectorAll("a.ade-inline-file-link")].find(el => el.textContent?.includes("poem.txt"))
+  assert.ok(poemLink, "Expected clickable inline file link poem.txt in timeline")
+  await act(async () => { (poemLink as HTMLElement).click() })
+  assert.match(container.querySelector(".ade-pane-beside")?.textContent ?? "", /Two branches reach into the sky/)
+
+  // 2. Right-click session -> Show all session artefacts -> preview jpg, md, py in right sidebar
+  const sessionRow = [...container.querySelectorAll(".ade-sidebar button, .ade-sidebar [role='button']")].find(el => el.textContent?.includes("Build split-pane ADE"))
+  assert.ok(sessionRow, "Expected Build split-pane ADE session in sidebar")
+  await act(async () => {
+    sessionRow.dispatchEvent(new browser.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 80, clientY: 160 }) as unknown as Event)
+  })
+  const showSessionArtItem = [...container.querySelectorAll('[role="menuitem"]')].find(el => el.textContent?.includes("Show all session artefacts"))
+  assert.ok(showSessionArtItem, "Expected Show all session artefacts in session context menu")
+  await act(async () => { (showSessionArtItem as HTMLElement).click() })
+
+  const beside = container.querySelector(".ade-pane-beside")
+  assert.ok(beside, "Expected beside right sidebar to open")
+  assert.match(beside.textContent ?? "", /poem\.txt/)
+  assert.match(beside.textContent ?? "", /script\.py/)
+  assert.match(beside.textContent ?? "", /notes\.md/)
+  assert.match(beside.textContent ?? "", /chart\.jpg/)
+
+  // Preview jpg image
+  const jpgRow = [...beside.querySelectorAll(".ade-artefact-row")].find(el => el.textContent?.includes("chart.jpg"))
+  assert.ok(jpgRow, "Expected chart.jpg row")
+  await act(async () => { (jpgRow as HTMLElement).click() })
+  const img = beside.querySelector("img.ade-image-preview") as HTMLImageElement | null
+  assert.ok(img, "Expected image preview element for chart.jpg")
+  assert.match(img.getAttribute("src") ?? "", /\/api\/workspace\/raw\?.*chart\.jpg/)
+
+  // Back to list -> preview Markdown (.md)
+  await click("All artefacts")
+  const mdRow = [...beside.querySelectorAll(".ade-artefact-row")].find(el => el.textContent?.includes("notes.md"))
+  assert.ok(mdRow, "Expected notes.md row")
+  await act(async () => { (mdRow as HTMLElement).click() })
+  assert.match(beside.textContent ?? "", /Markdown preview works/)
+  assert.ok(beside.querySelector("strong"), "Expected rendered Markdown bold element")
+
+  // Back to list -> preview Python (.py)
+  await click("All artefacts")
+  const pyRow = [...beside.querySelectorAll(".ade-artefact-row")].find(el => el.textContent?.includes("script.py"))
+  assert.ok(pyRow, "Expected script.py row")
+  await act(async () => { (pyRow as HTMLElement).click() })
+  assert.match(beside.textContent ?? "", /def greet/)
+
+  // 3. Right-click project -> Show all project artefacts -> opens project right sidebar Artefacts tab
+  const projRow = [...container.querySelectorAll('.ade-sidebar [role="button"]')].find(el => el.textContent?.includes("Alpha Project"))
+  assert.ok(projRow, "Expected Alpha Project in sidebar")
+  await act(async () => {
+    projRow.dispatchEvent(new browser.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 80, clientY: 160 }) as unknown as Event)
+  })
+  const showProjArtItem = [...container.querySelectorAll('[role="menuitem"]')].find(el => el.textContent?.includes("Show all project artefacts"))
+  assert.ok(showProjArtItem, "Expected Show all project artefacts in project context menu")
+  await act(async () => { (showProjArtItem as HTMLElement).click() })
+
+  const projRightPanel = container.querySelector('#project-files-panel[aria-label="Project artefacts"]')
+  assert.ok(projRightPanel && !projRightPanel.hasAttribute("hidden"), "Expected Project artefacts right sidebar to be visible")
+  assert.match(projRightPanel.textContent ?? "", /poem\.txt/)
+  assert.match(projRightPanel.textContent ?? "", /chart\.jpg/)
+  assert.ok(requests.some(r => r.url === "/api/projects/proj-1/artifacts"), "Expected GET /api/projects/proj-1/artifacts")
 })

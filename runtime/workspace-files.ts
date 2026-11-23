@@ -12,6 +12,164 @@ export type { GitFileChange, WorkspaceEntry, WorkspaceGitSummary };
 const execFileAsync = promisify(execFile);
 
 const SKIP_EXPLORER = new Set([".git", "node_modules"]);
+const SKIP_ARTEFACT_WALK = new Set([
+	".git",
+	"node_modules",
+	"dist",
+	"build",
+	".next",
+	".nuxt",
+	"__pycache__",
+	".venv",
+	"venv",
+	".cache",
+	"coverage",
+	".claude",
+	"target",
+]);
+
+const MIME_BY_EXT: Record<string, string> = {
+	jpg: "image/jpeg",
+	jpeg: "image/jpeg",
+	png: "image/png",
+	gif: "image/gif",
+	webp: "image/webp",
+	bmp: "image/bmp",
+	ico: "image/x-icon",
+	avif: "image/avif",
+	svg: "image/svg+xml",
+	pdf: "application/pdf",
+	html: "text/html; charset=utf-8",
+	htm: "text/html; charset=utf-8",
+	md: "text/markdown; charset=utf-8",
+	mdx: "text/markdown; charset=utf-8",
+	markdown: "text/markdown; charset=utf-8",
+	txt: "text/plain; charset=utf-8",
+	log: "text/plain; charset=utf-8",
+	csv: "text/csv; charset=utf-8",
+	json: "application/json; charset=utf-8",
+	xml: "application/xml; charset=utf-8",
+	py: "text/x-python; charset=utf-8",
+	ts: "text/typescript; charset=utf-8",
+	tsx: "text/typescript; charset=utf-8",
+	js: "text/javascript; charset=utf-8",
+	jsx: "text/javascript; charset=utf-8",
+	mjs: "text/javascript; charset=utf-8",
+	cjs: "text/javascript; charset=utf-8",
+	css: "text/css; charset=utf-8",
+	scss: "text/css; charset=utf-8",
+	yml: "text/yaml; charset=utf-8",
+	yaml: "text/yaml; charset=utf-8",
+	sh: "text/x-shellscript; charset=utf-8",
+	zsh: "text/x-shellscript; charset=utf-8",
+	bash: "text/x-shellscript; charset=utf-8",
+	sql: "text/x-sql; charset=utf-8",
+	rs: "text/x-rust; charset=utf-8",
+	go: "text/x-go; charset=utf-8",
+};
+
+const LANG_BY_EXT: Record<string, string> = {
+	ts: "typescript",
+	tsx: "tsx",
+	js: "javascript",
+	jsx: "jsx",
+	mjs: "javascript",
+	cjs: "javascript",
+	json: "json",
+	css: "css",
+	scss: "scss",
+	less: "less",
+	html: "html",
+	htm: "html",
+	xml: "xml",
+	svg: "xml",
+	md: "markdown",
+	mdx: "markdown",
+	markdown: "markdown",
+	py: "python",
+	rs: "rust",
+	go: "go",
+	java: "java",
+	kt: "kotlin",
+	c: "c",
+	h: "c",
+	cpp: "cpp",
+	hpp: "cpp",
+	rb: "ruby",
+	php: "php",
+	swift: "swift",
+	sh: "bash",
+	zsh: "bash",
+	bash: "bash",
+	yml: "yaml",
+	yaml: "yaml",
+	toml: "toml",
+	sql: "sql",
+	csv: "csv",
+	ini: "ini",
+	env: "bash",
+	txt: "text",
+};
+
+export function detectMimeType(relPath: string): string {
+	const ext = extname(relPath).slice(1).toLowerCase();
+	return MIME_BY_EXT[ext] ?? "application/octet-stream";
+}
+
+export type WorkspaceFlatFile = {
+	path: string;
+	name: string;
+	ext: string;
+	size: number;
+	modifiedAt: number;
+	mimeType: string;
+};
+
+export function listWorkspaceFilesFlat(root: string, maxFiles = 300): WorkspaceFlatFile[] {
+	const results: WorkspaceFlatFile[] = [];
+	const queue: string[] = [root];
+	let visitedDirs = 0;
+
+	while (queue.length > 0 && visitedDirs < 600 && results.length < maxFiles * 2) {
+		const dir = queue.shift()!;
+		visitedDirs++;
+		let entries;
+		try {
+			entries = readdirSync(dir, { withFileTypes: true });
+		} catch {
+			continue;
+		}
+		for (const entry of entries) {
+			if (entry.isSymbolicLink()) continue;
+			if (entry.isDirectory()) {
+				if (SKIP_ARTEFACT_WALK.has(entry.name)) continue;
+				queue.push(join(dir, entry.name));
+				continue;
+			}
+			if (!entry.isFile()) continue;
+			const full = join(dir, entry.name);
+			let stat;
+			try {
+				stat = statSync(full);
+			} catch {
+				continue;
+			}
+			const rel = relative(root, full).replace(/\\/g, "/");
+			const ext = extname(entry.name).slice(1).toLowerCase();
+			results.push({
+				path: rel,
+				name: entry.name,
+				ext,
+				size: stat.size,
+				modifiedAt: Math.round(stat.mtimeMs),
+				mimeType: detectMimeType(rel),
+			});
+		}
+	}
+
+	results.sort((a, b) => b.modifiedAt - a.modifiedAt || a.path.localeCompare(b.path));
+	return results.slice(0, maxFiles);
+}
 
 export function listWorkspaceDirectory(root: string, relPath = "."): WorkspaceEntry[] {
 	const target = relPath === "." || !relPath ? root : workspacePath(root, relPath, { mustExist: true });
@@ -44,11 +202,26 @@ export function listWorkspaceDirectory(root: string, relPath = "."): WorkspaceEn
 	});
 }
 
-export function readWorkspaceFile(root: string, relPath: string): { path: string; content: string; language: string; size: number; binary: boolean } {
+export function readWorkspaceFile(root: string, relPath: string): { path: string; content: string; language: string; size: number; binary: boolean; mimeType: string } {
 	const full = workspacePath(root, relPath, { mustExist: true });
 	const stat = lstatSync(full);
 	if (!stat.isFile()) throw badRequest("Path is not a file.");
-	if (stat.size > 2_000_000) throw payloadTooLarge("File is too large to open in the editor (>2MB).");
+	const mimeType = detectMimeType(relPath);
+	const isPreviewableBinary = mimeType.startsWith("image/") || mimeType === "application/pdf";
+	const maxSize = isPreviewableBinary ? 15_000_000 : 2_000_000;
+	if (stat.size > maxSize) throw payloadTooLarge(`File is too large to open (${isPreviewableBinary ? ">15MB" : ">2MB"}).`);
+	const ext = extname(relPath).slice(1).toLowerCase();
+	const isSvg = ext === "svg";
+	if (isPreviewableBinary && !isSvg) {
+		return {
+			path: relPath.replace(/\\/g, "/"),
+			content: "",
+			language: ext || "binary",
+			size: stat.size,
+			binary: true,
+			mimeType,
+		};
+	}
 	const buf = readFileSync(full);
 	let binary = false;
 	for (let i = 0; i < Math.min(buf.length, 4096); i++) {
@@ -57,18 +230,27 @@ export function readWorkspaceFile(root: string, relPath: string): { path: string
 			break;
 		}
 	}
-	const ext = extname(relPath).slice(1).toLowerCase();
-	const langMap: Record<string, string> = {
-		ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", mjs: "javascript",
-		json: "json", css: "css", html: "html", md: "markdown", py: "python",
-		rs: "rust", go: "go", sh: "bash", zsh: "bash", yml: "yaml", yaml: "yaml", toml: "toml", sql: "sql",
-	};
 	return {
 		path: relPath.replace(/\\/g, "/"),
 		content: binary ? "" : buf.toString("utf8"),
-		language: langMap[ext] ?? "text",
+		language: LANG_BY_EXT[ext] ?? "text",
 		size: stat.size,
 		binary,
+		mimeType,
+	};
+}
+
+export function readWorkspaceFileRaw(root: string, relPath: string): { path: string; buffer: Buffer; mimeType: string; size: number } {
+	const full = workspacePath(root, relPath, { mustExist: true });
+	const stat = lstatSync(full);
+	if (!stat.isFile()) throw badRequest("Path is not a file.");
+	if (stat.size > 20_000_000) throw payloadTooLarge("File is too large to preview (>20MB).");
+	const buffer = readFileSync(full);
+	return {
+		path: relPath.replace(/\\/g, "/"),
+		buffer,
+		mimeType: detectMimeType(relPath),
+		size: stat.size,
 	};
 }
 

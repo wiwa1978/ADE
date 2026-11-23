@@ -28,6 +28,14 @@ export class ArtifactManager {
 		return this.#db.prepare("SELECT * FROM session_artifacts WHERE sessionId=? ORDER BY updatedAt DESC").all(sessionId) as unknown as SessionArtifact[];
 	}
 
+	listArtifactsForSessions(sessionIds: string[]): SessionArtifact[] {
+		if (sessionIds.length === 0) return [];
+		const placeholders = sessionIds.map(() => "?").join(", ");
+		return this.#db
+			.prepare(`SELECT * FROM session_artifacts WHERE sessionId IN (${placeholders}) ORDER BY updatedAt DESC`)
+			.all(...sessionIds) as unknown as SessionArtifact[];
+	}
+
 	getArtifact(id: string): SessionArtifact | null {
 		return (this.#db.prepare("SELECT * FROM session_artifacts WHERE id=?").get(id) as unknown as SessionArtifact | undefined) ?? null;
 	}

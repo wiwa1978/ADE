@@ -64,9 +64,11 @@ type AppOverlaysProps = {
   onOpenExternalApp: (app: "cursor" | "vscode" | "windsurf" | "finder", path?: string | null) => void
   onTogglePin: (id: string) => void
   onToggleUnread: (id: string) => void
+  onShowSessionArtifacts: (sess: Conversation) => void
   onRenameSession: (sess: Conversation) => void
   onStopSession: (sess: Conversation) => void
   onDeleteSession: (sess: Conversation) => void
+  onShowProjectArtifacts: (project: Project) => void
   onOpenProjectSettings: (project: Project) => void
   onToggleArchiveProject: (project: Project) => void
   onDeleteProject: (project: Project) => void
@@ -115,9 +117,11 @@ export function AppOverlays({
   onOpenExternalApp,
   onTogglePin,
   onToggleUnread,
+  onShowSessionArtifacts,
   onRenameSession,
   onStopSession,
   onDeleteSession,
+  onShowProjectArtifacts,
   onOpenProjectSettings,
   onToggleArchiveProject,
   onDeleteProject,
@@ -198,10 +202,12 @@ export function AppOverlays({
         onContinueInCloud={() => onOpenSettingsSection("environments", true)}
         onTogglePin={onTogglePin}
         onToggleUnread={onToggleUnread}
+        onShowSessionArtifacts={onShowSessionArtifacts}
         onRenameSession={onRenameSession}
         onStopSession={onStopSession}
         onDeleteSession={onDeleteSession}
         onNewProjectStream={project => onNewSession(project.id)}
+        onShowProjectArtifacts={onShowProjectArtifacts}
         onOpenProjectSettings={onOpenProjectSettings}
         onToggleArchiveProject={onToggleArchiveProject}
         onDeleteProject={onDeleteProject}

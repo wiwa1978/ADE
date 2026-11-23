@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react"
 import {
-  ArrowLeft,
   ChevronDown,
   ChevronRight,
   Code2,
@@ -14,6 +13,7 @@ import {
 } from "lucide-react"
 import { request } from "../../api"
 import type { WorkspaceEntry } from "../../app-types"
+import { RichFilePreview } from "./RichFilePreview"
 
 function joinRelativePath(root: string, rel: string): string {
   const cleanRoot = root.replace(/[\\/]+$/, "")
@@ -169,34 +169,11 @@ export function FilesPanel({
   const [openError, setOpenError] = useState("")
   const [openingApp, setOpeningApp] = useState<"vscode" | "cursor" | null>(null)
   const [previewPath, setPreviewPath] = useState<string | null>(null)
-  const [previewResult, setPreviewResult] = useState<{ path: string; content: string; error: string } | null>(null)
 
   const queryParam = projectId
     ? `projectId=${encodeURIComponent(projectId)}`
     : `sessionId=${encodeURIComponent(sessionId ?? "")}`
   const scopeKey = projectId ? `project:${projectId}` : `session:${sessionId ?? ""}`
-
-  useEffect(() => {
-    if (!previewPath || !workspacePath) return
-    let cancelled = false
-    const target = previewPath
-    void request<{ content: string }>(
-      `/api/workspace/file?${queryParam}&path=${encodeURIComponent(target)}`,
-    )
-      .then(res => {
-        if (!cancelled) setPreviewResult({ path: target, content: res.content, error: "" })
-      })
-      .catch(err => {
-        if (!cancelled) {
-          setPreviewResult({ path: target, content: "", error: err instanceof Error ? err.message : "Could not read file." })
-        }
-      })
-    return () => { cancelled = true }
-  }, [previewPath, queryParam, workspacePath])
-
-  const previewLoading = Boolean(previewPath && previewResult?.path !== previewPath)
-  const previewError = previewResult?.path === previewPath ? previewResult.error : ""
-  const previewContent = previewResult?.path === previewPath ? previewResult.content : ""
 
   async function handleOpenIn(app: "vscode" | "cursor", absPath: string) {
     setOpenError("")
@@ -226,44 +203,36 @@ export function FilesPanel({
   if (previewPath) {
     const absFile = joinRelativePath(workspacePath, previewPath)
     return (
-      <div className="ade-pane-body">
-        <div className="ade-pane-toolbar">
-          <button type="button" className="sf-btn-ghost !h-7 !px-2 !text-[12px]" onClick={() => setPreviewPath(null)}>
-            <ArrowLeft className="size-3.5" /> Files
-          </button>
-          <span className="ade-truncate flex-1 font-mono text-[11.5px] opacity-75" title={previewPath}>
-            {previewPath}
-          </span>
-          <button
-            type="button"
-            className="ade-editor-pill"
-            disabled={openingApp !== null}
-            onClick={() => void handleOpenIn("vscode", absFile)}
-            title="Open file in VS Code"
-          >
-            VS Code
-          </button>
-          <button
-            type="button"
-            className="ade-editor-pill"
-            disabled={openingApp !== null}
-            onClick={() => void handleOpenIn("cursor", absFile)}
-            title="Open file in Cursor"
-          >
-            Cursor
-          </button>
-        </div>
-        {openError ? <div className="ade-pane-note text-rose-400">{openError}</div> : null}
-        <div className="ade-pane-scroll">
-          {previewLoading ? (
-            <div className="ade-pane-note">Loading file…</div>
-          ) : previewError ? (
-            <div className="ade-pane-note text-rose-400">{previewError}</div>
-          ) : (
-            <pre className="ade-file-preview-code">{previewContent}</pre>
-          )}
-        </div>
-      </div>
+      <RichFilePreview
+        sessionId={sessionId}
+        projectId={projectId}
+        filePath={previewPath}
+        onBack={() => setPreviewPath(null)}
+        backLabel="Files"
+        canEdit={Boolean(sessionId)}
+        toolbarExtra={
+          <>
+            <button
+              type="button"
+              className="ade-editor-pill"
+              disabled={openingApp !== null}
+              onClick={() => void handleOpenIn("vscode", absFile)}
+              title="Open file in VS Code"
+            >
+              VS Code
+            </button>
+            <button
+              type="button"
+              className="ade-editor-pill"
+              disabled={openingApp !== null}
+              onClick={() => void handleOpenIn("cursor", absFile)}
+              title="Open file in Cursor"
+            >
+              Cursor
+            </button>
+          </>
+        }
+      />
     )
   }
 

@@ -18,6 +18,7 @@ import {
 	gitUnstageFiles,
 	listWorkspaceDirectory,
 	readWorkspaceFile,
+	readWorkspaceFileRaw,
 	writeWorkspaceFile,
 } from "../workspace-files.ts";
 import { inspectWorktrees } from "../worktrees.ts";
@@ -63,6 +64,22 @@ export function registerWorkspaceRoutes(router: Router, { host, worktreeManager 
 	router.get("/api/workspace/file", (ctx) => {
 		const workspace = resolveTreeRoot(ctx);
 		ctx.json(200, readWorkspaceFile(workspace, ctx.url.searchParams.get("path") ?? ""));
+	});
+
+	router.get("/api/workspace/raw", (ctx) => {
+		const workspace = resolveTreeRoot(ctx);
+		const raw = readWorkspaceFileRaw(workspace, ctx.url.searchParams.get("path") ?? "");
+		const headers: Record<string, string | number> = {
+			"content-type": raw.mimeType,
+			"content-length": raw.buffer.length,
+			"cache-control": "no-cache",
+			"x-content-type-options": "nosniff",
+		};
+		if (raw.mimeType.includes("svg") || raw.mimeType.includes("html")) {
+			headers["content-security-policy"] = "sandbox";
+		}
+		ctx.response.writeHead(200, headers);
+		ctx.response.end(raw.buffer);
 	});
 
 	router.put(

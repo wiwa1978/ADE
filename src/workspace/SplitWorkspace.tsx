@@ -333,8 +333,8 @@ export function SplitWorkspace({
     openBeside({ id: "browser", kind: "browser", title: "Browser", ...(url ? { initialUrl: url } : {}) })
   }, [openBeside])
   const openArtifact = useCallback((artifactId?: string) => {
-    const art = artifacts.find(a => a.id === artifactId) ?? artifacts[0]
-    openBeside({ id: "artifact", kind: "artifact", title: art?.title || "Artifacts", artifactId: art?.id })
+    const art = artifactId ? artifacts.find(a => a.id === artifactId) : undefined
+    openBeside({ id: "artifact", kind: "artifact", title: art?.title || "Artefacts", artifactId: art?.id })
   }, [artifacts, openBeside])
   const openTerminal = useCallback((another = false) => {
     setBottomTerminalOpen(false)
@@ -567,6 +567,7 @@ export function SplitWorkspace({
         approvals={approvals}
         subagents={subagents}
         busy={isBusy}
+        workspacePath={workspacePath}
         emptyTitle={session.label}
         emptySubtitle={hasWorkspace
           ? `The agent works on ${session.workspace?.branch ? `branch ${session.workspace.branch}` : "the project folder"}. Describe a task below. Review its work in Changes, run it with Run or Terminal, and ship it from Pull request.`

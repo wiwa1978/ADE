@@ -45,8 +45,8 @@ export function useRunTargets() {
 /** Why a target can't be chosen right now, or "" when it can. */
 export function targetUnavailable(target: RunTarget, info: RunTargetsInfo | null, settings?: Partial<TargetSettings> | null) {
   if (!info) return ""
-  if (target === "docker" && !info.docker.available) return info.docker.message
-  if (target === "boat" && !info.boat.configured) return "Add a Boat.dev API key in Settings → Integrations first."
+  if (target === "docker" && info.docker && !info.docker.available) return info.docker.message
+  if (target === "boat" && info.boat && !info.boat.configured) return "Add a Boat.dev API key in Settings → Integrations first."
   if (target === "ssh" && settings && !settings.sshHost) return "Set the SSH host in Project settings → Run sessions on first."
   return ""
 }

@@ -60,7 +60,7 @@ function AppInner() {
   const [expandedProjects, setExpandedProjects] = useState<string[]>(() =>
     Array.isArray(lastView.expandedProjects) ? lastView.expandedProjects.filter(id => typeof id === "string") : [],
   )
-  const [projectRightPane, setProjectRightPane] = useState<"files" | "settings" | null>("files")
+  const [projectRightPane, setProjectRightPane] = useState<"files" | "artifacts" | "settings" | null>("files")
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>("general")
   const [settingsAutoOpenAddEnv, setSettingsAutoOpenAddEnv] = useState(false)
   const [envPaletteOpen, setEnvPaletteOpen] = useState(false)
@@ -547,9 +547,21 @@ function AppInner() {
         onOpenExternalApp={(app, path) => void sess.openExternalApp(app, path)}
         onTogglePin={sess.togglePin}
         onToggleUnread={sess.toggleUnread}
+        onShowSessionArtifacts={s => {
+          sess.clearUnread(s.id)
+          openSessionInWork(s.id)
+          setExternalOpenRequest({ id: "artifact", kind: "artifact", title: "Artefacts" })
+        }}
         onRenameSession={s => { setRenamingId(s.id); setRenameText(s.label) }}
         onStopSession={s => void sess.abortSession(s.id)}
         onDeleteSession={s => void sess.deleteSession(s)}
+        onShowProjectArtifacts={project => {
+          setSelectedProjectId(project.id)
+          expandProject(project.id)
+          setNewSessionOpen(false)
+          setScreen("project")
+          setProjectRightPane("artifacts")
+        }}
         onOpenProjectSettings={project => openProject(project.id, true)}
         onToggleArchiveProject={project => void sess.toggleArchive(`project:${project.id}`)}
         onDeleteProject={project => void proj.deleteProject(project)}

@@ -19,6 +19,7 @@ import type { RouteDeps } from "./context.ts";
 import { redactForCwd } from "../project-secrets.ts";
 import { transcriptMarkdown, type TranscriptItem } from "../../packages/protocol/transcript.ts";
 import { RUN_TARGETS, type RunTarget } from "../execution-targets.ts";
+import { getWorkspaceGitSummary, listWorkspaceFilesFlat } from "../workspace-files.ts";
 
 export function registerSessionRoutes(
 	router: Router,
@@ -380,8 +381,28 @@ export function registerSessionRoutes(
 	);
 
 	// --- Artifacts & Tasks ---
-	router.get("/api/sessions/:id/artifacts", (ctx) => {
-		ctx.json(200, { artifacts: host.artifacts.listArtifacts(ctx.params.id) });
+	router.get("/api/sessions/:id/artifacts", async (ctx) => {
+		const sessionId = ctx.params.id;
+		const artifacts = host.artifacts.listArtifacts(sessionId);
+		const workspace = host.getWorkspacePath(sessionId);
+		if (!workspace) {
+			ctx.json(200, { artifacts, files: [] });
+			return;
+		}
+		const [flat, git] = await Promise.all([
+			Promise.resolve(listWorkspaceFilesFlat(workspace, 300)),
+			getWorkspaceGitSummary(workspace).catch(() => ({ isGitRepo: false, branch: null, ahead: 0, behind: 0, additions: 0, deletions: 0, files: [] })),
+		]);
+		const gitMap = new Map(git.files.map((f) => [f.path, f.status]));
+		const files = flat
+			.map((f) => ({ ...f, gitStatus: gitMap.get(f.path) ?? null }))
+			.sort((a, b) => {
+				const aChanged = a.gitStatus ? 1 : 0;
+				const bChanged = b.gitStatus ? 1 : 0;
+				if (aChanged !== bChanged) return bChanged - aChanged;
+				return b.modifiedAt - a.modifiedAt || a.path.localeCompare(b.path);
+			});
+		ctx.json(200, { artifacts, files });
 	});
 
 	router.post(

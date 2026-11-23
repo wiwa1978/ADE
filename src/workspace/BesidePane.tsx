@@ -251,10 +251,20 @@ export function BesidePane({
 
         {activeBesideTab.kind === "artifact" ? (
           <ArtifactPanel
+            sessionId={session.id}
+            workspacePath={workspacePath}
             artifacts={artifacts}
             activeArtifactId={activeBesideTab.artifactId}
+            gitSummary={gitSummary}
+            timelineItems={timelineItems}
             onSelectArtifact={(id) => onOpenBeside({ ...activeBesideTab, artifactId: id })}
             onReview={onReviewArtifact}
+            onOpenFileTab={hasWorkspace ? onOpenFile : undefined}
+            onMentionInChat={(path) => {
+              onDraftChange(`${draft ? `${draft} ` : ""}\`${path}\` `)
+              textareaRef?.current?.focus()
+            }}
+            onSaved={onRefreshGit}
           />
         ) : null}
 
