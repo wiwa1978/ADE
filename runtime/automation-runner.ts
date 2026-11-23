@@ -79,7 +79,7 @@ export function createAutomationRunner(deps: AutomationRunnerDeps) {
 			if (!session) throw new Error("The session could not be created.");
 			if (session.workspace?.status !== "ready") throw new Error(session.workspace?.message || "The session's worktree could not be created.");
 			deps.prepareWorktree(session);
-			if (automation.agent !== "pi") deps.setEngine(id, automation.agent);
+			// Runs always start on the ADE agent (Pi Durable); it can hand parts to other harnesses as subagents.
 			await deps.sendToAgent(id, fillPrompt(automation.prompt, issue));
 			deps.store.recordRun(automation.id, { at, sessionId: id, reason }, issue?.number);
 			return id;

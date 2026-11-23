@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react"
 import {
-  ArrowLeft, Bell, Blocks, Bot, Check, Gauge, GitPullRequest, Palette, Search, Server, Settings2, Sparkles, Terminal, X, type LucideIcon,
+  ArrowLeft, Bell, Blocks, Bot, Workflow, Check, Gauge, GitPullRequest, Palette, Search, Server, Settings2, Sparkles, Terminal, X, type LucideIcon,
 } from "lucide-react"
 import { EnvironmentSettings } from "./EnvironmentSettings"
 import { colorPalettes, lookPresets, paletteVariables, type Theme } from "./appearance-palettes"
@@ -12,10 +12,11 @@ import { McpAndSecuritySettings } from "./src/panels/McpSettingsSection"
 import { request } from "./api"
 import { UsageSettings } from "./src/usage/UsageSettings"
 import { IntegrationsSettings } from "./src/integrations/IntegrationsSettings"
+import { SubagentSettings } from "./src/subagents/SubagentSettings"
 
 /** Settings categories. Every category here changes something real; nothing is a placeholder. */
 export type SettingsCategory =
-  | "general" | "appearance" | "models" | "agents" | "usage" | "integrations" | "github" | "terminal" | "notifications" | "environments"
+  | "general" | "appearance" | "models" | "agents" | "usage" | "subagents" | "integrations" | "github" | "terminal" | "notifications" | "environments"
 
 type SettingsItem = { id: SettingsCategory; label: string; icon: LucideIcon; description: string; keywords: string }
 
@@ -34,6 +35,7 @@ const groups: { label: string; items: SettingsItem[] }[] = [
     items: [
       { id: "models", label: "Models", icon: Sparkles, description: "Model providers, API keys, and the default model for new messages.", keywords: "openai anthropic claude copilot radius ollama compatible api key provider reasoning" },
       { id: "agents", label: "Agents & permissions", icon: Bot, description: "Command approvals, MCP servers, and skills available to agents.", keywords: "approval policy mcp skills rules permissions browser chrome" },
+      { id: "subagents", label: "Subagents", icon: Workflow, description: "What subagents run on (Pi, Claude Code, Codex) and who picks.", keywords: "harness claude code codex pi durable subagent model delegate" },
       { id: "usage", label: "Usage", icon: Gauge, description: "Tokens and cost per project and session, and a monthly budget.", keywords: "cost spend tokens budget billing price money" },
     ],
   },
@@ -609,7 +611,8 @@ export function SettingsView({
 
   const usage = <UsageSettings budget={settings.monthlyBudget} onBudgetChange={value => update({ monthlyBudget: value })} projects={projects} sessionLabels={sessionLabels} />
   const integrations = <IntegrationsSettings />
-  const content = { general, appearance, models, agents, usage, integrations, github, terminal, notifications, environments }[selectedCategory]
+  const subagents = <SubagentSettings modelCatalog={modelCatalog} />
+  const content = { general, appearance, models, agents, usage, subagents, integrations, github, terminal, notifications, environments }[selectedCategory]
 
   return <main className="st-layout">
     <aside className="st-nav" aria-label="Settings navigation">

@@ -8,6 +8,8 @@ import { createSearchTools } from "./search-tools.ts";
 import { createShellTools, type ProcessManager } from "./shell-tools.ts";
 import type { RuntimeEventBus } from "./events.ts";
 import { resolveBaseCommit, type WorktreeManager } from "./worktrees.ts";
+import { externalSubagents, subagentPolicy } from "./subagent-harness.ts";
+import { harnessChoiceText, harnessNames, resolveHarness, type SubagentHarness } from "./subagent-policy.ts";
 
 export type SubagentMode = "readonly" | "workspace" | "worktree";
 
@@ -20,6 +22,8 @@ export type SubagentRecordMetadata = {
 	workspacePath?: string | null;
 	branch?: string | null;
 	createdAt: number;
+	/** Where the subagent runs: Pi (durable, in this session) or an agent CLI. */
+	harness?: SubagentHarness;
 };
 
 type ModelToolEntry = ToolRegistration;
@@ -55,6 +59,13 @@ function extractPlainText(content: unknown): string {
 
 export function createSubagentTools(opts: SubagentToolsOptions) {
 	const backgroundPromises = new Map<string, Promise<{ status: string; report: string }>>();
+	const installedHarnesses = () => externalSubagents()?.installed(opts.sessionId) ?? new Set<SubagentHarness>(["pi"]);
+
+	/** The harness a subagent was started on (from its saved assignment entry). */
+	const harnessOf = (entries: { items: ReadonlyArray<{ kind?: string; data?: unknown }> }): SubagentHarness => {
+		const meta = entries.items.find(entry => entry.kind === "ade.assignment")?.data as SubagentRecordMetadata | undefined;
+		return meta?.harness ?? "pi";
+	};
 
 	const buildInstructions = (role: string, mode: SubagentMode, workspacePath: string | null) => {
 		const capabilityText =
@@ -157,8 +168,9 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 
 	const spawnSubagentTool = defineTool({
 		name: "spawn_subagent",
-		description: "Spawn a new subagent (1 or more per session) with its own conversation and live UI pane. Set background=true to run concurrently while you continue working or spawn multiple parallel subagents. Modes: 'readonly' (inspect/search only), 'workspace' (edit/run in current workspace), or 'worktree' (edit/run in a dedicated isolated Git worktree).",
+		description: "Spawn a new subagent (1 or more per session) with its own conversation and live UI pane. Set background=true to run concurrently while you continue working or spawn multiple parallel subagents. Modes: 'readonly' (inspect/search only), 'workspace' (edit/run in current workspace), or 'worktree' (edit/run in a dedicated isolated Git worktree)." + harnessChoiceText(subagentPolicy(), installedHarnesses()),
 		parameters: obj({
+			harness: opt(str({ description: "Which agent runs this subagent: 'pi', 'claude-code' or 'codex' (see the tool description)." })),
 			name: str({ description: "Short descriptive name (e.g. 'Backend API', 'Test Runner', 'UI Reviewer')" }),
 			role: opt(str({ description: "2-5 word role title (e.g. 'Codebase Researcher', 'Frontend Builder')" })),
 			task: str({ description: "Clear, actionable assignment for the subagent" }),
@@ -179,6 +191,16 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 
 			const subUuid = randomUUID();
 			const selected = await selectModelTools(mode, subUuid);
+			// Pick the harness: the user's fixed choice, else the main agent's pick when it's usable.
+			const policy = subagentPolicy();
+			let { harness, note } = resolveHarness(args.harness, policy, installedHarnesses());
+			const external = externalSubagents();
+			const cwd = selected.workspacePath ?? opts.workspace;
+			if (harness !== "pi" && (!external || !cwd)) {
+				note = `${harnessNames[harness]} needs a workspace, so this subagent runs on Pi.`;
+				harness = "pi";
+			}
+			const [piProvider, ...piModelParts] = policy.piModel.split("/");
 
 			const id = await api.commit(async tx => {
 				if (!background) {
@@ -194,6 +216,8 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 					modelTools: selected.tools,
 					maxTurns: 24,
 					instructions: buildInstructions(role || name, mode, selected.workspacePath),
+					// Pi subagents can use another model than the main agent (Settings → Subagents).
+					...(harness === "pi" && policy.piModel ? { model: { provider: piProvider, modelId: piModelParts.join("/") } } : {}),
 				});
 				const meta: SubagentRecordMetadata = {
 					name,
@@ -204,6 +228,7 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 					workspacePath: selected.workspacePath,
 					branch: selected.branch,
 					createdAt: Date.now(),
+					harness,
 				};
 				await tx.appendEntry(child.id, { kind: "ade.assignment", data: meta });
 				return child.id;
@@ -217,7 +242,36 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 				mode,
 				background,
 				branch: selected.branch,
+				harness,
 			}, ctx);
+
+			const harnessLine = `\n- harness: ${harnessNames[harness]}${note ? ` (${note})` : ""}`;
+			if (harness !== "pi" && external && cwd) {
+				// Claude Code / Codex do the work; the subagent's conversation here is the durable record.
+				// After a restart this tool runs again and the runner resumes the same run.
+				external.start({
+					sessionId: opts.sessionId,
+					conversationId: String(id),
+					harness,
+					cwd,
+					readOnly: mode === "readonly",
+					task: `You are a subagent named "${name}" (${role}) working for a coordinating agent. ${mode === "readonly" ? "Only read and investigate; don't change files." : "Make the changes in this folder and verify them."}\n\nTask:\n${taskText}\n\nEnd with a short report: what you did, what you found, and anything left to do.`,
+				});
+				const report = () => external.wait(opts.sessionId, String(id)).then(result => ({ status: result.status, report: result.text || `(${harnessNames[harness]} finished without a text report)` }));
+				if (background) {
+					backgroundPromises.set(String(id), report().finally(() => opts.events?.emit("subagents.update", { sessionId: opts.sessionId, subagentId: String(id) }, opts.sessionId)));
+					return {
+						output: [{ type: "text", text: `Background subagent spawned.\n- subagentId: ${String(id)}\n- name: ${name}\n- mode: ${mode}${harnessLine}${selected.branch ? `\n- branch: ${selected.branch}` : ""}\nUse wait_subagent, message_subagent, or list_subagents to track or coordinate with it.` }],
+						details: { conversationId: String(id), name, role, mode, background: true, branch: selected.branch, harness },
+					};
+				}
+				const result = await report();
+				return {
+					isError: result.status !== "completed",
+					output: [{ type: "text", text: `${result.report}${note ? `\n\n(${note})` : ""}` }],
+					details: { conversationId: String(id), name, role, mode, background: false, branch: selected.branch, harness },
+				};
+			}
 
 			const child = await api.conversation(id, ctx);
 			if (!child) throw new Error("The created subagent conversation is unavailable.");
@@ -245,9 +299,9 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 				return {
 					output: [{
 						type: "text",
-						text: `Background subagent spawned.\n- subagentId: ${String(id)}\n- name: ${name}\n- mode: ${mode}${selected.branch ? `\n- branch: ${selected.branch}` : ""}\nUse wait_subagent, message_subagent, or list_subagents to track or coordinate with it.`,
+						text: `Background subagent spawned.\n- subagentId: ${String(id)}\n- name: ${name}\n- mode: ${mode}${harnessLine}${selected.branch ? `\n- branch: ${selected.branch}` : ""}\nUse wait_subagent, message_subagent, or list_subagents to track or coordinate with it.`,
 					}],
-					details: { conversationId: String(id), name, role, mode, background: true, branch: selected.branch },
+					details: { conversationId: String(id), name, role, mode, background: true, branch: selected.branch, harness },
 				};
 			}
 
@@ -255,7 +309,7 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 			return {
 				isError: result.status !== "completed",
 				output: [{ type: "text", text: result.report }],
-				details: { conversationId: String(id), name, role, mode, background: false, branch: selected.branch },
+				details: { conversationId: String(id), name, role, mode, background: false, branch: selected.branch, harness },
 			};
 		},
 	});
@@ -270,6 +324,13 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 		}),
 		replay: "unsafe",
 		async execute(args, api, ctx) {
+			const external = externalSubagents();
+			if (external && harnessOf(await api.commit(tx => tx.scanEntries({ conversationId: toConvId(args.subagentId), order: "ascending" }, 20), ctx)) !== "pi") {
+				// Claude Code / Codex: a follow-up continues the same CLI session.
+				external.message(opts.sessionId, String(args.subagentId), args.message);
+				backgroundPromises.set(String(args.subagentId), external.wait(opts.sessionId, String(args.subagentId)).then(result => ({ status: result.status, report: result.text || "(no text)" })));
+				return { output: [{ type: "text", text: `Delivered follow-up to subagent ${args.subagentId}.` }], details: { conversationId: String(args.subagentId), mode: "followUp" } };
+			}
 			const child = await api.conversation(toConvId(args.subagentId), ctx);
 			if (!child) throw new Error(`Subagent ${args.subagentId} not found.`);
 			const whenBusy = args.mode === "steer" ? "steer" : "followUp";
@@ -312,6 +373,12 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 					continue;
 				}
 				const convId = toConvId(subId);
+				const external = externalSubagents();
+				if (external && harnessOf(await api.commit(tx => tx.scanEntries({ conversationId: convId, order: "ascending" }, 20), ctx)) !== "pi") {
+					const res = await external.wait(opts.sessionId, String(subId));
+					reports.push(`### Subagent ${subId} (${res.status})\n${res.text || "(no report yet)"}`);
+					continue;
+				}
 				const entries = await api.commit(tx => tx.scanEntries({ conversationId: convId, order: "descending" }, 40), ctx);
 				const lastAssistant = entries.items.find((e) => e?.model?.[0]?.role === "assistant");
 				const text = lastAssistant ? extractPlainText(lastAssistant.model?.[0]?.content).trim() : "";

@@ -81,7 +81,7 @@ test("the runner starts due schedules and new labelled issues as sessions, never
 		now = at(2026, 11, 25, 9, 1);
 		await runner.tick();
 		assert.equal(created.length, 2, "the daily schedule fires at 09:00");
-		assert.deepEqual(engines, [[String(created[1].id), "codex"]]);
+		assert.deepEqual(engines, [], "runs start on the ADE agent (Pi), even if an older automation named another agent");
 		now = at(2026, 11, 26, 9, 1);
 		await runner.tick();
 		assert.equal(created.length, 2, "yesterday's run is still working, so today's waits");

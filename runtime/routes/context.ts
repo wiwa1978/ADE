@@ -32,6 +32,8 @@ export type RouteDeps = {
 	automationRunner: import("../automation-runner.ts").AutomationRunner;
 	integrations: import("../integrations.ts").Integrations;
 	executionTargets: import("../execution-targets.ts").ExecutionTargets;
+	subagentPolicies: import("../subagent-policy.ts").SubagentPolicyStore;
+	subagentKey: (sessionId: string, conversationId: string) => string;
 	cleanUpArchivedWorkspace: (
 		session: { id: string; workspace: string | null; repository: string | null; kind: string | null },
 		removeWorktreeRequested: boolean,

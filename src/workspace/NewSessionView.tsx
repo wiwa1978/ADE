@@ -17,7 +17,6 @@ import { LinearIssuePicker, type LinearIssue } from "./LinearIssuePicker"
 import { runTargetDescriptions, targetLabel, targetUnavailable, useRunTargets, type RunTarget, type TargetSettings } from "../run-targets"
 
 type EngineId = "pi" | "claude-code" | "codex"
-type EngineOption = { id: EngineId; name: string; description: string; available: boolean }
 
 type OpenIssueOption = {
   repository: string
@@ -91,8 +90,6 @@ export function NewSessionView({
   const [linkedIssue, setLinkedIssue] = useState<GitHubIssue | null>(null)
   const [issueError, setIssueError] = useState("")
   const [lookingUp, setLookingUp] = useState(false)
-  const [engines, setEngines] = useState<EngineOption[]>([])
-  const [engine, setEngine] = useState<EngineId>("pi")
   const [startChoice, setStartChoice] = useState<StartChoice>({ mode: "new" })
   const [linearIssue, setLinearIssue] = useState<LinearIssue | null>(null)
   // Where the session's commands run. Starts from the project's default.
@@ -109,18 +106,8 @@ export function NewSessionView({
   }, [selectedProjectId])
   const defaultRunOn = projectRunOn && projectRunOn.projectId === selectedProjectId ? projectRunOn.target : "local"
   const effectiveRunOn = runOn ?? defaultRunOn
-  // Best of N: run the same task several times, each in its own worktree, possibly with different agents.
+  // Best of N: run the same task several times, each in its own worktree.
   const [attemptCount, setAttemptCount] = useState(1)
-  const [attemptEngines, setAttemptEngines] = useState<Array<EngineId | null>>([null, null, null])
-
-  useEffect(() => {
-    let active = true
-    void request<{ engines: EngineOption[] }>("/api/engines").then(result => { if (active) setEngines(result.engines) }).catch(() => undefined)
-    return () => { active = false }
-  }, [])
-  // External agents need a workspace to work in.
-  const engineAllowed = (id: EngineId) => id === "pi" || kind !== "none"
-  const activeEngine = engines.find(item => item.id === engine)
 
   const effectiveRepo = activeProject?.repository || repository
 
@@ -202,7 +189,6 @@ export function NewSessionView({
   const startTitle = startChoice.mode === "branch" ? startChoice.branch
     : startChoice.mode === "pr" && startChoice.number ? `PR #${startChoice.number}${startChoice.title ? `: ${startChoice.title}` : ""}` : undefined
   const canAttempt = kind === "worktree" && startChoice.mode === "new"
-  const availableEngines = engines.filter(option => option.available)
   const canSubmit = !starting && !startFromIncomplete && (Boolean(prompt.trim()) || Boolean(startFrom)) && (kind === "none" || Boolean(effectiveRepo.trim()))
 
   const handleSubmit = (e: FormEvent) => {
@@ -214,10 +200,11 @@ export function NewSessionView({
       repository: kind === "none" ? "" : effectiveRepo.trim(),
       prompt: prompt.trim(),
       githubIssue: linkedIssue ?? undefined,
-      engine: engineAllowed(engine) ? engine : "pi",
+      // The main agent is always the ADE agent (Pi Durable); subagents can use other harnesses.
+      engine: "pi",
       ...(startFrom ? { startFrom, title: startTitle } : linearIssue ? { title: `${linearIssue.identifier}: ${linearIssue.title}` } : {}),
       ...(kind !== "none" ? { runOn: effectiveRunOn } : {}),
-      ...(canAttempt && attemptCount > 1 ? { attempts: attemptEngines.slice(0, attemptCount).map(item => item ?? engine) } : {}),
+      ...(canAttempt && attemptCount > 1 ? { attempts: Array.from({ length: attemptCount }, () => "pi" as const) } : {}),
     })
   }
 
@@ -303,32 +290,6 @@ export function NewSessionView({
             />
           ) : null}
 
-          {/* Which agent does the work */}
-          {engines.length > 1 ? (
-            <div className="sf-label">
-              <span>Agent</span>
-              <div className="sf-segmented h-9 w-full justify-between" role="radiogroup" aria-label="Agent">
-                {engines.map(option => {
-                  const disabledOption = !option.available || !engineAllowed(option.id)
-                  return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={engine === option.id}
-                      disabled={disabledOption}
-                      title={!option.available ? `${option.name} isn't installed on this host` : !engineAllowed(option.id) ? `${option.name} needs a workspace (own branch or project folder)` : option.description}
-                      className={`sf-seg-btn flex-1 justify-center ${engine === option.id ? "is-active" : ""}`}
-                      onClick={() => setEngine(option.id)}
-                    >
-                      {option.name}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          ) : null}
-
           {kind !== "none" ? (
             <div className="sf-label">
               <span>Run on</span>
@@ -367,19 +328,6 @@ export function NewSessionView({
                 </div>
                 <small className="opacity-65">{attemptCount === 1 ? "One agent on one branch." : `${attemptCount} agents work on the same task, each on its own branch. Compare the results and keep the best.`}</small>
               </div>
-              {attemptCount > 1 && availableEngines.length > 1 ? (
-                <div className="ade-attempts-agents">
-                  {Array.from({ length: attemptCount }, (_, index) => (
-                    <label key={index}>
-                      <span>Attempt {"ABC"[index]}</span>
-                      <select className="sf-field !h-8" value={attemptEngines[index] ?? engine}
-                        onChange={event => setAttemptEngines(current => current.map((item, i) => (i === index ? event.target.value as EngineId : item)))}>
-                        {availableEngines.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}
-                      </select>
-                    </label>
-                  ))}
-                </div>
-              ) : null}
             </div>
           ) : null}
 
@@ -493,9 +441,7 @@ export function NewSessionView({
             />
             <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 border-t border-[rgb(var(--border)/0.65)] bg-[rgb(var(--surface-raised)/0.5)]">
               <div className="flex items-center gap-2">
-                {engine !== "pi" && engineAllowed(engine) ? (
-                  <span className="text-xs opacity-70">{activeEngine?.name} uses its own sign-in and model.</span>
-                ) : <ModelPicker
+                <ModelPicker
                   catalog={modelCatalog}
                   selectedProvider={selectedProvider}
                   selectedModel={selectedModel}
@@ -505,7 +451,7 @@ export function NewSessionView({
                   onSelectReasoning={onSelectReasoning}
                   onChangeApprovalPolicy={onChangeApprovalPolicy}
                   onOpenSettings={onOpenSettings}
-                />}
+                />
               </div>
 
               <button

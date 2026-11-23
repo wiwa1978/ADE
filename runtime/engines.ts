@@ -27,7 +27,12 @@ export type EngineSession = {
 	usage: { inputTokens: number; outputTokens: number; totalCost: number };
 	lastStatus: "completed" | "failed" | null;
 	updatedAt: number;
+	/** Set when this run is a subagent of an ADE session: where it runs, and where its updates go. */
+	parent?: { sessionId: string; conversationId: string; cwd?: string } | null;
 };
+
+/** How a run ended, for subagents the coordinator waits on. */
+export type EngineResult = { status: "completed" | "failed"; text: string };
 
 export const engineInfo: Record<EngineId, { name: string; command: string; description: string }> = {
 	"claude-code": { name: "Claude Code", command: "claude", description: "Anthropic's coding agent, using your Claude Code sign-in." },
@@ -149,10 +154,19 @@ export function engineArgs(engine: EngineId, prompt: string, externalId: string 
 	return args;
 }
 
+function lastText(state: EngineSession | null | undefined) {
+	for (const item of [...(state?.items ?? [])].reverse()) {
+		if (item.kind === "assistant" && item.text.trim()) return item.text.trim();
+		if (item.kind === "error") return item.message;
+	}
+	return "";
+}
+
 export class EngineManager {
 	#dir: string;
 	#events?: RuntimeEventBus;
 	#running = new Map<string, ChildProcess>();
+	#waiters = new Map<string, Array<(result: EngineResult) => void>>();
 	#cwd = new Map<string, string>();
 	#cache = new Map<string, EngineSession>();
 	#available: Record<EngineId, boolean> | null = null;
@@ -198,12 +212,15 @@ export class EngineManager {
 	}
 
 	/** Choose the engine for a session (only before its first message). */
-	setEngine(sessionId: string, engine: unknown) {
+	setEngine(sessionId: string, engine: unknown, parent: EngineSession["parent"] = null) {
 		if (engine === "pi") return null;
 		if (engine !== "claude-code" && engine !== "codex") throw Object.assign(new Error("Unknown engine."), { statusCode: 400 });
 		const existing = this.get(sessionId);
-		if (existing?.items.length) throw Object.assign(new Error("The engine can't change after the conversation has started."), { statusCode: 409 });
-		const state: EngineSession = { engine, externalId: null, items: [], usage: { inputTokens: 0, outputTokens: 0, totalCost: 0 }, lastStatus: null, updatedAt: Date.now() };
+		if (existing?.items.length) {
+			if (existing.parent && existing.engine === engine) return existing;
+			throw Object.assign(new Error("The engine can't change after the conversation has started."), { statusCode: 409 });
+		}
+		const state: EngineSession = { engine, externalId: null, items: [], usage: { inputTokens: 0, outputTokens: 0, totalCost: 0 }, lastStatus: null, updatedAt: Date.now(), parent };
 		this.#save(sessionId, state);
 		return state;
 	}
@@ -227,7 +244,27 @@ export class EngineManager {
 	}
 
 	#emit(sessionId: string) {
+		const parent = this.get(sessionId)?.parent;
+		if (parent) {
+			// A subagent's updates belong to its ADE session, as that session's subagent conversation.
+			this.#events?.emit("timeline.update", { ...this.snapshot(sessionId), sessionId: parent.sessionId, conversationId: parent.conversationId, isSubagent: true }, parent.sessionId);
+			this.#events?.emit("subagents.update", { sessionId: parent.sessionId, subagentId: parent.conversationId, busy: this.isWorking(sessionId) }, parent.sessionId);
+			return;
+		}
 		this.#events?.emit("timeline.update", this.snapshot(sessionId), sessionId);
+	}
+
+	/** Resolves when the current (or next) run for this key ends, with the agent's final text. */
+	waitFor(sessionId: string): Promise<EngineResult> {
+		if (!this.isWorking(sessionId)) {
+			const state = this.get(sessionId);
+			return Promise.resolve({ status: state?.lastStatus === "failed" ? "failed" : "completed", text: lastText(state) });
+		}
+		return new Promise(resolveWait => {
+			const list = this.#waiters.get(sessionId) ?? [];
+			list.push(resolveWait);
+			this.#waiters.set(sessionId, list);
+		});
 	}
 
 	send(sessionId: string, cwd: string, prompt: string, policy: ApprovalPolicy, model: string | null = null) {
@@ -244,7 +281,9 @@ export class EngineManager {
 		this.#save(sessionId, state);
 		const command = engineInfo[state.engine].command;
 		const secrets = secretEnv(cwd);
-		const target = sessionTarget(sessionId);
+		// A subagent runs where its ADE session runs.
+		const targetSession = state.parent?.sessionId ?? sessionId;
+		const target = sessionTarget(targetSession);
 		const args = engineArgs(state.engine, content, state.externalId, policy, model, target === "local" ? gitWritableDirs(cwd) : [], target !== "local");
 		const env: Record<string, string> = { ...secrets, NO_COLOR: "1", IS_SANDBOX: "1" };
 		// Sessions that run in Docker, WSL2, on an SSH host or a Boat.dev VM run the agent CLI there.
@@ -256,7 +295,7 @@ export class EngineManager {
 			const install = `command -v ${command} >/dev/null 2>&1 || npm install -g ${pkg} >/dev/null 2>&1 || { echo "ADE: ${engineInfo[state.engine].name} isn't installed on this machine and couldn't be installed with npm (npm install -g ${pkg})." >&2; exit 127; }`;
 			const signIn = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "CODEX_API_KEY"].filter(name => this.#environment[name] || secrets[name]);
 			for (const name of signIn) if (!env[name] && this.#environment[name]) env[name] = String(this.#environment[name]);
-			remote = commandInvocation(sessionId, cwd, `${install}; ${command} ${args.map(q).join(" ")}`, [...Object.keys(secrets), ...signIn, "NO_COLOR", "IS_SANDBOX"], { pidFile: this.#pidFile(sessionId) });
+			remote = commandInvocation(targetSession, cwd, `${install}; ${command} ${args.map(q).join(" ")}`, [...Object.keys(secrets), ...signIn, "NO_COLOR", "IS_SANDBOX"], { pidFile: this.#pidFile(sessionId) });
 		}
 		const child = spawn(remote?.file ?? command, remote?.args ?? args, {
 			cwd,
@@ -312,6 +351,9 @@ export class EngineManager {
 			if (!assistant.text && !assistant.toolCalls.length) state.items = state.items.filter(item => item !== assistant);
 			flush(true);
 			this.#events?.emit("sessions.changed", { id: sessionId });
+			const waiters = this.#waiters.get(sessionId) ?? [];
+			this.#waiters.delete(sessionId);
+			for (const resolveWait of waiters) resolveWait({ status: state.lastStatus === "failed" ? "failed" : "completed", text: lastText(state) });
 		});
 		return this.snapshot(sessionId);
 	}
@@ -321,12 +363,13 @@ export class EngineManager {
 		if (!child) return { ok: false };
 		child.kill("SIGTERM");
 		// On another machine, end the agent there too (killing the local client alone doesn't).
-		if (sessionTarget(sessionId) !== "local") stopOnTarget(sessionId, this.#pidFile(sessionId), this.#cwd.get(sessionId) ?? "");
+		const targetSession = this.get(sessionId)?.parent?.sessionId ?? sessionId;
+		if (sessionTarget(targetSession) !== "local") stopOnTarget(targetSession, this.#pidFile(sessionId), this.#cwd.get(sessionId) ?? "");
 		return { ok: true };
 	}
 
 	#pidFile(sessionId: string) {
-		return `/tmp/ade-engine-${sessionId.slice(0, 12)}.pid`;
+		return `/tmp/ade-engine-${sessionId.replace(/[^a-zA-Z0-9-]/g, "").slice(-60)}.pid`;
 	}
 
 	abortAll() {

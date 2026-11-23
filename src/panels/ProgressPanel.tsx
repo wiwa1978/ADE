@@ -12,6 +12,8 @@ const statusInfo: Record<Status, { label: string; icon: typeof CheckCircle2; ton
   pending: { label: "Not started", icon: CircleDashed, tone: "idle" },
 }
 
+const harnessLabel: Record<string, string> = { pi: "Pi", "claude-code": "Claude Code", codex: "Codex" }
+
 function subagentStatus(status: SubagentInfo["status"]): Status {
   if (status === "completed") return "done"
   if (status === "running") return "working"
@@ -68,8 +70,8 @@ export function ProgressPanel({
   const rows = [
     {
       id: "lead",
-      name: "Lead agent",
-      role: "",
+      name: "Main agent",
+      role: "ADE agent (Pi Durable)",
       asked: leadAsked && leadAsked.kind === "user" ? leadAsked.content : leadLabel,
       status: (leadBusy ? "working" : leadFailed ? "failed" : leadItems.length ? "done" : "pending") as Status,
       result: lastReply(leadItems),
@@ -78,7 +80,7 @@ export function ProgressPanel({
     ...subagents.map(sub => ({
       id: sub.id,
       name: sub.name || "Subagent",
-      role: sub.role ?? "",
+      role: [sub.role, harnessLabel[sub.harness ?? "pi"]].filter(Boolean).join(" · "),
       asked: sub.assignment,
       status: subagentStatus(sub.status),
       result: sub.error || lastReply(subagentTimelines[sub.id]?.items ?? sub.timeline) || [...sub.messages].reverse().find(message => message.role === "assistant")?.content || "",

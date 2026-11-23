@@ -9,7 +9,6 @@ type Trigger =
 type Run = { at: number; sessionId: string | null; reason: string; error?: string }
 type Automation = { id: string; name: string; prompt: string; agent: "pi" | "claude-code" | "codex"; trigger: Trigger; enabled: boolean; lastRunAt: number | null; runs: Run[] }
 
-const agentNames = { pi: "ADE agent", "claude-code": "Claude Code", codex: "Codex" }
 const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 
 function describe(trigger: Trigger) {
@@ -128,11 +127,7 @@ export function ProjectAutomationsTab({
             ) : (
               <label>Label<input value={form.label} onChange={event => setForm({ ...form, label: event.target.value })} placeholder="agent" required /></label>
             )}
-            <label>Agent
-              <select value={form.agent} onChange={event => setForm({ ...form, agent: event.target.value as Automation["agent"] })}>
-                {Object.entries(agentNames).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-              </select>
-            </label>
+
           </div>
           <label>What should the agent do?
             <textarea rows={4} value={form.prompt} onChange={event => setForm({ ...form, prompt: event.target.value })} required
@@ -155,7 +150,7 @@ export function ProjectAutomationsTab({
               <div className="ade-automation-main">
                 <strong>{item.name}</strong>
                 <span className="ade-muted ade-xs">
-                  {item.trigger.type === "issue-label" ? <Tag className="inline size-3" /> : <CalendarClock className="inline size-3" />} {describe(item.trigger)} · {agentNames[item.agent]}
+                  {item.trigger.type === "issue-label" ? <Tag className="inline size-3" /> : <CalendarClock className="inline size-3" />} {describe(item.trigger)}
                 </span>
                 <span className="ade-muted ade-xs ade-truncate" title={item.prompt}>{item.prompt}</span>
                 {item.runs[0] ? (

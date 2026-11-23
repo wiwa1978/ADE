@@ -29,7 +29,6 @@ export type Automation = {
 	seenIssues: number[];
 };
 
-const AGENTS: AutomationAgent[] = ["pi", "claude-code", "codex"];
 
 function parseTime(value: unknown) {
 	const match = typeof value === "string" ? /^(\d{1,2}):(\d{2})$/.exec(value.trim()) : null;
@@ -43,7 +42,8 @@ export function validateAutomation(input: unknown): Pick<Automation, "name" | "p
 	if (!name) throw badRequest("Give the automation a name.");
 	const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
 	if (!prompt || prompt.length > 6000) throw badRequest("Describe what the agent should do (up to 6000 characters).");
-	const agent = AGENTS.includes(body.agent as AutomationAgent) ? body.agent as AutomationAgent : "pi";
+	// The main agent is always the ADE agent; older automations may still name another one.
+	const agent: AutomationAgent = "pi";
 	const raw = (body.trigger && typeof body.trigger === "object" ? body.trigger : {}) as Record<string, unknown>;
 	let trigger: AutomationTrigger;
 	if (raw.type === "issue-label") {

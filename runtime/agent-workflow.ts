@@ -2,7 +2,9 @@
 import { realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import { ProjectSecrets, setSecretResolver } from "./project-secrets.ts";
-import { ExecutionTargets, setExecutionTargets } from "./execution-targets.ts";
+import { ExecutionTargets, sessionTarget, setExecutionTargets } from "./execution-targets.ts";
+import { setExternalSubagentRunner } from "./subagent-harness.ts";
+import { SubagentPolicyStore, type SubagentHarness } from "./subagent-policy.ts";
 import { checkFailedPrompt } from "../packages/protocol/agent-prompts.ts";
 import { createInbox } from "./inbox.ts";
 import { copyIntoWorktree, ProjectScriptStore, ScriptRunner } from "./project-scripts.ts";
@@ -192,6 +194,40 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		const engine = engines.get(session.id);
 		if (engine) usage.record(session.id, "0", engine.usage, session.projectId ?? null);
 	}
+	// Subagents on other harnesses. The main agent is always Pi Durable; its subagents can run on
+	// Pi (any model), Claude Code or Codex, as the user allows (Settings → Subagents).
+	const subagentPolicies = new SubagentPolicyStore(stateDirectory);
+	const subagentKey = (sessionId: string, conversationId: string) => `sub-${sessionId}-${conversationId}`.replace(/[^\w-]/g, "");
+	setExternalSubagentRunner({
+		installed(sessionId) {
+			const set = new Set<SubagentHarness>(["pi"]);
+			for (const engine of engines.available()) if (engine.id !== "pi" && engine.available) set.add(engine.id);
+			// On a container, VM or WSL, ADE installs the CLI there with npm when it's first used.
+			if (sessionTarget(sessionId) !== "local") { set.add("claude-code"); set.add("codex"); }
+			return set;
+		},
+		start({ sessionId, conversationId, harness, cwd, task, readOnly }) {
+			const key = subagentKey(sessionId, conversationId);
+			const existing = engines.get(key);
+			if (engines.isWorking(key) || existing?.lastStatus === "completed") return;
+			engines.setEngine(key, harness, { sessionId, conversationId, cwd });
+			const policy = subagentPolicies.get();
+			// A read-only subagent can't change files; others follow the session's approval setting.
+			const approval = readOnly ? "ask" : host.approvals.policy(sessionId);
+			const prompt = existing?.items.length ? "ADE restarted while you were working. Continue the task where you left off, then give your report." : task;
+			engines.send(key, cwd, prompt, approval, (harness === "claude-code" ? policy.claudeModel : policy.codexModel) || null);
+		},
+		message(sessionId, conversationId, text) {
+			const key = subagentKey(sessionId, conversationId);
+			const state = engines.get(key);
+			if (!state?.parent?.cwd) throw Object.assign(new Error("That subagent isn't available anymore."), { statusCode: 404 });
+			const policy = subagentPolicies.get();
+			engines.send(key, state.parent.cwd, text, host.approvals.policy(sessionId), (state.engine === "claude-code" ? policy.claudeModel : policy.codexModel) || null);
+		},
+		wait: (sessionId, conversationId) => engines.waitFor(subagentKey(sessionId, conversationId)),
+		stop: (sessionId, conversationId) => engines.abort(subagentKey(sessionId, conversationId)).ok,
+	}, () => subagentPolicies.get());
+
 	// Background agents: scheduled and issue-triggered automations (R11).
 	const automations = new AutomationStore(stateDirectory);
 	const automationRunner = createAutomationRunner({
@@ -207,5 +243,5 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 			notify("automations", sessionId, (label, project) => `🤖 Automation started *${label}* (${project}).`);
 		},
 	});
-	return { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner, integrations, executionTargets };
+	return { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner, integrations, executionTargets, subagentPolicies, subagentKey };
 }

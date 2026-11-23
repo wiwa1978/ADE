@@ -267,6 +267,12 @@ Features that comparable tools (Conductor, Claude Code, Cursor, Codex, Orca, Pas
 | R14 | ✅ Done | Settings → Integrations: Slack webhook (needs approval, finished, failed, automation runs) and Linear (New session → Import Linear issue). Jira is not included. |
 | R15 | ✅ Done | Transcript button (scroll icon) in a session's header: step through every message and tool call with its arguments and output; Copy, or download as .md / .json. |
 
+### Agents and harnesses (design decision)
+- **The main agent is always the ADE agent on Pi Durable.** It survives restarts and crashes, plans the work and coordinates it. Claude Code and Codex aren't durable, so they are no longer offered as a session's main agent (New session, Best of N and Automations all start on Pi). Older Codex sessions stay readable.
+- **Subagents can run on any harness:** Pi (with any configured model), Claude Code or Codex. Settings → Subagents sets which are allowed, the models, and who picks.
+- **The main agent picks the best-suited harness** per subagent (`spawn_subagent` → `harness`), guided by what each is good at, unless the user fixed one. Pi is the fallback when the pick isn't allowed or installed, and the agent is told why.
+- **Durability for external subagents:** the subagent's Pi conversation is the durable record. If ADE restarts mid-run, the main agent's tool call runs again and the Claude Code / Codex run resumes its own session. Their progress, report and stop button appear like any subagent's (Progress shows the harness).
+
 ### Where agents run
 Choose in New session → Run on, as a project default in Project settings → Run sessions on, or per session in Run → Runs on. Everything a session runs goes there: the ADE agent's commands and its subagents', Claude Code and Codex, terminals, and setup/run/check scripts. Stop ends a command and everything it started on that machine. If the target isn't ready, commands fail with a clear message instead of running on this computer.
 

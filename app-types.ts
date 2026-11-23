@@ -119,6 +119,8 @@ export type SubagentInfo = {
   createdAt?: number
   assignment: string
   status: "running" | "waiting" | "completed" | "failed" | "blocked" | "unknown"
+  /** Which agent runs this subagent: the ADE agent (Pi), Claude Code or Codex. */
+  harness?: "pi" | "claude-code" | "codex"
   model: string | null
   reasoning: string
   error: string | null

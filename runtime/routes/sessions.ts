@@ -22,7 +22,7 @@ import { RUN_TARGETS, type RunTarget } from "../execution-targets.ts";
 
 export function registerSessionRoutes(
 	router: Router,
-	{ host, worktreeManager, sessionGit, cleanUpArchivedWorkspace, engines, inbox, viewSessions, prepareWorktree, sendToAgent, executionTargets }: RouteDeps,
+	{ host, worktreeManager, sessionGit, cleanUpArchivedWorkspace, engines, inbox, viewSessions, prepareWorktree, sendToAgent, executionTargets, subagentKey }: RouteDeps,
 ): void {
 	router.get("/api/sessions", (ctx) => {
 		ctx.json(200, { sessions: viewSessions() });
@@ -195,7 +195,24 @@ export function registerSessionRoutes(
 	);
 
 	router.get("/api/coding-tasks/:id([0-9a-f-]+)/agents", async (ctx) => {
-		ctx.json(200, { agents: await host.featureAgents(ctx.params.id) });
+		const agents = await host.featureAgents(ctx.params.id);
+		// Claude Code / Codex subagents: their progress lives in the CLI run, not in Pi's transcript.
+		ctx.json(200, { agents: agents.map(agent => {
+			if (!agent.harness || agent.harness === "pi") return agent;
+			const key = subagentKey(ctx.params.id, String(agent.id));
+			const run = engines.get(key);
+			if (!run) return agent;
+			const snapshot = engines.snapshot(key);
+			const working = engines.isWorking(key);
+			return {
+				...agent,
+				status: working ? "running" : run.lastStatus === "failed" ? "failed" : run.lastStatus === "completed" ? "completed" : "waiting",
+				model: run.engine === "claude-code" ? "Claude Code" : "Codex",
+				timeline: snapshot.items,
+				messages: snapshot.items.flatMap((item): Array<{ id: string; role: "user" | "assistant"; content: string }> => item.kind === "user" ? [{ id: item.id, role: "user", content: item.content }] : item.kind === "assistant" && item.text ? [{ id: item.id, role: "assistant", content: item.text }] : []),
+				error: run.lastStatus === "failed" ? snapshot.items.filter(item => item.kind === "error").at(-1)?.message ?? null : null,
+			};
+		}) });
 	});
 
 	router.post(
@@ -346,6 +363,12 @@ export function registerSessionRoutes(
 	router.post(
 		"/api/sessions/:id/subagents/:subagentId/stop",
 		async (ctx) => {
+			// Claude Code / Codex subagents are stopped by ending their CLI run.
+			const key = subagentKey(ctx.params.id, ctx.params.subagentId);
+			if (engines.get(key)) {
+				ctx.json(200, { stopped: engines.abort(key).ok });
+				return;
+			}
 			ctx.json(200, await host.stopSubagent(ctx.params.id, ctx.params.subagentId));
 		},
 		{ originError: "Use ADE to stop a subagent." },

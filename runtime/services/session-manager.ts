@@ -349,6 +349,7 @@ export class SessionManager {
 						branch?: string | null;
 						createdAt?: number;
 						task?: string;
+						harness?: string;
 					} | undefined;
 					if (!record.owner && !metadata) continue;
 					const latest = record.owner
@@ -379,6 +380,7 @@ export class SessionManager {
 						branch: metadata?.branch ?? null,
 						createdAt: metadata?.createdAt ?? Date.now(),
 						assignment: metadata?.task ?? "",
+						harness: metadata?.harness ?? "pi",
 						status,
 						model: agent.model?.modelId ?? null,
 						reasoning: agent.thinkingLevel,

@@ -5,10 +5,11 @@ import type { ScriptKind } from "../project-scripts.ts";
 import type { Router } from "../router.ts";
 import type { RouteDeps } from "./context.ts";
 import { readInstructions, searchWorkspaceFiles, writeInstructions } from "../agent-context.ts";
+import { harnessGuidance } from "../subagent-policy.ts";
 
 export function registerAgentWorkflowRoutes(
 	router: Router,
-	{ host, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, usage, secrets, automations, automationRunner, integrations, executionTargets }: RouteDeps,
+	{ host, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, usage, secrets, automations, automationRunner, integrations, executionTargets, subagentPolicies }: RouteDeps,
 ): void {
 	// --- Usage: tokens and cost per session, project and day ---
 	router.get("/api/usage", (ctx) => {
@@ -48,6 +49,16 @@ export function registerAgentWorkflowRoutes(
 		scripts.save(project.id, await ctx.readBody());
 		ctx.json(200, scriptsResponse(project.id, project.repository));
 	}, { originError: "Use ADE to change project scripts." });
+
+	// --- Subagent harnesses (the main agent is always Pi Durable) ---
+	router.get("/api/subagent-policy", (ctx) => {
+		const available = engines.available().filter(engine => engine.id !== "pi").map(engine => ({ id: engine.id, name: engine.name, installed: engine.available }));
+		ctx.json(200, { policy: subagentPolicies.get(), harnesses: [{ id: "pi", name: "ADE agent (Pi)", installed: true }, ...available], guidance: harnessGuidance });
+	});
+
+	router.put("/api/subagent-policy", async (ctx) => {
+		ctx.json(200, { policy: subagentPolicies.set(await ctx.readBody()) });
+	}, { originError: "Use ADE to change subagent settings." });
 
 	// --- Where sessions run: this computer or a Docker container ---
 	router.get("/api/docker", async (ctx) => {
