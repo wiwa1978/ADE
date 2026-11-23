@@ -1,9 +1,13 @@
-import { Archive, ChevronDown, ChevronRight, Folder, FolderGit2, FolderPlus, GitBranch, Inbox, MessageCircle, MessageSquare, PanelLeft, Pin, Plus, Search, Server, Settings2, Workflow } from "lucide-react"
+import { useState } from "react"
+import { Archive, ChevronDown, ChevronRight, Folder, FolderGit2, FolderPlus, GitBranch, Inbox, MessageCircle, MessageSquare, PanelLeft, Pin, Plus, Search, Server, Settings2, Workflow, X } from "lucide-react"
 import type { Conversation } from "../../app-types"
 import type { FactoryRunDetail } from "../factory/types"
 import type { Project } from "../../ProjectsView"
 import { sessionStateInfo, type InboxEntry } from "../session-state"
 import { DEFAULT_KEYBINDINGS, formatShortcut, type KeybindingMap } from "../keybindings"
+import type { AddProjectSource } from "../projects/AddProjectWizard"
+import { ProjectsHeaderControls } from "./ProjectsHeaderControls"
+import { loadSidebarPrefs, saveSidebarPrefs, type SidebarPrefs } from "./sidebar-prefs"
 
 export type SidebarSelection =
   | { kind: "inbox" }
@@ -41,9 +45,12 @@ export type SidebarProps = {
   keybindings?: KeybindingMap
   onCollapse: () => void
   onNewSession: (projectId?: string) => void
+  onCreateWorktree?: () => void
   onSearch: () => void
   onOpenInbox: () => void
-  onAddProject: () => void
+  onAddProject: (initialSource?: AddProjectSource) => void
+  onMarkAllRead?: () => void
+  onClearCompleted?: () => void
   onOpenProject: (projectId: string) => void
   onToggleProject: (projectId: string) => void
   onOpenSession: (session: Conversation) => void
@@ -114,12 +121,78 @@ function SessionRow({ session, props, child }: { session: Conversation; props: S
 
 export function Sidebar(props: SidebarProps) {
   const { selection } = props
+  const [prefs, setPrefs] = useState<SidebarPrefs>(loadSidebarPrefs)
+  const [filterText, setFilterText] = useState("")
   const kb = props.keybindings ?? DEFAULT_KEYBINDINGS
   const searchKbd = kb.commandCenter ? formatShortcut(kb.commandCenter) : ""
   const addProjectKbd = kb.addProject ? formatShortcut(kb.addProject) : ""
   const inboxKbd = kb.openInbox ? formatShortcut(kb.openInbox) : ""
+
+  const updatePrefs = (patch: Partial<SidebarPrefs>) => {
+    setPrefs(prev => {
+      const next = { ...prev, ...patch }
+      saveSidebarPrefs(next)
+      return next
+    })
+  }
+
+  const q = filterText.trim().toLowerCase()
+  const sessionMatchesFilter = (session: Conversation): boolean => {
+    const entry = props.inbox[session.id]
+    const isUnread = props.unreadIds.includes(session.id) || Boolean(entry?.needsYou)
+    if (prefs.unreadOnly && !isUnread) return false
+    if (prefs.pinnedOnly && !props.pinnedIds.includes(session.id)) return false
+    if (q && !session.label.toLowerCase().includes(q) && !(session.workspace?.branch ?? "").toLowerCase().includes(q)) return false
+    return true
+  }
+
+  const allCodingSessions = [
+    ...Object.values(props.sessionsByProject).flat(),
+    ...props.ungroupedSessions,
+  ]
+  const hasUnread = props.unreadIds.length > 0 || props.inboxCount > 0
+  const hasCompleted = allCodingSessions.some(s => s.status !== "working")
+
+  const filteredProjects = props.projects.filter(project => {
+    if (prefs.projectFilter && project.id !== prefs.projectFilter) return false
+    if (prefs.pinnedOnly && !props.pinnedIds.includes(`project:${project.id}`)) {
+      const hasPinnedSession = (props.sessionsByProject[project.id] ?? []).some(s => props.pinnedIds.includes(s.id))
+      if (!hasPinnedSession) return false
+    }
+    if (prefs.unreadOnly) {
+      const hasUnreadSession = (props.sessionsByProject[project.id] ?? []).some(s => props.unreadIds.includes(s.id) || Boolean(props.inbox[s.id]?.needsYou))
+      if (!hasUnreadSession) return false
+    }
+    if (q) {
+      const matchesName = project.name.toLowerCase().includes(q)
+      const matchesSession = (props.sessionsByProject[project.id] ?? []).some(sessionMatchesFilter)
+      if (!matchesName && !matchesSession) return false
+    }
+    return true
+  })
+
+  const statusGroups = (() => {
+    if (prefs.groupBy !== "status") return []
+    const relevant = allCodingSessions.filter(s => {
+      if (prefs.projectFilter && s.projectId !== prefs.projectFilter) return false
+      return sessionMatchesFilter(s)
+    })
+    const buckets: { id: string; label: string; items: Conversation[] }[] = [
+      { id: "attention", label: "Needs attention", items: [] },
+      { id: "working", label: "Working", items: [] },
+      { id: "idle", label: "Idle", items: [] },
+    ]
+    for (const s of relevant) {
+      const entry = props.inbox[s.id]
+      if (entry?.needsYou) buckets[0].items.push(s)
+      else if (s.status === "working" || entry?.state === "working") buckets[1].items.push(s)
+      else buckets[2].items.push(s)
+    }
+    return buckets.filter(b => b.items.length > 0)
+  })()
+
   return (
-    <aside className="ade-sidebar" style={{ width: `${props.width}px` }} aria-label="Workspace navigation">
+    <aside className={`ade-sidebar ${prefs.compact ? "is-compact" : ""}`} style={{ width: `${props.width}px` }} aria-label="Workspace navigation">
       <div className="ade-sidebar-top">
         <div className="ade-brand-row">
           <div className="ade-brand-badge">A</div>
@@ -147,7 +220,7 @@ export function Sidebar(props: SidebarProps) {
             <button
               type="button"
               className="ade-sidebar-add-btn"
-              onClick={props.onAddProject}
+              onClick={() => props.onAddProject("menu")}
               title={addProjectKbd ? `Add project (${addProjectKbd})` : "Add project"}
               aria-label="Add project"
             >
@@ -167,99 +240,150 @@ export function Sidebar(props: SidebarProps) {
         </div>
 
         <div>
-          <div className="ade-nav-section-head">
-            <span>Projects</span>
-            <button type="button" className="ade-icon-btn" onClick={props.onAddProject} title="Add a project" aria-label="Add a project">
-              <Plus className="size-3.5" />
-            </button>
-          </div>
-          <div className="ade-nav-list">
-            {props.projects.length === 0 ? (
-              <button type="button" className="ade-nav-empty" onClick={props.onAddProject}>
-                <FolderGit2 className="size-3.5" /> Add your first project
-              </button>
-            ) : null}
-            {props.projects.map(project => {
-              const expanded = props.expandedProjects.includes(project.id)
-              const sessions = props.sessionsByProject[project.id] ?? []
-              const runs = props.factoryRunsByProject[project.id] ?? []
-              const attention = sessions.filter(session => props.inbox[session.id]?.needsYou).length
-              const working = sessions.filter(session => props.inbox[session.id]?.state === "working" || session.status === "working").length
-              return (
-                <div key={project.id}>
-                  <div
-                    className={`ade-nav-row ${selection.kind === "project" && selection.projectId === project.id ? "is-selected" : ""}`}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => props.onOpenProject(project.id)}
-                    onKeyDown={event => { if (event.key === "Enter") props.onOpenProject(project.id) }}
-                    onContextMenu={event => {
-                      event.preventDefault()
-                      props.onContextMenu({ kind: "project", project, x: event.clientX, y: event.clientY })
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="ade-icon-btn !w-5 !h-5"
-                      onClick={event => { event.stopPropagation(); props.onToggleProject(project.id) }}
-                      aria-label={expanded ? `Collapse ${project.name}` : `Expand ${project.name}`}
-                      aria-expanded={expanded}
+          <ProjectsHeaderControls
+            inboxCount={props.inboxCount}
+            environmentName={props.environmentName}
+            projects={props.projects}
+            prefs={prefs}
+            hasUnread={hasUnread}
+            hasCompleted={hasCompleted}
+            onChangePrefs={updatePrefs}
+            onOpenInbox={props.onOpenInbox}
+            onOpenEnvironments={props.onOpenEnvironments}
+            onOpenAddProject={src => props.onAddProject(src)}
+            onOpenCreateWorktree={() => (props.onCreateWorktree ? props.onCreateWorktree() : props.onNewSession())}
+            onMarkAllRead={() => props.onMarkAllRead?.()}
+            onClearCompleted={() => props.onClearCompleted?.()}
+          />
+
+          {prefs.showSearch ? (
+            <div className="ade-sidebar-filter-box">
+              <input
+                type="text"
+                placeholder="Filter…"
+                aria-label="Filter projects and sessions"
+                value={filterText}
+                onChange={e => setFilterText(e.target.value)}
+              />
+              {filterText ? (
+                <button type="button" className="ade-sidebar-filter-clear" onClick={() => setFilterText("")} aria-label="Clear filter">
+                  <X className="size-3" />
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {prefs.groupBy === "status" ? (
+            <div className="ade-nav-list">
+              {statusGroups.length === 0 ? (
+                <div className="ade-sidebar-filter-empty">No agent activity matches these filters.</div>
+              ) : (
+                statusGroups.map(group => (
+                  <div key={group.id} className="mb-1.5">
+                    <div className="ade-sidebar-status-label">{group.label} ({group.items.length})</div>
+                    {group.items.map(session => <SessionRow key={session.id} session={session} props={props} child={false} />)}
+                  </div>
+                ))
+              )}
+            </div>
+          ) : (
+            <div className="ade-nav-list">
+              {props.projects.length === 0 ? (
+                <button type="button" className="ade-nav-empty" onClick={() => props.onAddProject("menu")}>
+                  <FolderGit2 className="size-3.5" /> Add your first project
+                </button>
+              ) : filteredProjects.length === 0 ? (
+                <div className="ade-sidebar-filter-empty">No projects match these filters.</div>
+              ) : null}
+              {filteredProjects.map((project, idx) => {
+                const pinned = props.pinnedIds.includes(`project:${project.id}`)
+                const nextProject = filteredProjects[idx + 1]
+                const showPinnedDivider = pinned && nextProject && !props.pinnedIds.includes(`project:${nextProject.id}`)
+                const expanded = props.expandedProjects.includes(project.id)
+                const rawSessions = props.sessionsByProject[project.id] ?? []
+                const sessions = (prefs.unreadOnly || prefs.pinnedOnly || q) ? rawSessions.filter(sessionMatchesFilter) : rawSessions
+                const runs = props.factoryRunsByProject[project.id] ?? []
+                const attention = rawSessions.filter(session => props.inbox[session.id]?.needsYou).length
+                const working = rawSessions.filter(session => props.inbox[session.id]?.state === "working" || session.status === "working").length
+                return (
+                  <div key={project.id}>
+                    <div
+                      className={`ade-nav-row ${selection.kind === "project" && selection.projectId === project.id ? "is-selected" : ""}`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => props.onOpenProject(project.id)}
+                      onKeyDown={event => { if (event.key === "Enter") props.onOpenProject(project.id) }}
+                      onContextMenu={event => {
+                        event.preventDefault()
+                        props.onContextMenu({ kind: "project", project, x: event.clientX, y: event.clientY })
+                      }}
                     >
-                      {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-                    </button>
-                    <Folder className="size-3.5 shrink-0 opacity-75" />
-                    <span className="ade-truncate flex-1">{project.name}</span>
-                    {!expanded && attention > 0 ? <span className="ade-count-badge is-accent" title={`${attention} need you`}>{attention}</span>
-                      : !expanded && working > 0 ? <span className="ade-state-dot is-running" title={`${working} working`} /> : null}
-                    <div className="ade-nav-row-actions">
                       <button
                         type="button"
                         className="ade-icon-btn !w-5 !h-5"
-                        title={`New session in ${project.name}`}
-                        aria-label={`New session in ${project.name}`}
-                        onClick={event => { event.stopPropagation(); props.onNewSession(project.id) }}
+                        onClick={event => { event.stopPropagation(); props.onToggleProject(project.id) }}
+                        aria-label={expanded ? `Collapse ${project.name}` : `Expand ${project.name}`}
+                        aria-expanded={expanded}
                       >
-                        <Plus className="size-3" />
+                        {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
                       </button>
-                    </div>
-                  </div>
-
-                  {expanded ? (
-                    <div className="flex flex-col gap-0.5 mt-0.5">
-                      {sessions.map(session => <SessionRow key={session.id} session={session} props={props} child />)}
-                      {runs.map(run => (
-                        <div
-                          key={run.run.runId}
-                          role="button"
-                          tabIndex={0}
-                          className="ade-nav-row ade-nav-row-child"
-                          onClick={() => props.onOpenFactoryRun(project.id, run.run.runId)}
-                          onKeyDown={event => { if (event.key === "Enter") props.onOpenFactoryRun(project.id, run.run.runId) }}
-                          title="Software Factory run"
+                      <Folder className="size-3.5 shrink-0 opacity-75" />
+                      <span className="ade-truncate flex-1">{project.name}</span>
+                      {pinned ? <Pin className="size-3 shrink-0 opacity-60" aria-label="Pinned" /> : null}
+                      {!expanded && attention > 0 ? <span className="ade-count-badge is-accent" title={`${attention} need you`}>{attention}</span>
+                        : !expanded && working > 0 ? <span className="ade-state-dot is-running" title={`${working} working`} /> : null}
+                      <div className="ade-nav-row-actions">
+                        <button
+                          type="button"
+                          className="ade-icon-btn !w-5 !h-5"
+                          title={`New session in ${project.name}`}
+                          aria-label={`New session in ${project.name}`}
+                          onClick={event => { event.stopPropagation(); props.onNewSession(project.id) }}
                         >
-                          <span className={`ade-state-dot is-${run.run.status === "running" ? "running" : run.run.status === "failed" ? "failed" : run.run.status === "completed" ? "ok" : "waiting"}`} />
-                          <Workflow className="size-3 shrink-0 opacity-70" />
-                          <span className="ade-truncate flex-1">
-                            {run.run.issueRef?.number ? `#${run.run.issueRef.number} ` : ""}
-                            {run.run.issueRef?.title || run.taskPrompt || run.run.runId.slice(0, 8)}
-                          </span>
-                        </div>
-                      ))}
-                      {sessions.length === 0 && runs.length === 0 ? (
-                        <button type="button" className="ade-nav-row ade-nav-row-child opacity-60 hover:opacity-100" onClick={() => props.onNewSession(project.id)}>
-                          <Plus className="size-3 shrink-0" />
-                          <span className="ade-truncate">New session</span>
+                          <Plus className="size-3" />
                         </button>
-                      ) : null}
+                      </div>
                     </div>
-                  ) : null}
-                </div>
-              )
-            })}
-            {props.ungroupedSessions.map(session => <SessionRow key={session.id} session={session} props={props} child={false} />)}
-          </div>
+
+                    {expanded ? (
+                      <div className="flex flex-col gap-0.5 mt-0.5">
+                        {sessions.map(session => <SessionRow key={session.id} session={session} props={props} child />)}
+                        {runs.map(run => (
+                          <div
+                            key={run.run.runId}
+                            role="button"
+                            tabIndex={0}
+                            className="ade-nav-row ade-nav-row-child"
+                            onClick={() => props.onOpenFactoryRun(project.id, run.run.runId)}
+                            onKeyDown={event => { if (event.key === "Enter") props.onOpenFactoryRun(project.id, run.run.runId) }}
+                            title="Software Factory run"
+                          >
+                            <span className={`ade-state-dot is-${run.run.status === "running" ? "running" : run.run.status === "failed" ? "failed" : run.run.status === "completed" ? "ok" : "waiting"}`} />
+                            <Workflow className="size-3 shrink-0 opacity-70" />
+                            <span className="ade-truncate flex-1">
+                              {run.run.issueRef?.number ? `#${run.run.issueRef.number} ` : ""}
+                              {run.run.issueRef?.title || run.taskPrompt || run.run.runId.slice(0, 8)}
+                            </span>
+                          </div>
+                        ))}
+                        {sessions.length === 0 && runs.length === 0 ? (
+                          <button type="button" className="ade-nav-row ade-nav-row-child opacity-60 hover:opacity-100" onClick={() => props.onNewSession(project.id)}>
+                            <Plus className="size-3 shrink-0" />
+                            <span className="ade-truncate">New session</span>
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {showPinnedDivider ? <div className="my-1 mx-2 border-t border-[rgb(var(--border)/0.6)]" /> : null}
+                  </div>
+                )
+              })}
+              {props.ungroupedSessions.filter(sessionMatchesFilter).map(session => <SessionRow key={session.id} session={session} props={props} child={false} />)}
+            </div>
+          )}
         </div>
 
+        {!prefs.hideChats ? (
         <div>
           <div className="ade-nav-section-head">
             <span>Chats</span>
@@ -292,6 +416,7 @@ export function Sidebar(props: SidebarProps) {
             })}
           </div>
         </div>
+        ) : null}
 
         {props.archivedProjects.length + props.archivedSessions.length > 0 ? (
           <div className="ade-archived-section">

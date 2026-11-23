@@ -84,8 +84,16 @@ export function SidebarContextMenu({
     }
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") { e.preventDefault(); onClose(); return }
-      if (target.kind !== "session") return
       const key = e.key.toLowerCase()
+      if (target.kind === "project") {
+        const proj = target.project
+        if (key === "p") { e.preventDefault(); onTogglePin(`project:${proj.id}`); onClose() }
+        else if (key === "n") { e.preventDefault(); onNewProjectStream(proj); onClose() }
+        else if (key === "s") { e.preventDefault(); onOpenProjectSettings(proj); onClose() }
+        else if (key === "a") { e.preventDefault(); onToggleArchiveProject(proj); onClose() }
+        else if (key === "d") { e.preventDefault(); onDeleteProject(proj); onClose() }
+        return
+      }
       const sess = target.session
       const projectPath = projects.find(p => p.id === sess.projectId)?.repository ?? sess.workspace?.path ?? null
       if (submenu === "split") {
@@ -113,7 +121,7 @@ export function SidebarContextMenu({
   }, [
     target, submenu, projects, onClose, onOpenSplitView, onOpenNewWindow, onOpenExternalApp,
     onContinueInCloud, onTogglePin, onToggleUnread, onRenameSession, onStopSession,
-    onDeleteSession,
+    onDeleteSession, onNewProjectStream, onOpenProjectSettings, onToggleArchiveProject, onDeleteProject,
   ])
 
   if (!target) return null
@@ -129,11 +137,14 @@ export function SidebarContextMenu({
       {target.kind === "project" ? (
         <ProjectContextMenuItems
           project={target.project}
+          pinned={isPinned(`project:${target.project.id}`)}
+          pinShortcut={pinShortcut}
           archived={isArchived(`project:${target.project.id}`)}
           submenu={submenu}
           flipSub={pos.flipSub}
           onSetSubmenu={setSubmenu}
           onClose={onClose}
+          onTogglePinProject={p => onTogglePin(`project:${p.id}`)}
           onNewProjectStream={onNewProjectStream}
           onOpenExternalApp={onOpenExternalApp}
           onOpenProjectSettings={onOpenProjectSettings}

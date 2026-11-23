@@ -499,3 +499,74 @@ test("Keybindings editor rebinds built-in shortcuts, reflects them in the UI, an
   assert.ok(searchBox, "Expected sidebar search box")
   assert.match(searchBox.textContent ?? "", /P/)
 })
+
+test("Pinning a project via right-click moves it above unpinned projects in the sidebar", async () => {
+  projectRecords.push(
+    { id: "proj-1", name: "Alpha Project", githubUrl: null, repository: "/tmp/alpha" },
+    { id: "proj-2", name: "Beta Project", githubUrl: null, repository: "/tmp/beta" },
+  )
+  await act(async () => root.render(React.createElement(App)))
+
+  const getProjectNamesInSidebar = () =>
+    [...container.querySelectorAll('.ade-sidebar [role="button"]')]
+      .map(el => el.textContent?.trim() ?? "")
+      .filter(txt => txt.includes("Alpha Project") || txt.includes("Beta Project"))
+
+  assert.equal(getProjectNamesInSidebar()[0], "Alpha Project")
+  assert.equal(getProjectNamesInSidebar()[1], "Beta Project")
+
+  // Right-click Beta Project -> click Pin
+  const betaRow = [...container.querySelectorAll('.ade-sidebar [role="button"]')].find(el => el.textContent?.includes("Beta Project"))
+  assert.ok(betaRow, "Expected Beta Project in sidebar")
+  await act(async () => {
+    betaRow.dispatchEvent(new browser.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 80, clientY: 160 }) as unknown as Event)
+  })
+
+  const pinItem = [...container.querySelectorAll('[role="menuitem"]')].find(el => el.textContent?.includes("Pin"))
+  assert.ok(pinItem, "Expected Pin menu item in project context menu")
+  await act(async () => { (pinItem as HTMLElement).click() })
+
+  // Beta Project should now be first (above Alpha Project) and persisted in ade.pinned-ids
+  assert.equal(getProjectNamesInSidebar()[0], "Beta Project")
+  assert.equal(getProjectNamesInSidebar()[1], "Alpha Project")
+  const stored = JSON.parse(browser.localStorage.getItem("ade.pinned-ids") ?? "[]") as string[]
+  assert.ok(stored.includes("project:proj-2"), "Expected project:proj-2 in ade.pinned-ids")
+})
+
+test("Projects header exposes Filters popover (Show search), Add project quick menu, and Create worktree modal", async () => {
+  projectRecords.push(
+    { id: "proj-1", name: "Alpha Project", githubUrl: null, repository: "/tmp/alpha" },
+    { id: "proj-2", name: "Beta Project", githubUrl: null, repository: "/tmp/beta" },
+  )
+  await act(async () => root.render(React.createElement(App)))
+
+  // 1. Filters popover -> toggle Show search -> filter projects live
+  const filterBtn = container.querySelector('button[aria-label="Filter and view options"]')
+  assert.ok(filterBtn, "Expected Filters & view icon button in Projects header")
+  await act(async () => { (filterBtn as HTMLElement).click() })
+  await click("Show search")
+  const filterInput = container.querySelector('input[aria-label="Filter projects and sessions"]')
+  assert.ok(filterInput, "Expected inline Filter input after enabling Show search")
+  await act(async () => setInput(filterInput, "Beta"))
+  assert.match(container.querySelector(".ade-sidebar")?.textContent ?? "", /Beta Project/)
+  assert.doesNotMatch(container.querySelector(".ade-sidebar")?.textContent ?? "", /Alpha Project/)
+
+  // 2. Add project quick menu -> Browse folder opens wizard on Local folder
+  const addMenuBtn = container.querySelector('button[aria-label="Add project options"]')
+  assert.ok(addMenuBtn, "Expected Add project options button in Projects header")
+  await act(async () => { (addMenuBtn as HTMLElement).click() })
+  await click("Browse folder…")
+  const wizardDialog = container.querySelector('[role="dialog"][aria-label="Create Project"]')
+  assert.ok(wizardDialog, "Expected Create Project wizard dialog")
+  assert.match(wizardDialog.textContent ?? "", /Local folder/)
+  await click("Cancel")
+
+  // 3. + New workspace -> opens Create worktree modal
+  const newWsBtn = container.querySelector('button[aria-label="New workspace"]')
+  assert.ok(newWsBtn, "Expected New workspace + button in Projects header")
+  await act(async () => { (newWsBtn as HTMLElement).click() })
+  const wtDialog = container.querySelector('[role="dialog"][aria-label="Create worktree"]')
+  assert.ok(wtDialog, "Expected Create worktree modal dialog")
+  assert.match(wtDialog.textContent ?? "", /Create worktree/)
+  assert.match(wtDialog.textContent ?? "", /Create more/)
+})

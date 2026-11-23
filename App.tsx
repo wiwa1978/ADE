@@ -17,6 +17,7 @@ import { useInbox } from "./src/session-state"
 import type { ContextMenuTarget } from "./src/sidebar/SidebarContextMenu"
 import { AppMainColumn } from "./src/layout/AppMainColumn"
 import { AppOverlays } from "./src/layout/AppOverlays"
+import type { AddProjectSource } from "./src/projects/AddProjectWizard"
 import { isEditableTarget, matchesChord, resolveKeybindings } from "./src/keybindings"
 
 type LastView = { screen?: Screen; activeSessionId?: string; selectedProjectId?: string | null; expandedProjects?: string[] }
@@ -64,6 +65,8 @@ function AppInner() {
   const [settingsAutoOpenAddEnv, setSettingsAutoOpenAddEnv] = useState(false)
   const [envPaletteOpen, setEnvPaletteOpen] = useState(false)
   const [addProjectOpen, setAddProjectOpen] = useState(false)
+  const [addProjectInitialSource, setAddProjectInitialSource] = useState<AddProjectSource>("menu")
+  const [createWorktreeOpen, setCreateWorktreeOpen] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
   const [contextMenu, setContextMenu] = useState<ContextMenuTarget | null>(null)
   const [externalOpenRequest, setExternalOpenRequest] = useState<WorkspaceTab | null>(null)
@@ -209,7 +212,13 @@ function AppInner() {
       }
       if (matchesChord(e, keybindings.addProject)) {
         e.preventDefault()
+        setAddProjectInitialSource("menu")
         setAddProjectOpen(true)
+        return
+      }
+      if (!e.shiftKey && !e.altKey && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
+        e.preventDefault()
+        setCreateWorktreeOpen(true)
         return
       }
       if (matchesChord(e, keybindings.openInbox)) {
@@ -233,7 +242,11 @@ function AppInner() {
       }
       if (matchesChord(e, keybindings.pinSession)) {
         e.preventDefault()
-        if (sess.activeSession?.id) sess.togglePin(sess.activeSession.id)
+        if (screen === "project" && selectedProjectId) {
+          sess.togglePin(`project:${selectedProjectId}`)
+        } else if (sess.activeSession?.id) {
+          sess.togglePin(sess.activeSession.id)
+        }
         return
       }
 
@@ -269,7 +282,7 @@ function AppInner() {
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [keybindings, settings.customKeybindings, sess, stream, resolved, update])
+  }, [keybindings, settings.customKeybindings, screen, selectedProjectId, sess, stream, resolved, update])
 
   const openSettingsSection = useCallback((category: SettingsCategory, autoOpenAdd = false) => {
     previousScreen.current = screen
@@ -301,7 +314,16 @@ function AppInner() {
   const sortPinnedFirst = (list: Conversation[]) =>
     [...list].sort((a, b) => Number(sess.pinnedIds.includes(b.id)) - Number(sess.pinnedIds.includes(a.id)))
 
-  const visibleProjects = proj.projects.filter(p => !sess.archivedIds.includes(`project:${p.id}`))
+  const visibleProjects = [...proj.projects.filter(p => !sess.archivedIds.includes(`project:${p.id}`))].sort((a, b) => {
+    const aIdx = sess.pinnedIds.indexOf(`project:${a.id}`)
+    const bIdx = sess.pinnedIds.indexOf(`project:${b.id}`)
+    const aPinned = aIdx !== -1
+    const bPinned = bIdx !== -1
+    if (aPinned && bPinned) return aIdx - bIdx
+    if (aPinned) return -1
+    if (bPinned) return 1
+    return 0
+  })
   const codingTasks = sess.sessions.filter(s => s.id !== "coding" && s.id !== "personal" && !s.chatThread)
   const personalChats = sortPinnedFirst(sess.sessions.filter(s => s.mode === "personal" && !sess.archivedIds.includes(s.id)))
   const generalChats = sortPinnedFirst(sess.sessions.filter(s => (s.id === "coding" || (s.chatThread && s.mode === "coding")) && !sess.archivedIds.includes(s.id)))
@@ -347,9 +369,20 @@ function AppInner() {
           onCancelRename={() => setRenamingId(null)}
           onSubmitRename={async s => { setRenamingId(null); await sess.renameSession(s, renameText) }}
           onOpenNewSession={projectId => { if (projectId) setSelectedProjectId(projectId); setNewSessionOpen(true); setScreen("work") }}
+          onOpenCreateWorktree={() => setCreateWorktreeOpen(true)}
           onOpenCommandCenter={() => setCommandOpen(true)}
           onOpenInbox={() => setScreen("inbox")}
-          onOpenAddProject={() => setAddProjectOpen(true)}
+          onOpenAddProject={src => { setAddProjectInitialSource(src ?? "menu"); setAddProjectOpen(true) }}
+          onMarkAllRead={() => {
+            sess.markAllRead()
+            for (const entry of Object.values(inbox.entries)) {
+              if (entry.needsYou) void markSeen(entry.sessionId)
+            }
+          }}
+          onClearCompleted={() => {
+            const idleTasks = codingTasks.filter(s => s.status !== "working" && !sess.archivedIds.includes(s.id))
+            for (const t of idleTasks) void sess.toggleArchive(t.id, false)
+          }}
           onOpenProject={projectId => openProject(projectId, false)}
           onToggleExpandProject={id => setExpandedProjects(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]))}
           onOpenSession={openSession}
@@ -465,6 +498,12 @@ function AppInner() {
       <AppOverlays
         commandOpen={commandOpen}
         addProjectOpen={addProjectOpen}
+        addProjectInitialSource={addProjectInitialSource}
+        createWorktreeOpen={createWorktreeOpen}
+        selectedProjectId={selectedProjectId}
+        activeEnvironmentName={env.activeEnvironmentName}
+        creatingSession={sess.creatingSession}
+        launchError={sess.launchError}
         envPaletteOpen={envPaletteOpen}
         contextMenu={contextMenu}
         projects={proj.projects}
@@ -481,6 +520,9 @@ function AppInner() {
         keybindings={keybindings}
         onCloseCommand={() => setCommandOpen(false)}
         onCloseAddProject={() => setAddProjectOpen(false)}
+        onCloseCreateWorktree={() => setCreateWorktreeOpen(false)}
+        onOpenAddProjectFromModal={() => { setAddProjectInitialSource("menu"); setAddProjectOpen(true) }}
+        onCreateWorktree={sess.startNewSession}
         onCloseEnvPalette={() => setEnvPaletteOpen(false)}
         onCloseContextMenu={() => setContextMenu(null)}
         onSelectProjectFromCommand={id => { setSelectedProjectId(id); setProjectRightPane("settings"); setScreen("project") }}

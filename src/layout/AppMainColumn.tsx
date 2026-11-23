@@ -400,6 +400,7 @@ export function AppMainColumn(props: AppMainColumnProps) {
           onSelectReasoning={level => update({ reasoning: level })}
           approvalPolicy={stream.approvalPolicy}
           onChangeApprovalPolicy={p => void stream.setApprovalPolicy(p)}
+          skillsCatalog={stream.skillsCatalog}
           onOpenSettings={() => props.onOpenSettingsSection("models")}
           starting={creatingSession}
           error={launchError}

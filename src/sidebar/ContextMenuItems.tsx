@@ -29,11 +29,14 @@ async function copyToClipboard(text: string) {
 
 export function ProjectContextMenuItems({
   project,
+  pinned,
+  pinShortcut = "⌥⌘P",
   archived,
   submenu,
   flipSub,
   onSetSubmenu,
   onClose,
+  onTogglePinProject,
   onNewProjectStream,
   onOpenExternalApp,
   onOpenProjectSettings,
@@ -41,11 +44,14 @@ export function ProjectContextMenuItems({
   onDeleteProject,
 }: {
   project: Project
+  pinned: boolean
+  pinShortcut?: string
   archived: boolean
   submenu: SubmenuKind
   flipSub: boolean
   onSetSubmenu: (next: SubmenuKind | ((prev: SubmenuKind) => SubmenuKind)) => void
   onClose: () => void
+  onTogglePinProject: (project: Project) => void
   onNewProjectStream: (project: Project) => void
   onOpenExternalApp: (app: "cursor" | "vscode" | "windsurf" | "finder", path?: string | null) => void
   onOpenProjectSettings: (project: Project) => void
@@ -54,9 +60,14 @@ export function ProjectContextMenuItems({
 }) {
   return (
     <>
-      <button type="button" className="ade-ctx-item" role="menuitem" onClick={() => { onNewProjectStream(project); onClose() }}>
+      <button type="button" className="ade-ctx-item" role="menuitem" onMouseEnter={() => onSetSubmenu(null)} onClick={() => { onNewProjectStream(project); onClose() }}>
         <span>New session</span>
         <span className="ade-ctx-shortcut">N</span>
+      </button>
+
+      <button type="button" className="ade-ctx-item" role="menuitem" onMouseEnter={() => onSetSubmenu(null)} onClick={() => { onTogglePinProject(project); onClose() }}>
+        <span>{pinned ? "Unpin" : "Pin"}</span>
+        {pinShortcut ? <span className="ade-ctx-shortcut">{pinShortcut}</span> : null}
       </button>
 
       <div

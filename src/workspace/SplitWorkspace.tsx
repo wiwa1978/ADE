@@ -25,6 +25,7 @@ import { confirmRestore, restoreCheckpoint, type CheckpointInfo } from "../panel
 import type { PullRequestInfo } from "../panels/PullRequestPanel"
 import { WorkspaceHeaderBar } from "./WorkspaceHeaderBar"
 import { BesidePane } from "./BesidePane"
+import { ConversationLayout } from "./ConversationLayout"
 import { DEFAULT_KEYBINDINGS, formatShortcut, matchesChord, type KeybindingMap } from "../keybindings"
 
 export function SplitWorkspace({
@@ -358,7 +359,10 @@ export function SplitWorkspace({
   const runningProcessesCount = processes.filter(p => p.status === "running").length
 
   return (
-    <div className="ade-workspace-shell">
+    <ConversationLayout
+      containerRef={containerRef}
+      primaryWidth={showBeside ? `${splitRatio}%` : "100%"}
+      header={
       <WorkspaceHeaderBar
         session={session}
         isBusy={isBusy}
@@ -393,91 +397,66 @@ export function SplitWorkspace({
         onOpenArtifact={() => openArtifact()}
         onOpenProcesses={openProcesses}
       />
-
-      <div className="ade-split-container" ref={containerRef}>
-        <section className="ade-pane ade-pane-primary" style={showBeside ? { width: `${splitRatio}%` } : { width: "100%" }}>
-          <div className="ade-pane-scroll ade-lead-scroll">
-            <TimelineView
-              timeline={timeline}
-              fallbackMessages={session.messages}
-              approvals={approvals}
-              subagents={subagents}
-              busy={isBusy}
-              emptyTitle={session.label}
-              emptySubtitle={hasWorkspace
-                ? `The agent works on ${session.workspace?.branch ? `branch ${session.workspace.branch}` : "the project folder"}. Describe a task below. Review its work in Changes, run it with Run or Terminal, and ship it from Pull request.`
-                : session.workspace?.removed
-                  ? "This session was archived and its worktree removed. Restore it from Archived in the sidebar to continue."
-                  : "Ask anything, plan work with /plan, or preview web pages in the built-in browser."}
-              onResolveApproval={onResolveApproval}
-              onOpenFile={hasWorkspace ? openFile : undefined}
-              onOpenSubagent={openSubagent}
-              onOpenBrowser={openBrowser}
-              onOpenExternalBrowser={onOpenExternalBrowser}
-              onOpenArtifact={openArtifact}
-              onRewind={hasWorkspace ? content => void rewindTo(content) : undefined}
-            />
-          </div>
-
-          <div className="ade-composer-anchor">
-            <AmbientTracksBar
-              subagents={subagents}
-              gitSummary={gitSummary}
-              tasks={tasks}
-              artifacts={artifacts}
-              processes={processes}
-              approvals={approvals}
-              approvalPolicy={approvalPolicy}
-              hasWorkspace={hasWorkspace}
-              onOpenSubagent={openSubagent}
-              onStopSubagent={id => void onStopSubagent(id)}
-              onOpenDiff={() => openDiff()}
-              onOpenArtifact={openArtifact}
-              onOpenProcesses={openProcesses}
-              onChangeApprovalPolicy={onChangeApprovalPolicy}
-              usage={timeline?.usage}
-              onOpenProgress={openProgress}
-            />
-
-            <ComposerDock
-              draft={draft}
-              onDraftChange={onDraftChange}
-              busy={isBusy}
-              modelCatalog={modelCatalog}
-              selectedProvider={selectedProvider}
-              selectedModel={selectedModel}
-              onSelectModel={onSelectModel}
-              reasoning={reasoning}
-              onSelectReasoning={onSelectReasoning}
-              approvalPolicy={approvalPolicy}
-              onChangeApprovalPolicy={onChangeApprovalPolicy}
-              onOpenSettings={onOpenSettings}
-              attachments={attachments}
-              onAttachFiles={onAttachFiles}
-              onRemoveAttachment={onRemoveAttachment}
-              skillsCatalog={skillsCatalog}
-              hasWorkspace={hasWorkspace}
-              onSubmit={onSendMessage}
-              onSteer={onSteerSession}
-              onAbort={onAbortSession}
-              onCompact={onCompactSession}
-              onQuickOpenPanel={panel => {
-                if (panel === "files") openFiles()
-                else if (panel === "diff") openDiff()
-                else if (panel === "browser") openBrowser()
-                else if (panel === "terminal") toggleBottomTerminal()
-                else if (panel === "pr") openPullRequest()
-              }}
-              textareaRef={textareaRef}
-              sendChord={keybindings.sendMessage}
-              newLineChord={keybindings.newLine}
-              engineLabel={session.engine === "claude-code" ? "Claude Code" : session.engine === "codex" ? "Codex" : undefined}
-              sessionId={session.id}
-            />
-          </div>
-        </section>
-
-        {showBeside && activeBesideTab ? (
+      }
+      aboveComposer={
+        <AmbientTracksBar
+          subagents={subagents}
+          gitSummary={gitSummary}
+          tasks={tasks}
+          artifacts={artifacts}
+          processes={processes}
+          approvals={approvals}
+          approvalPolicy={approvalPolicy}
+          hasWorkspace={hasWorkspace}
+          onOpenSubagent={openSubagent}
+          onStopSubagent={id => void onStopSubagent(id)}
+          onOpenDiff={() => openDiff()}
+          onOpenArtifact={openArtifact}
+          onOpenProcesses={openProcesses}
+          onChangeApprovalPolicy={onChangeApprovalPolicy}
+          usage={timeline?.usage}
+          onOpenProgress={openProgress}
+        />
+      }
+      composer={
+        <ComposerDock
+          draft={draft}
+          onDraftChange={onDraftChange}
+          busy={isBusy}
+          modelCatalog={modelCatalog}
+          selectedProvider={selectedProvider}
+          selectedModel={selectedModel}
+          onSelectModel={onSelectModel}
+          reasoning={reasoning}
+          onSelectReasoning={onSelectReasoning}
+          approvalPolicy={approvalPolicy}
+          onChangeApprovalPolicy={onChangeApprovalPolicy}
+          onOpenSettings={onOpenSettings}
+          attachments={attachments}
+          onAttachFiles={onAttachFiles}
+          onRemoveAttachment={onRemoveAttachment}
+          skillsCatalog={skillsCatalog}
+          hasWorkspace={hasWorkspace}
+          onSubmit={onSendMessage}
+          onSteer={onSteerSession}
+          onAbort={onAbortSession}
+          onCompact={onCompactSession}
+          onQuickOpenPanel={panel => {
+            if (panel === "files") openFiles()
+            else if (panel === "diff") openDiff()
+            else if (panel === "browser") openBrowser()
+            else if (panel === "terminal") toggleBottomTerminal()
+            else if (panel === "pr") openPullRequest()
+          }}
+          textareaRef={textareaRef}
+          sendChord={keybindings.sendMessage}
+          newLineChord={keybindings.newLine}
+          engineLabel={session.engine === "claude-code" ? "Claude Code" : session.engine === "codex" ? "Codex" : undefined}
+          sessionId={session.id}
+        />
+      }
+      beside={
+        showBeside && activeBesideTab ? (
           <>
             <div
               className="ade-split-divider"
@@ -535,11 +514,10 @@ export function SplitWorkspace({
               onPullRequestChange={setPullRequest}
             />
           </>
-        ) : null}
-      </div>
-
-      {/* Bottom-Docked Resizable Terminal Drawer (stays mounted once opened so the shell session persists when collapsed) */}
-      {bottomTerminalMounted ? (
+        ) : null
+      }
+      footer={
+        bottomTerminalMounted ? (
         <section
           className="ade-bottom-drawer"
           style={{ height: `${bottomTerminalHeight}px` }}
@@ -580,7 +558,29 @@ export function SplitWorkspace({
             />
           </div>
         </section>
-      ) : null}
-    </div>
+      ) : null
+      }
+    >
+      <TimelineView
+        timeline={timeline}
+        fallbackMessages={session.messages}
+        approvals={approvals}
+        subagents={subagents}
+        busy={isBusy}
+        emptyTitle={session.label}
+        emptySubtitle={hasWorkspace
+          ? `The agent works on ${session.workspace?.branch ? `branch ${session.workspace.branch}` : "the project folder"}. Describe a task below. Review its work in Changes, run it with Run or Terminal, and ship it from Pull request.`
+          : session.workspace?.removed
+            ? "This session was archived and its worktree removed. Restore it from Archived in the sidebar to continue."
+            : "Ask anything, plan work with /plan, or preview web pages in the built-in browser."}
+        onResolveApproval={onResolveApproval}
+        onOpenFile={hasWorkspace ? openFile : undefined}
+        onOpenSubagent={openSubagent}
+        onOpenBrowser={openBrowser}
+        onOpenExternalBrowser={onOpenExternalBrowser}
+        onOpenArtifact={openArtifact}
+        onRewind={hasWorkspace ? content => void rewindTo(content) : undefined}
+      />
+    </ConversationLayout>
   )
 }

@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState, type FormEvent } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
-  ArrowUp,
   Check,
   ChevronDown,
   Cpu,
@@ -14,17 +13,18 @@ import {
   Search,
   Server,
   Settings2,
-  Sparkles,
   X,
 } from "lucide-react"
 import { request } from "../../api"
-import type { ApprovalPolicy, GitHubIssue, ProviderCatalogEntry, StartFrom, TaskStart } from "../../app-types"
+import type { ApprovalPolicy, GitHubIssue, ProviderCatalogEntry, SkillsAndRulesCatalog, StartFrom, TaskStart } from "../../app-types"
 import type { Project } from "../../ProjectsView"
-import { ModelPicker } from "../composer/ModelPicker"
+import { ComposerDock } from "../composer/ComposerDock"
 import { StartFromPicker, type StartChoice } from "./StartFromPicker"
 import { LinearIssuePicker, type LinearIssue } from "./LinearIssuePicker"
 import { runTargetDescriptions, targetLabel, targetUnavailable, useRunTargets, type RunTarget, type TargetSettings } from "../run-targets"
-import { DEFAULT_KEYBINDINGS, formatShortcut, matchesChord, type KeybindingMap } from "../keybindings"
+import { DEFAULT_KEYBINDINGS, formatShortcut, type KeybindingMap } from "../keybindings"
+import { ConversationLayout } from "./ConversationLayout"
+import { WorkspaceEmptyHero } from "./WorkspaceEmptyHero"
 
 type EngineId = "pi" | "claude-code" | "codex"
 type OpenMenu = null | "project" | "workspace" | "runOn" | "attempts"
@@ -61,6 +61,7 @@ export function NewSessionView({
   onSelectReasoning,
   approvalPolicy,
   onChangeApprovalPolicy,
+  skillsCatalog,
   onOpenSettings,
   starting,
   error,
@@ -83,6 +84,7 @@ export function NewSessionView({
   onSelectReasoning: (level: string) => void
   approvalPolicy?: ApprovalPolicy
   onChangeApprovalPolicy?: (policy: ApprovalPolicy) => void
+  skillsCatalog?: SkillsAndRulesCatalog
   onOpenSettings?: () => void
   starting: boolean
   error: string
@@ -159,7 +161,7 @@ export function NewSessionView({
     onSelectProject(nextId)
     setStartChoice({ mode: "new" })
     setRunOn(null)
-    const proj = projects.find(p => p.id === nextId)
+    const proj = unarchivedProjects.find(p => p.id === nextId)
     setRepository(proj?.repository ?? "")
     setKind(proj?.repository ? "worktree" : "checkout")
     setLinkedIssue(null)
@@ -232,12 +234,13 @@ export function NewSessionView({
   const startTitle = startChoice.mode === "branch" ? startChoice.branch
     : startChoice.mode === "pr" && startChoice.number ? `PR #${startChoice.number}${startChoice.title ? `: ${startChoice.title}` : ""}` : undefined
   const canAttempt = kind === "worktree" && startChoice.mode === "new"
-  const canSubmit = !starting && !startFromIncomplete && (Boolean(prompt.trim()) || Boolean(startFrom)) && (kind === "none" || Boolean(effectiveRepo.trim()))
+  const readyToStart = !starting && !startFromIncomplete && (kind === "none" || Boolean(effectiveRepo.trim()))
   const needsManualRepo = kind !== "none" && !activeProject?.repository
 
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault()
-    if (!canSubmit) return
+  const handleSubmitText = (text: string) => {
+    if (!readyToStart) return
+    const trimmed = text.trim()
+    if (!trimmed && !startFrom) return
     const customTitle = sessionTitle.trim()
     const resolvedTitle = customTitle
       || startTitle
@@ -246,7 +249,7 @@ export function NewSessionView({
       projectId: selectedProjectId,
       kind,
       repository: kind === "none" ? "" : effectiveRepo.trim(),
-      prompt: prompt.trim(),
+      prompt: trimmed,
       githubIssue: linkedIssue ?? undefined,
       engine: "pi",
       ...(startFrom ? { startFrom } : {}),
@@ -266,44 +269,37 @@ export function NewSessionView({
   const runOnAvailable = runTargets?.available ?? ["local", "docker"]
 
   return (
-    <div className="flex flex-1 items-center justify-center overflow-y-auto p-6">
-      <div className="w-full max-w-2xl flex flex-col gap-5">
-        {/* Quiet, centered header with inline editable session name */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            <div className="w-9 h-9 rounded-xl grid place-items-center bg-[rgb(var(--surface))] text-[rgb(var(--foreground))] border border-[rgb(var(--border))] shrink-0">
-              <Sparkles className="size-4 opacity-80" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <input
-                type="text"
-                className="w-full bg-transparent border-0 outline-none text-[17px] font-semibold tracking-tight text-[rgb(var(--foreground))] placeholder:text-[rgb(var(--foreground)/0.9)] focus:placeholder:opacity-45 p-0"
-                placeholder="New session"
-                aria-label="Session name"
-                maxLength={120}
-                value={sessionTitle}
-                onChange={e => setSessionTitle(e.target.value)}
-              />
-              <p className="text-[12.5px] opacity-60 mt-0.5 mb-0">
-                Click the title above to name this session, or describe what you want built.
-              </p>
-            </div>
+    <ConversationLayout
+      header={
+        <header className="ade-workspace-header">
+          <div className="ade-header-left">
+            <span className="ade-header-title ade-truncate">
+              {sessionTitle.trim() || "New session"}
+            </span>
+            {activeProject ? (
+              <span className="ade-pill">{activeProject.name}</span>
+            ) : null}
           </div>
-          {onOpenEnvironmentPalette ? (
-            <button
-              type="button"
-              className="ade-ns-pill shrink-0"
-              onClick={onOpenEnvironmentPalette}
-              title={keybindings.switchEnvironment ? `Switch environment (${formatShortcut(keybindings.switchEnvironment)})` : "Switch environment"}
-            >
-              <Server className="size-3.5 opacity-70" />
-              <span>{environmentName}</span>
-            </button>
-          ) : null}
-        </div>
+          <div className="ade-header-right">
+            {onOpenEnvironmentPalette ? (
+              <button
+                type="button"
+                className="ade-header-tool-btn"
+                onClick={onOpenEnvironmentPalette}
+                title={keybindings.switchEnvironment ? `Switch environment (${formatShortcut(keybindings.switchEnvironment)})` : "Switch environment"}
+              >
+                <Server className="size-3.5" />
+                <span>{environmentName}</span>
+              </button>
+            ) : null}
+          </div>
+        </header>
+      }
+      aboveComposer={
+        <div className="ade-ns-above">
+          {error ? <div className="ade-banner-error">{error}</div> : null}
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          {/* Compact Inline Context Pill Bar */}
+          {/* Compact Context Pill Row — sits cleanly above the shared ComposerDock */}
           <div className="ade-ns-pills" ref={pillBarRef}>
             {/* Project Picker Pill */}
             <div className="ade-ns-menu-anchor">
@@ -315,13 +311,13 @@ export function NewSessionView({
                 onClick={() => setOpenMenu(m => (m === "project" ? null : "project"))}
               >
                 <FolderGit2 className="size-3.5 opacity-70" />
-                <span className="truncate max-w-[180px]">{activeProject ? activeProject.name : "No project"}</span>
+                <span className="truncate max-w-[160px]">{activeProject ? activeProject.name : "No project"}</span>
                 <ChevronDown className="size-3 opacity-55" />
               </button>
 
               {openMenu === "project" ? (
-                <div className="ade-ns-popover" role="dialog" aria-label="Choose project">
-                  {projects.length > 4 ? (
+                <div className="ade-ns-popover ade-ns-popover-up" role="dialog" aria-label="Choose project">
+                  {unarchivedProjects.length > 4 ? (
                     <div className="ade-ns-popover-search">
                       <Search className="size-3.5 opacity-55 shrink-0" />
                       <input
@@ -392,7 +388,7 @@ export function NewSessionView({
               </button>
 
               {openMenu === "workspace" ? (
-                <div className="ade-ns-popover" role="dialog" aria-label="Workspace mode">
+                <div className="ade-ns-popover ade-ns-popover-up" role="dialog" aria-label="Workspace mode">
                   <div className="ade-ns-popover-list">
                     {WORKSPACE_OPTIONS.map(opt => (
                       <button
@@ -429,14 +425,16 @@ export function NewSessionView({
                 </button>
 
                 {openMenu === "runOn" ? (
-                  <div className="ade-ns-popover !w-[280px]" role="dialog" aria-label="Run on target">
+                  <div className="ade-ns-popover ade-ns-popover-up !w-[280px]" role="dialog" aria-label="Run on target">
                     <div className="ade-ns-popover-list">
                       {runOnAvailable.map(target => {
-                        const blocked = targetUnavailable(
-                          target,
-                          runTargets,
-                          projectRunOn && projectRunOn.projectId === selectedProjectId ? projectRunOn : { sshHost: "" },
-                        )
+                        const blocked = runTargets?.docker
+                          ? targetUnavailable(
+                              target,
+                              runTargets,
+                              projectRunOn && projectRunOn.projectId === selectedProjectId ? projectRunOn : { sshHost: "" },
+                            )
+                          : ""
                         const detail =
                           target === "docker"
                             ? `${runTargetDescriptions.docker} Image: ${projectRunOn?.image ?? "node:22-bookworm"}.`
@@ -466,7 +464,7 @@ export function NewSessionView({
               </div>
             ) : null}
 
-            {/* Attempts Pill (Best of N) */}
+            {/* Attempts Pill */}
             {canAttempt ? (
               <div className="ade-ns-menu-anchor">
                 <button
@@ -482,7 +480,7 @@ export function NewSessionView({
                 </button>
 
                 {openMenu === "attempts" ? (
-                  <div className="ade-ns-popover !w-[240px]" role="dialog" aria-label="Attempts">
+                  <div className="ade-ns-popover ade-ns-popover-up !w-[240px]" role="dialog" aria-label="Attempts">
                     <div className="ade-ns-popover-list">
                       {[1, 2, 3].map(count => (
                         <button
@@ -506,14 +504,9 @@ export function NewSessionView({
               </div>
             ) : null}
 
-            {/* Quick Add Project button */}
+            {/* Quick Add Project */}
             {onAddProject ? (
-              <button
-                type="button"
-                className="ade-ns-pill ade-ns-pill-quiet"
-                onClick={onAddProject}
-                title="Create a new project"
-              >
+              <button type="button" className="ade-ns-pill ade-ns-pill-quiet" onClick={onAddProject} title="Create a new project">
                 <FolderPlus className="size-3.5 opacity-70" />
                 <span>New project</span>
               </button>
@@ -521,18 +514,13 @@ export function NewSessionView({
 
             {/* GitHub Issue trigger */}
             {activeProject?.githubUrl && !linkedIssue ? (
-              <button
-                type="button"
-                className="ade-ns-pill ade-ns-pill-quiet"
-                onClick={() => setIssueOpen(v => !v)}
-              >
+              <button type="button" className="ade-ns-pill ade-ns-pill-quiet" onClick={() => setIssueOpen(v => !v)}>
                 <Link2 className="size-3.5 opacity-70" />
                 <span>Link issue</span>
               </button>
             ) : null}
           </div>
 
-          {/* Quiet inline folder attachment bar when the project/session has no folder yet */}
           {needsManualRepo ? (
             <div className="ade-ns-folder-bar">
               <FolderOpen className="size-4 opacity-60 shrink-0" />
@@ -569,7 +557,6 @@ export function NewSessionView({
             />
           ) : null}
 
-          {/* Linked GitHub Issue / Picker */}
           {linkedIssue ? (
             <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[rgb(var(--primary)/0.45)] bg-[rgb(var(--primary)/0.1)] text-xs">
               <span className="truncate">
@@ -632,54 +619,48 @@ export function NewSessionView({
               if (!prompt.trim()) setPrompt(`Work on ${issue.identifier}: ${issue.title}\n${issue.url}${issue.description ? `\n\n${issue.description}` : ""}`)
             }}
           />
-
-          {/* Main Task Prompt Composer */}
-          <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] focus-within:border-[rgb(var(--primary)/0.75)] transition-colors overflow-hidden">
-            <textarea
-              className="w-full bg-transparent border-0 outline-none resize-none px-4 pt-3.5 pb-2 text-[13.5px] leading-relaxed text-[rgb(var(--foreground))]"
-              rows={5}
-              placeholder={startFrom
-                ? "Optional: what should the agent do on this branch? Leave empty to just open it."
-                : `Describe the task. ${formatShortcut(keybindings.sendMessage)} to start, ${formatShortcut(keybindings.newLine)} for a new line.`}
-              value={prompt}
-              onChange={e => setPrompt(e.target.value)}
-              onKeyDown={e => {
-                if (matchesChord(e.nativeEvent, keybindings.newLine)) return
-                if (matchesChord(e.nativeEvent, keybindings.sendMessage)) {
-                  e.preventDefault()
-                  if (canSubmit) handleSubmit(e)
-                }
-              }}
-            />
-            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 border-t border-[rgb(var(--border)/0.65)] bg-[rgb(var(--surface-raised)/0.45)]">
-              <div className="flex items-center gap-2">
-                <ModelPicker
-                  catalog={modelCatalog}
-                  selectedProvider={selectedProvider}
-                  selectedModel={selectedModel}
-                  reasoning={reasoning}
-                  approvalPolicy={approvalPolicy}
-                  onSelectModel={onSelectModel}
-                  onSelectReasoning={onSelectReasoning}
-                  onChangeApprovalPolicy={onChangeApprovalPolicy}
-                  onOpenSettings={onOpenSettings}
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="sf-btn-primary"
-                disabled={!canSubmit}
-              >
-                <ArrowUp className="size-3.5" />
-                {starting ? "Starting…" : canAttempt && attemptCount > 1 ? `Start ${attemptCount} attempts` : "Start session"}
-              </button>
-            </div>
-          </div>
-
-          {error ? <div className="ade-banner-error">{error}</div> : null}
-        </form>
+        </div>
+      }
+      composer={
+        <ComposerDock
+          draft={prompt}
+          onDraftChange={setPrompt}
+          busy={starting}
+          disabled={!readyToStart}
+          canSubmitEmpty={Boolean(startFrom)}
+          placeholder={startFrom
+            ? "Optional: what should the agent do on this branch? Leave empty to just open it."
+            : `Message ADE… ${formatShortcut(keybindings.sendMessage)} to start, ${formatShortcut(keybindings.newLine)} for a new line.`}
+          submitTitle={canAttempt && attemptCount > 1 ? `Start ${attemptCount} attempts` : "Start session"}
+          modelCatalog={modelCatalog}
+          selectedProvider={selectedProvider}
+          selectedModel={selectedModel}
+          onSelectModel={onSelectModel}
+          reasoning={reasoning}
+          onSelectReasoning={onSelectReasoning}
+          approvalPolicy={approvalPolicy}
+          onChangeApprovalPolicy={onChangeApprovalPolicy}
+          onOpenSettings={onOpenSettings}
+          skillsCatalog={skillsCatalog}
+          hasWorkspace={Boolean(effectiveRepo.trim())}
+          sendChord={keybindings.sendMessage}
+          newLineChord={keybindings.newLine}
+          onSubmit={handleSubmitText}
+        />
+      }
+    >
+      <div className="ade-timeline">
+        <WorkspaceEmptyHero
+          title={sessionTitle.trim() || "New session"}
+          subtitle="Click the title above to name this session, or describe what you want built, planned, or investigated."
+          editableTitle={{
+            value: sessionTitle,
+            placeholder: "New session",
+            ariaLabel: "Session name",
+            onChange: setSessionTitle,
+          }}
+        />
       </div>
-    </div>
+    </ConversationLayout>
   )
 }

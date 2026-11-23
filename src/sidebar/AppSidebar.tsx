@@ -7,6 +7,7 @@ import type { InboxEntry } from "../session-state"
 import { Sidebar, type SidebarSelection } from "./Sidebar"
 import type { ContextMenuTarget } from "./SidebarContextMenu"
 import { DEFAULT_KEYBINDINGS, formatShortcut, type KeybindingMap } from "../keybindings"
+import type { AddProjectSource } from "../projects/AddProjectWizard"
 
 type AppSidebarProps = {
   selection: SidebarSelection
@@ -33,9 +34,12 @@ type AppSidebarProps = {
   onCancelRename: () => void
   onSubmitRename: (sess: Conversation) => Promise<void>
   onOpenNewSession: (projectId?: string) => void
+  onOpenCreateWorktree?: () => void
   onOpenCommandCenter: () => void
   onOpenInbox: () => void
-  onOpenAddProject: () => void
+  onOpenAddProject: (initialSource?: AddProjectSource) => void
+  onMarkAllRead?: () => void
+  onClearCompleted?: () => void
   onOpenProject: (projectId: string) => void
   onToggleExpandProject: (projectId: string) => void
   onOpenSession: (session: Conversation) => void
@@ -91,7 +95,7 @@ export function AppSidebar(props: AppSidebarProps) {
         <button type="button" className="ade-icon-btn" onClick={props.onOpenCommandCenter} title={searchBadge ? `Search (${searchBadge})` : "Search"} aria-label="Search">
           <Search className="size-4" />
         </button>
-        <button type="button" className="ade-icon-btn" onClick={props.onOpenAddProject} title={addProjectBadge ? `Add project (${addProjectBadge})` : "Add project"} aria-label="Add project">
+        <button type="button" className="ade-icon-btn" onClick={() => props.onOpenAddProject()} title={addProjectBadge ? `Add project (${addProjectBadge})` : "Add project"} aria-label="Add project">
           <FolderPlus className="size-4" />
         </button>
         <button type="button" className="ade-icon-btn relative" onClick={props.onOpenInbox} title={inboxBadge ? `Inbox (${inboxBadge})` : "Inbox"} aria-label={`Inbox, ${props.inboxCount} need you`}>
@@ -131,9 +135,12 @@ export function AppSidebar(props: AppSidebarProps) {
         keybindings={kb}
         onCollapse={() => setSidebarOpen(false)}
         onNewSession={props.onOpenNewSession}
+        onCreateWorktree={props.onOpenCreateWorktree}
         onSearch={props.onOpenCommandCenter}
         onOpenInbox={props.onOpenInbox}
         onAddProject={props.onOpenAddProject}
+        onMarkAllRead={props.onMarkAllRead}
+        onClearCompleted={props.onClearCompleted}
         onOpenProject={props.onOpenProject}
         onToggleProject={props.onToggleExpandProject}
         onOpenSession={props.onOpenSession}

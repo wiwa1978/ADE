@@ -159,6 +159,11 @@ export function useSessions(params: {
     })
   }, [])
 
+  const markAllRead = useCallback(() => {
+    setUnreadIds([])
+    writeStoredIds("ade.unread-ids", [])
+  }, [])
+
   const archivedIds = [
     ...sessions.filter(s => s.archivedAt).map(s => s.id),
     ...projects.filter(p => p.archivedAt).map(p => `project:${p.id}`),
@@ -611,6 +616,7 @@ export function useSessions(params: {
     togglePin,
     toggleUnread,
     clearUnread,
+    markAllRead,
     toggleArchive,
     attachFiles,
     sendMessage,

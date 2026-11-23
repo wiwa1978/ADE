@@ -36,11 +36,13 @@ export function ComposerDock({
   approvalPolicy,
   onChangeApprovalPolicy,
   onOpenSettings,
-  attachments,
+  attachments = [],
   onAttachFiles,
   onRemoveAttachment,
-  skillsCatalog,
+  skillsCatalog = { skills: [], rules: [], commands: [] },
   hasWorkspace,
+  canSubmitEmpty = false,
+  submitTitle,
   onSubmit,
   onSteer,
   onAbort,
@@ -66,11 +68,13 @@ export function ComposerDock({
   approvalPolicy?: ApprovalPolicy
   onChangeApprovalPolicy?: (policy: ApprovalPolicy) => void
   onOpenSettings?: () => void
-  attachments: { id: string; name: string; content: string }[]
+  attachments?: { id: string; name: string; content: string }[]
   onAttachFiles?: (files: FileList | null) => void
   onRemoveAttachment?: (id: string) => void
-  skillsCatalog: SkillsAndRulesCatalog
+  skillsCatalog?: SkillsAndRulesCatalog
   hasWorkspace: boolean
+  canSubmitEmpty?: boolean
+  submitTitle?: string
   onSubmit: (text: string) => void
   onSteer?: (text: string, mode: "steer" | "follow-up") => void
   onAbort?: () => void
@@ -128,7 +132,8 @@ export function ComposerDock({
 
   const expandAndDispatch = (mode: "normal" | "steer" | "follow-up" = "normal") => {
     const trimmed = draft.trim()
-    if (!trimmed) return
+    if (!trimmed && !canSubmitEmpty) return
+    if (disabled) return
     // Expand leading /command if it matches a known slash command
     const leadMatch = /^\/([a-z0-9-_]+)(?:\s+([\s\S]*))?$/i.exec(trimmed)
     let finalPrompt = trimmed
@@ -424,8 +429,8 @@ export function ComposerDock({
             <button
               type="submit"
               className="ade-send-btn"
-              disabled={disabled || !draft.trim()}
-              title={busy ? "Steer agent (Enter)" : "Send message (Enter)"}
+              disabled={disabled || (!canSubmitEmpty && !draft.trim())}
+              title={submitTitle ?? (busy ? "Steer agent (Enter)" : "Send message (Enter)")}
             >
               {busy ? <CornerDownLeft className="size-4" /> : <ArrowUp className="size-4" />}
             </button>

@@ -1,7 +1,32 @@
 import { useCallback, useEffect, useState } from "react"
 import { request } from "../../api"
-import type { ProviderCatalogEntry, RuntimeHealth } from "../../app-types"
+import type { ProviderCatalogEntry, ProviderTool, RuntimeHealth } from "../../app-types"
 import type { Settings } from "../../useSettings"
+
+function mergeCliToolsIntoCatalog(
+  catalog: ProviderCatalogEntry[],
+  tools: ProviderTool[],
+): ProviderCatalogEntry[] {
+  if (!tools.length) return catalog
+  const seen = new Set(catalog.map(p => p.id))
+  const merged = [...catalog]
+  for (const tool of tools) {
+    if (tool.kind !== "cli" || !tool.installed || !tool.enabled || seen.has(tool.id)) continue
+    seen.add(tool.id)
+    const toolModels = Array.isArray(tool.models) ? tool.models : []
+    merged.push({
+      id: tool.id,
+      name: tool.name,
+      kind: "cli",
+      configured: true,
+      enabled: true,
+      defaultModel: toolModels[0]?.id ?? "default",
+      setupMessage: "",
+      models: toolModels,
+    })
+  }
+  return merged
+}
 
 export function useModelSelection(params: {
   settings: Settings
@@ -11,6 +36,7 @@ export function useModelSelection(params: {
   const { settings, environmentVersion, screen } = params
   const [runtime, setRuntime] = useState<RuntimeHealth | null>(null)
   const [modelCatalog, setModelCatalog] = useState<ProviderCatalogEntry[]>([])
+  const [cliTools, setCliTools] = useState<ProviderTool[]>([])
   const [runtimeError, setRuntimeError] = useState("")
 
   const loadHealth = useCallback(async () => {
@@ -27,8 +53,16 @@ export function useModelSelection(params: {
 
   const loadModelCatalog = useCallback(async () => {
     try {
-      const catalog = await request<{ providers: ProviderCatalogEntry[] }>("/api/models/catalog")
+      const [catalog, tools] = await Promise.all([
+        request<{ providers: ProviderCatalogEntry[] }>("/api/models/catalog"),
+        request<{ providers: ProviderTool[] }>("/api/provider-tools", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "status" }),
+        }).catch(() => ({ providers: [] as ProviderTool[] })),
+      ])
       if (Array.isArray(catalog?.providers)) setModelCatalog(catalog.providers)
+      if (Array.isArray(tools?.providers)) setCliTools(tools.providers)
     } catch {
       // The runtime may still be starting; health polling surfaces connection errors.
     }
@@ -53,6 +87,15 @@ export function useModelSelection(params: {
         if (!cancelled && Array.isArray(catalog?.providers)) setModelCatalog(catalog.providers)
       })
       .catch(() => undefined)
+    void request<{ providers: ProviderTool[] }>("/api/provider-tools", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "status" }),
+    })
+      .then(tools => {
+        if (!cancelled && Array.isArray(tools?.providers)) setCliTools(tools.providers)
+      })
+      .catch(() => undefined)
     return () => { cancelled = true }
   }, [settings.provider, environmentVersion])
 
@@ -65,11 +108,20 @@ export function useModelSelection(params: {
         if (!cancelled && Array.isArray(catalog?.providers)) setModelCatalog(catalog.providers)
       })
       .catch(() => undefined)
+    void request<{ providers: ProviderTool[] }>("/api/provider-tools", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "status" }),
+    })
+      .then(tools => {
+        if (!cancelled && Array.isArray(tools?.providers)) setCliTools(tools.providers)
+      })
+      .catch(() => undefined)
     return () => { cancelled = true }
   }, [screen])
 
   const matchingRuntime = runtime && (!settings.provider || runtime.provider === settings.provider) ? runtime : null
-  const effectiveCatalog: ProviderCatalogEntry[] = (() => {
+  const baseCatalog: ProviderCatalogEntry[] = (() => {
     if (modelCatalog.length > 0) return modelCatalog
     if (!runtime) return []
     return (runtime.providers?.length ? runtime.providers : [{ id: runtime.provider, name: runtime.provider }]).map(p => ({
@@ -83,21 +135,24 @@ export function useModelSelection(params: {
       models: p.id === runtime.provider ? runtime.models : [],
     }))
   })()
+  const effectiveCatalog = mergeCliToolsIntoCatalog(baseCatalog, cliTools)
 
-  // A saved provider that the harness can no longer run (e.g. an old CLI-tool choice) falls back to the runtime default.
+  // Prefer the saved provider if it's configured (or if nothing else is); otherwise pick the first configured provider.
+  const savedEntry = settings.provider ? effectiveCatalog.find(p => p.id === settings.provider) : undefined
+  const firstConfigured = effectiveCatalog.find(p => p.configured)
   const effectiveProvider =
-    settings.provider && (!effectiveCatalog.length || effectiveCatalog.some(p => p.id === settings.provider))
-      ? settings.provider
-      : runtime?.provider || effectiveCatalog.find(p => p.configured)?.id || effectiveCatalog[0]?.id || "anthropic"
+    savedEntry && (savedEntry.configured || !firstConfigured)
+      ? savedEntry.id
+      : firstConfigured?.id || (settings.provider && !effectiveCatalog.length ? settings.provider : runtime?.provider || effectiveCatalog[0]?.id || "anthropic")
   const activeCatalogProvider = effectiveCatalog.find(p => p.id === effectiveProvider) ?? effectiveCatalog[0]
   const availableModels = activeCatalogProvider?.models?.length
     ? activeCatalogProvider.models
     : (matchingRuntime?.models ?? runtime?.models ?? [])
   const selectedModel = availableModels.some(m => m.id === settings.model)
     ? settings.model
-    : (settings.model || activeCatalogProvider?.defaultModel || matchingRuntime?.defaultModel || runtime?.defaultModel || "")
+    : (activeCatalogProvider?.defaultModel || settings.model || matchingRuntime?.defaultModel || runtime?.defaultModel || "")
   const modelReady = Boolean(activeCatalogProvider?.configured && selectedModel)
-  const modelSetupMessage = activeCatalogProvider?.setupMessage || "Set up a model provider in Settings → Models."
+  const modelSetupMessage = activeCatalogProvider?.setupMessage || "Set up a model provider in Settings → Providers."
   const providerName =
     activeCatalogProvider?.name ?? runtime?.providers.find(p => p.id === effectiveProvider)?.name ?? effectiveProvider
 

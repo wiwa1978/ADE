@@ -21,6 +21,7 @@ import {
   XCircle,
 } from "lucide-react"
 import { MessageContent } from "../../MessageContent"
+import { WorkspaceEmptyHero } from "../workspace/WorkspaceEmptyHero"
 import type {
   ConversationMessage,
   ConversationTimelineSnapshot,
@@ -321,11 +322,10 @@ export function TimelineView({
   return (
     <div className="ade-timeline">
       {items.length === 0 && approvals.length === 0 ? (
-        <div className="ade-timeline-empty">
-          <div className="ade-empty-badge"><Sparkles className="size-4" /></div>
-          <h3>{emptyTitle || "Ready to build"}</h3>
-          <p>{emptySubtitle || "Ask the agent to explore the codebase, spawn parallel subagents, run commands, review diffs, or inspect your app in the built-in browser."}</p>
-        </div>
+        <WorkspaceEmptyHero
+          title={emptyTitle || "Ready to build"}
+          subtitle={emptySubtitle || "Ask the agent to explore the codebase, spawn parallel subagents, run commands, review diffs, or inspect your app in the built-in browser."}
+        />
       ) : null}
 
       {items.map((item) => {

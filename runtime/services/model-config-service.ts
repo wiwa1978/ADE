@@ -48,13 +48,15 @@ export class ModelConfigService {
 	}
 
 	/**
-	 * Providers the Pi Durable harness can run. Installed CLI agents (claude, codex, …) are reported by
-	 * providerTools() for information only; they are not selectable until a CLI harness exists.
+	 * Providers available for model selection: API providers from the Pi Durable harness plus
+	 * installed & enabled CLI coding agents discovered on this host.
 	 */
 	async modelCatalog(): Promise<{ providers: ProviderCatalogEntry[]; defaultProvider?: string }> {
 		const runtimeProviders = this.#runtimeModels?.providers ?? [];
 		const results: ProviderCatalogEntry[] = [];
+		const seen = new Set<string>();
 		for (const p of runtimeProviders) {
+			seen.add(p.id);
 			let config: Pick<ModelConfigResult, "configured" | "availableModels" | "defaultModel" | "setupMessage">;
 			try {
 				config = await this.getConfig(p.id);
@@ -74,6 +76,7 @@ export class ModelConfigService {
 		}
 		if (!results.length) {
 			const single = await this.getConfig(undefined);
+			seen.add(single.provider);
 			results.push({
 				id: single.provider,
 				name: single.provider,
@@ -85,8 +88,32 @@ export class ModelConfigService {
 				models: single.availableModels ?? [],
 			});
 		}
+		try {
+			const { providers: scannedTools } = await this.providerTools(null);
+			for (const tool of scannedTools) {
+				if (tool.kind !== "cli" || !tool.installed || !tool.enabled || seen.has(tool.id)) continue;
+				seen.add(tool.id);
+				const toolModels = Array.isArray(tool.models) ? tool.models.map(m => ({ id: m.id, name: m.name })) : [];
+				results.push({
+					id: tool.id,
+					name: tool.name,
+					kind: "cli",
+					configured: true,
+					enabled: true,
+					defaultModel: toolModels[0]?.id ?? "default",
+					setupMessage: "",
+					models: toolModels,
+				});
+			}
+		} catch {
+			// Best-effort CLI tool discovery; keep API providers even if scanning fails.
+		}
 		const defaultProvider = await this.#runtimeModels?.defaultProvider?.();
-		return { providers: results, defaultProvider: defaultProvider ?? results[0]?.id };
+		const configuredDefault = results.find(p => p.id === defaultProvider && p.configured)?.id
+			?? results.find(p => p.configured)?.id
+			?? defaultProvider
+			?? results[0]?.id;
+		return { providers: results, defaultProvider: configuredDefault };
 	}
 
 	async health(provider?: string): Promise<RuntimeHealth> {
