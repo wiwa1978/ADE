@@ -114,6 +114,33 @@ type SettingsViewProps = {
 
 // --- Building blocks -------------------------------------------------------------------------------
 
+/** Font choices; the first entry ("") is the system default. */
+const INTERFACE_FONTS: Array<[string, string]> = [
+  ["", "System default"],
+  ['"Inter", sans-serif', "Inter"],
+  ['"SF Pro Text", -apple-system, sans-serif', "SF Pro"],
+  ['"Helvetica Neue", Helvetica, sans-serif', "Helvetica Neue"],
+  ["Arial, sans-serif", "Arial"],
+  ['"Segoe UI", sans-serif', "Segoe UI"],
+  ["Roboto, sans-serif", "Roboto"],
+  ['"IBM Plex Sans", sans-serif', "IBM Plex Sans"],
+  ['"Source Sans 3", "Source Sans Pro", sans-serif', "Source Sans"],
+  ["Avenir Next, Avenir, sans-serif", "Avenir Next"],
+  ["Georgia, serif", "Georgia (serif)"],
+]
+const CODE_FONTS: Array<[string, string]> = [
+  ["", "System default"],
+  ['"SF Mono", SFMono-Regular, monospace', "SF Mono"],
+  ["Menlo, monospace", "Menlo"],
+  ['"JetBrains Mono", monospace', "JetBrains Mono"],
+  ['"Fira Code", monospace', "Fira Code"],
+  ['"Cascadia Code", monospace', "Cascadia Code"],
+  ['"IBM Plex Mono", monospace', "IBM Plex Mono"],
+  ['"Source Code Pro", monospace', "Source Code Pro"],
+  ["Monaco, monospace", "Monaco"],
+  ["Consolas, monospace", "Consolas"],
+]
+
 type TextDraft = { interfaceFont: string; codeFont: string; interfaceSize: string; contentSize: string; codeSize: string; contentWidth: string }
 
 function textFromSettings(settings: Settings): TextDraft {
@@ -179,6 +206,7 @@ export function SettingsView({
     setTextDraft(appliedText)
   }
   const textDirty = !sameText(textDraft, appliedText)
+  const [customFont, setCustomFont] = useState({ interfaceFont: false, codeFont: false })
   const [prevInitialCategory, setPrevInitialCategory] = useState(initialCategory)
   const [permission, setPermission] = useState(notificationPermission)
   const [editingKey, setEditingKey] = useState<string | null>(null)
@@ -291,6 +319,40 @@ export function SettingsView({
       onKeyDown={event => { if (event.key === "Enter") applyText() }} />
   )
   // Free typing; checked when you apply, so the value never jumps while you type.
+  // Fonts and sizes are picked from lists; "Custom…" keeps a free-text font for anything else installed.
+  const fontSelect = (label: string, key: "interfaceFont" | "codeFont", options: Array<[string, string]>) => {
+    const value = textDraft[key].trim()
+    // "Arial" and "Arial, sans-serif" are the same choice: compare the first font name.
+    const firstFamily = (font: string) => font.split(",")[0].replace(/["']/g, "").trim().toLowerCase()
+    const match = options.find(([fontValue]) => fontValue === value || (fontValue && value && firstFamily(fontValue) === firstFamily(value)))
+    const custom = customFont[key] || !match
+    return (
+      <span className="st-font-pick">
+        <select className="st-select" aria-label={label} value={custom ? "__custom__" : match[0]}
+          onChange={event => {
+            const next = event.target.value
+            if (next === "__custom__") { setCustomFont(current => ({ ...current, [key]: true })); return }
+            setCustomFont(current => ({ ...current, [key]: false }))
+            setTextDraft(current => ({ ...current, [key]: next }))
+          }}>
+          {options.map(([fontValue, name]) => <option key={name} value={fontValue} style={fontValue ? { fontFamily: fontValue } : undefined}>{name}</option>)}
+          <option value="__custom__">Custom…</option>
+        </select>
+        {custom ? textField(`${label} (custom)`, key, key === "codeFont" ? "e.g. Berkeley Mono" : "e.g. Avenir Next") : null}
+      </span>
+    )
+  }
+  const sizeSelect = (label: string, key: "interfaceSize" | "contentSize" | "codeSize") => {
+    const [min, max] = textLimits[key]
+    const sizes = Array.from({ length: max - min + 1 }, (_, index) => String(min + index))
+    return (
+      <select className="st-select is-narrow" aria-label={label} value={sizes.includes(textDraft[key]) ? textDraft[key] : ""}
+        onChange={event => setTextDraft(current => ({ ...current, [key]: event.target.value }))}>
+        {sizes.includes(textDraft[key]) ? null : <option value="" disabled>Choose</option>}
+        {sizes.map(size => <option key={size} value={size}>{size} px{key === "interfaceSize" && size === "14" ? " (default)" : ""}</option>)}
+      </select>
+    )
+  }
   const numberField = (label: string, key: keyof typeof textLimits) => (
     <span className={`st-number ${textInvalid(key) ? "is-invalid" : ""}`} title={`${textLimits[key][0]}–${textLimits[key][1]} px`}>
       <input aria-label={label} inputMode="numeric" value={textDraft[key]} aria-invalid={textInvalid(key)}
@@ -362,11 +424,11 @@ export function SettingsView({
       </Row>
     </Section>
     <Section title="Text">
-      <Row title="Interface font" description="Leave empty for the system font.">{textField("Interface font", "interfaceFont", "System default")}</Row>
-      <Row title="Interface size" description="Scales the whole app, like zooming. 14 is the default.">{numberField("Interface size", "interfaceSize")}</Row>
-      <Row title="Chat text size" description="Messages in the conversation.">{numberField("Chat text size", "contentSize")}</Row>
-      <Row title="Code font" description="Code blocks, diffs, and the terminal.">{textField("Code font", "codeFont", "SF Mono, Menlo")}</Row>
-      <Row title="Code size">{numberField("Code size", "codeSize")}</Row>
+      <Row title="Interface font" description="Fonts that aren't installed fall back to the system font.">{fontSelect("Interface font", "interfaceFont", INTERFACE_FONTS)}</Row>
+      <Row title="Interface size" description="Scales the whole app, like zooming.">{sizeSelect("Interface size", "interfaceSize")}</Row>
+      <Row title="Chat text size" description="Messages in the conversation.">{sizeSelect("Chat text size", "contentSize")}</Row>
+      <Row title="Code font" description="Code blocks, diffs, and the terminal.">{fontSelect("Code font", "codeFont", CODE_FONTS)}</Row>
+      <Row title="Code size">{sizeSelect("Code size", "codeSize")}</Row>
     </Section>
     <Section title="Layout">
       <Row title="Conversation width" description="Maximum width of chat on wide screens.">{numberField("Conversation width", "contentWidth")}</Row>
