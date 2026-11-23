@@ -11,6 +11,9 @@ import {
 } from "../validators.ts";
 import { resolveCheckout } from "../worktrees.ts";
 import type { ArchivedWorkspaceCleanup, RouteDeps } from "./context.ts";
+import { createStartFrom } from "../start-from.ts";
+
+const startFrom = createStartFrom();
 
 export function registerProjectRoutes(router: Router, { host, githubRepositories, sessionGit, cleanUpArchivedWorkspace }: RouteDeps): void {
 	router.get("/api/projects", (ctx) => {
@@ -78,6 +81,17 @@ export function registerProjectRoutes(router: Router, { host, githubRepositories
 		const stateParam = ctx.url.searchParams.get("state");
 		const state = stateParam === "closed" || stateParam === "merged" || stateParam === "all" ? stateParam : "open";
 		ctx.json(200, { pullRequests: await sessionGit.listPullRequests(project.repository || process.cwd(), slug, state) });
+	});
+
+	// Branches a new session can start from (local and origin, newest first).
+	router.get("/api/projects/:id/branches", async (ctx) => {
+		const project = host.projects().find((p) => p.id === ctx.params.id);
+		if (!project) throw notFound("Project not found.");
+		if (!project.repository) {
+			ctx.json(200, { branches: [] });
+			return;
+		}
+		ctx.json(200, { branches: await startFrom.listBranches(project.repository) });
 	});
 
 	router.get("/api/projects/:id([0-9a-f-]+)/agents", async (ctx) => {

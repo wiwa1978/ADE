@@ -73,6 +73,7 @@ export function BesidePane({
   onRefreshProcesses,
   onPullRequestChange,
   agentBusy = false,
+  onAskAgent,
   diffMode = "working",
   onRunStatusChange,
   onOpenProjectSettings,
@@ -116,6 +117,7 @@ export function BesidePane({
   onRefreshProcesses: () => void
   onPullRequestChange: (pr: PullRequestInfo | null) => void
   agentBusy?: boolean
+  onAskAgent?: (text: string) => Promise<void>
   diffMode?: "working" | "branch" | "history"
   onRunStatusChange?: (status: RunStatus) => void
   onOpenProjectSettings?: () => void
@@ -223,7 +225,7 @@ export function BesidePane({
         ) : null}
 
         {activeBesideTab.kind === "diff" ? (
-          <DiffPanel sessionId={session.id} summary={gitSummary} onRefresh={onRefreshGit} onOpenFile={onOpenFile} agentBusy={agentBusy} initialMode={diffMode} />
+          <DiffPanel sessionId={session.id} summary={gitSummary} onRefresh={onRefreshGit} onOpenFile={onOpenFile} agentBusy={agentBusy} initialMode={diffMode} onAskAgent={onAskAgent} />
         ) : null}
 
         {activeBesideTab.kind === "browser" ? (
@@ -268,6 +270,8 @@ export function BesidePane({
             onOpenExternal={url => void onOpenExternalBrowser(url)}
             onOpenChanges={onOpenDiff}
             onPullRequestChange={onPullRequestChange}
+            agentBusy={agentBusy}
+            onAskAgent={onAskAgent}
           />
         ) : null}
 

@@ -1,0 +1,45 @@
+/* Review loop: diff line numbers and notes, PR feedback, branch updates. */
+.ade-diff-code .ade-diff-line { display: flex; align-items: stretch; padding: 0 12px 0 0; }
+.ade-diff-gutter { flex: none; width: 44px; padding-right: 8px; text-align: right; color: rgb(var(--muted) / 0.7); user-select: none; }
+.ade-diff-text { flex: 1; white-space: pre; }
+.ade-diff-note-spacer { flex: none; width: 18px; }
+.ade-diff-note-btn { flex: none; width: 18px; display: inline-flex; align-items: center; justify-content: center; border: 0; padding: 0; background: transparent; color: rgb(var(--primary)); opacity: 0; cursor: pointer; }
+.ade-diff-line:hover .ade-diff-note-btn, .ade-diff-note-btn:focus-visible { opacity: 1; }
+.ade-diff-note { display: flex; align-items: flex-start; gap: 8px; margin: 4px 12px 6px 62px; padding: 6px 8px 6px 10px; border-radius: 7px; border: 1px solid rgb(var(--primary) / 0.35); background: rgb(var(--primary) / 0.08); font-family: var(--ui-font, inherit); font-size: 12.5px; white-space: pre-wrap; color: rgb(var(--foreground)); }
+.ade-diff-note span { flex: 1; }
+.ade-diff-note-form { margin: 4px 12px 8px 62px; display: grid; gap: 6px; font-family: var(--ui-font, inherit); }
+.ade-diff-note-form textarea { width: 100%; resize: vertical; font: inherit; font-size: 12.5px; padding: 6px 8px; border-radius: 7px; border: 1px solid rgb(var(--border)); background: rgb(var(--surface)); color: rgb(var(--foreground)); }
+.ade-diff-note-actions { display: flex; justify-content: flex-end; gap: 6px; }
+
+.ade-notes-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid rgb(var(--border)); background: rgb(var(--primary) / 0.07); font-size: 12.5px; }
+.ade-notes-bar > span { flex: 1; }
+
+/* Pull request panel sections */
+.ade-review-section { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid rgb(var(--border)); border-radius: 10px; background: rgb(var(--surface)); }
+.ade-review-section > header { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; }
+.ade-review-section > header > span { flex: 1; }
+.ade-review-section p { margin: 0; font-size: 12.5px; color: rgb(var(--muted)); }
+.ade-review-section.is-warn { border-color: rgb(213 163 91 / 0.55); }
+.ade-review-section.is-error { border-color: rgb(207 98 91 / 0.55); }
+.ade-review-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ade-feedback-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; max-height: 340px; overflow: auto; }
+.ade-feedback-item { display: grid; grid-template-columns: auto 1fr; gap: 8px; padding: 7px 8px; border-radius: 7px; background: rgb(var(--background)); font-size: 12.5px; }
+.ade-feedback-item.is-resolved { opacity: 0.55; }
+.ade-feedback-item input { margin-top: 2px; }
+.ade-feedback-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; color: rgb(var(--muted)); font-size: 11.5px; }
+.ade-feedback-meta code { font-size: 11px; color: rgb(var(--foreground) / 0.85); }
+.ade-feedback-body { white-space: pre-wrap; word-break: break-word; margin-top: 2px; }
+.ade-feedback-reply { color: rgb(var(--muted)); margin-top: 3px; white-space: pre-wrap; }
+.ade-conflict-list { margin: 0; padding-left: 18px; font-family: var(--code-font); font-size: 11.5px; }
+.ade-sent-note { font-size: 12px; color: var(--ok); }
+
+/* New session: start from an existing branch or pull request */
+.ade-start-from { display: grid; gap: 6px; margin-top: 6px; }
+.ade-start-from-list { margin: 0; padding: 3px; list-style: none; max-height: 210px; overflow: auto; border: 1px solid rgb(var(--border)); border-radius: 8px; background: rgb(var(--background)); }
+.ade-start-from-list button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: rgb(var(--foreground)); font-size: 12.5px; text-align: left; cursor: pointer; }
+.ade-start-from-list button:hover { background: rgb(var(--surface-raised)); }
+.ade-start-from-list button.is-selected { background: rgb(var(--primary) / 0.14); }
+.ade-start-from-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ade-start-from-meta { flex: none; color: rgb(var(--muted)); font-size: 11.5px; }
+.ade-start-from-note { margin: 0; padding: 4px 2px; color: rgb(var(--muted)); font-size: 12px; }
+.ade-start-from-list button:disabled { opacity: 0.5; cursor: default; background: transparent; }

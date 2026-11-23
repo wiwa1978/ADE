@@ -185,6 +185,14 @@ export const HOST_MIGRATIONS: readonly SchemaMigration[] = [
 			ensureColumn(db, "chat_threads", "archivedAt", "INTEGER");
 		},
 	},
+	{
+		version: 2,
+		name: "coding_tasks_existing_branch",
+		up(db) {
+			// Sessions started from an existing branch or pull request check that branch out instead of creating one.
+			ensureColumn(db, "coding_tasks", "existingBranch", "INTEGER NOT NULL DEFAULT 0");
+		},
+	},
 ];
 
 export const LATEST_HOST_SCHEMA_VERSION = HOST_MIGRATIONS[HOST_MIGRATIONS.length - 1].version;

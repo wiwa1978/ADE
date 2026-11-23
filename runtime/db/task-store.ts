@@ -2,6 +2,7 @@ import { statSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { validateLinkedIssue } from "../github-issues.ts";
 import { badRequest, conflict, notFound, serviceUnavailable } from "../http-error.ts";
+import { parseStartFrom, type PreparedBranch, type StartFrom } from "../start-from.ts";
 import { resolveBaseCommit, resolveCheckout, type WorktreeManager } from "../worktrees.ts";
 import { dbAll, dbGet } from "./schema.ts";
 import type { ProjectStore } from "./project-store.ts";
@@ -15,6 +16,8 @@ export type CreateCodingTaskInput = {
 	title?: unknown;
 	projectId?: unknown;
 	githubIssue?: unknown;
+	/** Start from an existing branch or pull request instead of a new branch. */
+	startFrom?: unknown;
 	initialMessage?: {
 		id?: unknown;
 		content?: unknown;
@@ -167,7 +170,7 @@ export class TaskStore {
 			let path = task.repository;
 			let note: string | null = null;
 			if (task.kind === "worktree") {
-				const operation = await manager.create({ id: task.id, repository: task.repository, branch: task.branch, base: task.base });
+				const operation = await manager.create({ id: task.id, repository: task.repository, branch: task.branch, base: task.base, existingBranch: task.existingBranch === 1 });
 				if (operation.status !== "completed") throw new Error(operation.message);
 				path = operation.target;
 				note = operation.message;
@@ -212,6 +215,7 @@ export class TaskStore {
 			isCredentialChangeBusy: () => boolean;
 			getModelConfig: (provider?: string) => Promise<ModelConfigResult>;
 			resumeInitialTurn: (taskId: string, savedTurn: TurnRow, config: ModelConfigResult | undefined) => Promise<void>;
+			prepareBranch?: (repository: string, startFrom: StartFrom) => Promise<PreparedBranch>;
 		},
 	): Promise<string> {
 		const credentialRevision = deps.getCredentialRevision();
@@ -224,6 +228,8 @@ export class TaskStore {
 			throw badRequest("Choose an existing project for this feature.");
 		}
 		const project = typeof input.projectId === "string" ? this.#projects.get(input.projectId) ?? null : null;
+		const startFrom = parseStartFrom(input.startFrom);
+		if (startFrom && input.kind !== "worktree") throw badRequest("Starting from a branch or pull request needs its own worktree.");
 		const githubIssue = validateLinkedIssue(input.githubIssue, project);
 		if (input.kind === "none" && input.repository.trim()) {
 			throw badRequest("A workspace-free feature cannot have a checkout path.");
@@ -253,8 +259,9 @@ export class TaskStore {
 		let task = this.get(input.id);
 		if (task) this.#verifyTaskInputs(task, normalizedInput, repository, initial);
 		if (!task) {
-			const branch = input.kind === "worktree" ? sessionBranchName(input.title, input.id) : null;
-			const base = input.kind === "worktree" ? await resolveBaseCommit(repository, "HEAD") : "HEAD";
+			const prepared = startFrom && deps.prepareBranch ? await deps.prepareBranch(repository, startFrom) : null;
+			const branch = prepared?.branch ?? (input.kind === "worktree" ? sessionBranchName(input.title, input.id) : null);
+			const base = prepared?.base ?? (input.kind === "worktree" ? await resolveBaseCommit(repository, "HEAD") : "HEAD");
 			if (initial) {
 				config = await deps.getModelConfig(initial.provider);
 				if (!config.configured) throw serviceUnavailable(config.setupMessage || "The selected model provider is not configured");
@@ -275,9 +282,9 @@ export class TaskStore {
 					if (initial && this.#turns.exists(initial.id)) {
 						throw conflict("This initial message ID already belongs to another turn.");
 					}
-					this.#db.prepare("INSERT INTO coding_tasks (id,title,repository,kind,base,branch,status,createdAt,initialTurnId,projectId,initialTitle,issueUrl,issueRepository,issueNumber,issueTitle,issueState) VALUES (?,?,?,?,?,?,'provisioning',?,?,?,?,?,?,?,?,?)")
+					this.#db.prepare("INSERT INTO coding_tasks (id,title,repository,kind,base,branch,status,createdAt,initialTurnId,projectId,initialTitle,issueUrl,issueRepository,issueNumber,issueTitle,issueState,existingBranch) VALUES (?,?,?,?,?,?,'provisioning',?,?,?,?,?,?,?,?,?,?)")
 						.run(input.id, input.title.trim(), repository, input.kind, base, branch, now, initial?.id ?? null, normalizedInput.projectId, input.title.trim(),
-							githubIssue?.url ?? null, githubIssue?.repository ?? null, githubIssue?.number ?? null, githubIssue?.title ?? null, githubIssue?.state ?? null);
+							githubIssue?.url ?? null, githubIssue?.repository ?? null, githubIssue?.number ?? null, githubIssue?.title ?? null, githubIssue?.state ?? null, prepared ? 1 : 0);
 					if (initial) {
 						this.#db.prepare("INSERT INTO turns (id,mode,content,provider,model,reasoning,status,createdAt,updatedAt,taskId) VALUES (?,'coding',?,?,?,?,'pending',?,?,?)")
 							.run(initial.id, initial.content, initial.provider, initial.model, initial.reasoning, now, now, input.id);

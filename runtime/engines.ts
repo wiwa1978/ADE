@@ -4,8 +4,8 @@
 // The CLI's events are translated into ADE's timeline format, so the conversation view, inbox,
 // checkpoints, review and pull request tools work the same for every engine.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { join, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { RuntimeEventBus } from "./events.ts";
 
@@ -111,7 +111,23 @@ export function applyEvent(engine: EngineId, state: EngineSession, turn: { assis
 	}
 }
 
-function engineArgs(engine: EngineId, prompt: string, externalId: string | null, policy: ApprovalPolicy, model: string | null) {
+/**
+ * A linked worktree keeps its Git metadata (index, refs, objects) in the main repository's .git,
+ * outside the workspace. Sandboxed agents need write access there to stage and commit.
+ */
+export function gitWritableDirs(cwd: string): string[] {
+	try {
+		const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd, encoding: "utf8", timeout: 5000, windowsHide: true }).trim();
+		const root = realpathSync(cwd);
+		const dir = common ? realpathSync(common) : "";
+		if (dir && dir !== root && !dir.startsWith(`${root}${sep}`)) return [dir];
+	} catch {
+		// Not a Git checkout: nothing extra to allow.
+	}
+	return [];
+}
+
+export function engineArgs(engine: EngineId, prompt: string, externalId: string | null, policy: ApprovalPolicy, model: string | null, writableDirs: string[] = []) {
 	if (engine === "claude-code") {
 		const mode = policy === "auto-all" ? "bypassPermissions" : policy === "ask" ? "default" : "acceptEdits";
 		const args = ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", mode];
@@ -122,6 +138,7 @@ function engineArgs(engine: EngineId, prompt: string, externalId: string | null,
 	}
 	const sandbox = policy === "auto-all" ? ["--dangerously-bypass-approvals-and-sandbox"] : ["-s", policy === "ask" ? "read-only" : "workspace-write"];
 	const args = ["exec", "--json", "--skip-git-repo-check", ...sandbox];
+	if (policy !== "ask" && policy !== "auto-all") for (const dir of writableDirs) args.push("--add-dir", dir);
 	if (model) args.push("-m", model);
 	if (externalId) args.push("resume", externalId, prompt);
 	else args.push(prompt);
@@ -221,7 +238,7 @@ export class EngineManager {
 		state.lastStatus = null;
 		this.#save(sessionId, state);
 		const command = engineInfo[state.engine].command;
-		const child = spawn(command, engineArgs(state.engine, content, state.externalId, policy, model), {
+		const child = spawn(command, engineArgs(state.engine, content, state.externalId, policy, model, gitWritableDirs(cwd)), {
 			cwd,
 			env: { ...this.#environment, NO_COLOR: "1" },
 			stdio: ["ignore", "pipe", "pipe"],

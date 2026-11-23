@@ -2,6 +2,7 @@
 // push, and pull requests (create, view, mark ready, merge). GitHub calls go through the user's
 // authenticated GitHub CLI (`gh`), so ADE never handles a GitHub token itself.
 import { execFile } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { promisify } from "node:util";
 import { workspacePath } from "./coding-tools.ts";
 import { badGateway, httpError } from "./http-error.ts";
@@ -42,7 +43,35 @@ export type BranchStatus = {
 	behindUpstream: number;
 	hasRemote: boolean;
 	uncommitted: number;
+	/** The ref new work on the base branch is read from (origin/main, or main when there is no remote). */
+	baseRef: string | null;
+	/** Commits on the base branch that this branch does not have yet (as of the last fetch). */
+	behindBase: number;
+	/** Files with unresolved conflicts from an "update from base" merge in progress. */
+	conflicts: string[];
+	mergeInProgress: boolean;
 };
+
+export type FeedbackComment = { author: string; body: string; createdAt: string };
+
+/** One piece of reviewer feedback on a pull request. */
+export type FeedbackItem = {
+	id: string;
+	kind: "thread" | "review" | "comment";
+	author: string;
+	body: string;
+	createdAt: string;
+	/** Inline review threads only. */
+	path?: string;
+	line?: number | null;
+	resolved?: boolean;
+	outdated?: boolean;
+	replies?: FeedbackComment[];
+	/** Review state for whole-PR reviews (CHANGES_REQUESTED, COMMENTED, APPROVED). */
+	state?: string;
+};
+
+export type FailedRun = { id: number; name: string; url: string; log: string };
 
 export type BranchDiffFile = { path: string; additions: number; deletions: number; status: "added" | "modified" | "deleted" | "renamed" };
 
@@ -131,6 +160,9 @@ function toPullRequest(input: unknown): PullRequestInfo {
 	};
 }
 
+/** gh errors that just mean "there is no GitHub pull request here" (none yet, or the remote is not on GitHub). */
+const NO_PULL_REQUEST = /no pull requests found|could not find|none of the git remotes|not a github|no git remotes/i;
+
 export function createSessionGit(run: CommandRunner = defaultRunner) {
 	const git = (cwd: string, ...args: string[]) => run("git", args, cwd);
 	const gh = (cwd: string, ...args: string[]) => run("gh", args, cwd);
@@ -171,6 +203,27 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 		return null;
 	}
 
+	/** Where new base-branch work comes from: origin/<default>, else a local main/master. */
+	async function baseRef(cwd: string) {
+		const baseBranch = await defaultBaseBranch(cwd);
+		if (baseBranch && await tryGit(cwd, "rev-parse", "--verify", "--quiet", `refs/remotes/origin/${baseBranch}`)) return { ref: `origin/${baseBranch}`, branch: baseBranch, remote: true };
+		for (const candidate of [baseBranch, "main", "master"].filter(Boolean) as string[]) {
+			if (await tryGit(cwd, "rev-parse", "--verify", "--quiet", `refs/heads/${candidate}`)) return { ref: candidate, branch: candidate, remote: false };
+		}
+		return null;
+	}
+
+	async function conflictedFiles(cwd: string) {
+		const out = await tryGit(cwd, "diff", "--name-only", "--diff-filter=U");
+		return out ? out.split("\n").filter(Boolean) : [];
+	}
+
+	/** owner/name of the repository a pull request URL points at. */
+	function repoFromUrl(url: string) {
+		const match = /github\.com\/([^/]+)\/([^/]+)\/pull\/\d+/.exec(url);
+		return match ? { owner: match[1], name: match[2] } : null;
+	}
+
 	return {
 		async status(cwd: string, recordedBase: string | null): Promise<BranchStatus> {
 			const [branch, base, baseBranch, upstream, remotes, porcelain] = await Promise.all([
@@ -182,6 +235,10 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 				tryGit(cwd, "status", "--porcelain"),
 			]);
 			const commitsAhead = base ? Number(await tryGit(cwd, "rev-list", "--count", `${base}..HEAD`) ?? 0) : 0;
+			const target = await baseRef(cwd);
+			const onBase = Boolean(branch && target && branch === target.branch);
+			const behindBase = target && !onBase ? Number(await tryGit(cwd, "rev-list", "--count", `HEAD..${target.ref}`) ?? 0) : 0;
+			const mergeInProgress = Boolean(await tryGit(cwd, "rev-parse", "-q", "--verify", "MERGE_HEAD"));
 			let unpushed = 0;
 			let behindUpstream = 0;
 			if (upstream) {
@@ -200,7 +257,138 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 				behindUpstream,
 				hasRemote: Boolean(remotes?.split("\n").includes("origin")),
 				uncommitted: porcelain ? porcelain.split("\n").filter(Boolean).length : 0,
+				baseRef: target?.ref ?? null,
+				behindBase,
+				conflicts: mergeInProgress ? await conflictedFiles(cwd) : [],
+				mergeInProgress,
 			};
+		},
+
+		/** Fetch the base branch so "behind" counts are current. Quietly does nothing offline or without a remote. */
+		async fetchBase(cwd: string) {
+			const target = await baseRef(cwd);
+			if (!target?.remote) return false;
+			return (await tryGit(cwd, "fetch", "--quiet", "origin", target.branch)) !== null;
+		},
+
+		/**
+		 * Bring the base branch's new commits into this branch with a merge (never rewrites the
+		 * session's history). Conflicts are left in place for the agent or the user to resolve.
+		 */
+		async updateFromBase(cwd: string): Promise<{ result: "up-to-date" | "updated" | "conflicts"; baseRef: string; conflicts: string[] }> {
+			if (await tryGit(cwd, "rev-parse", "-q", "--verify", "MERGE_HEAD")) throw httpError(409, "An update is already in progress. Resolve the conflicts or abort it first.");
+			const porcelain = await tryGit(cwd, "status", "--porcelain", "--untracked-files=no");
+			if (porcelain) throw httpError(409, "Commit or discard the uncommitted changes before updating the branch.");
+			const target = await baseRef(cwd);
+			if (!target) throw httpError(409, "Could not find the base branch to update from.");
+			const branch = await currentBranch(cwd);
+			if (branch === target.branch) throw httpError(409, `This workspace is on ${branch} itself.`);
+			if (target.remote) await git(cwd, "fetch", "--quiet", "origin", target.branch);
+			const behind = Number(await tryGit(cwd, "rev-list", "--count", `HEAD..${target.ref}`) ?? 0);
+			if (!behind) return { result: "up-to-date", baseRef: target.ref, conflicts: [] };
+			try {
+				await git(cwd, "merge", "--no-edit", "--no-ff", target.ref);
+				return { result: "updated", baseRef: target.ref, conflicts: [] };
+			} catch (error) {
+				const conflicts = await conflictedFiles(cwd);
+				if (conflicts.length) return { result: "conflicts", baseRef: target.ref, conflicts };
+				await tryGit(cwd, "merge", "--abort");
+				throw error;
+			}
+		},
+
+		/** Stage the files that had conflicts (once no conflict markers are left) and commit the merge. */
+		async finishMerge(cwd: string) {
+			if (!await tryGit(cwd, "rev-parse", "-q", "--verify", "MERGE_HEAD")) throw httpError(409, "There is no update in progress.");
+			const files = await conflictedFiles(cwd);
+			const marked = files.filter(file => {
+				const path = workspacePath(cwd, file, { mustExist: false });
+				return existsSync(path) && /^(<{7}|>{7})( |$)/m.test(readFileSync(path, "utf8"));
+			});
+			if (marked.length) throw httpError(409, `Conflict markers are still in ${marked.join(", ")}. Resolve them first.`);
+			if (files.length) await git(cwd, "add", "-A", "--", ...files);
+			await git(cwd, "commit", "--no-edit");
+			return { finished: true };
+		},
+
+		async abortMerge(cwd: string) {
+			if (!await tryGit(cwd, "rev-parse", "-q", "--verify", "MERGE_HEAD")) throw httpError(409, "There is no update in progress.");
+			await git(cwd, "merge", "--abort");
+			return { aborted: true };
+		},
+
+		/** Unresolved review threads, review summaries and conversation comments on the branch's pull request. */
+		async reviewFeedback(cwd: string): Promise<{ number: number; items: FeedbackItem[] } | null> {
+			const branch = await currentBranch(cwd);
+			if (!branch) return null;
+			let raw: { number?: unknown; url?: unknown; reviews?: unknown; comments?: unknown };
+			try {
+				raw = JSON.parse(await gh(cwd, "pr", "view", branch, "--json", "number,url,reviews,comments"));
+			} catch (error) {
+				const err = error as { stderr?: unknown; message?: unknown };
+				if (NO_PULL_REQUEST.test(String(err?.stderr ?? err?.message ?? ""))) return null;
+				throw error;
+			}
+			const number = Number(raw.number);
+			const login = (value: unknown) => String((value as { login?: unknown } | null)?.login ?? "someone");
+			const items: FeedbackItem[] = [];
+			const repo = repoFromUrl(String(raw.url ?? ""));
+			if (repo) {
+				const query = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved isOutdated path line originalLine comments(first:30){nodes{author{login} body createdAt}}}}}}}`;
+				try {
+					const data = JSON.parse(await gh(cwd, "api", "graphql", "-f", `query=${query}`, "-F", `owner=${repo.owner}`, "-F", `name=${repo.name}`, "-F", `number=${number}`));
+					const threads = data?.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+					for (const thread of threads) {
+						const comments = (thread?.comments?.nodes ?? []).map((c: { author?: unknown; body?: unknown; createdAt?: unknown }) => ({ author: login(c.author), body: String(c.body ?? ""), createdAt: String(c.createdAt ?? "") }));
+						if (!comments.length) continue;
+						items.push({
+							id: `thread:${thread.id}`,
+							kind: "thread",
+							author: comments[0].author,
+							body: comments[0].body,
+							createdAt: comments[0].createdAt,
+							path: String(thread.path ?? ""),
+							line: typeof thread.line === "number" ? thread.line : typeof thread.originalLine === "number" ? thread.originalLine : null,
+							resolved: Boolean(thread.isResolved),
+							outdated: Boolean(thread.isOutdated),
+							replies: comments.slice(1),
+						});
+					}
+				} catch {
+					// Inline threads are best effort; reviews and comments below still come through.
+				}
+			}
+			for (const [index, review] of (Array.isArray(raw.reviews) ? raw.reviews : []).entries()) {
+				const body = String(review?.body ?? "").trim();
+				if (!body) continue;
+				items.push({ id: `review:${index}`, kind: "review", author: login(review?.author), body, createdAt: String(review?.submittedAt ?? ""), state: String(review?.state ?? "") });
+			}
+			for (const [index, comment] of (Array.isArray(raw.comments) ? raw.comments : []).entries()) {
+				const body = String(comment?.body ?? "").trim();
+				if (!body) continue;
+				items.push({ id: `comment:${index}`, kind: "comment", author: login(comment?.author), body, createdAt: String(comment?.createdAt ?? "") });
+			}
+			return { number, items };
+		},
+
+		/** Failed GitHub Actions runs for the branch's latest pushed commit, with the tail of each failed log. */
+		async failedRuns(cwd: string): Promise<FailedRun[]> {
+			const branch = await currentBranch(cwd);
+			if (!branch) return [];
+			const head = await tryGit(cwd, "rev-parse", "@{u}") ?? await tryGit(cwd, "rev-parse", "HEAD");
+			const runs = JSON.parse(await gh(cwd, "run", "list", "--branch", branch, "--limit", "30", "--json", "databaseId,name,workflowName,conclusion,headSha,url")) as Array<{ databaseId: number; name?: string; workflowName?: string; conclusion?: string; headSha?: string; url?: string }>;
+			const failed = runs.filter(run => run.headSha === head && ["failure", "timed_out", "startup_failure"].includes(String(run.conclusion)));
+			const result: FailedRun[] = [];
+			for (const run of failed.slice(0, 4)) {
+				let log = "";
+				try {
+					log = await gh(cwd, "run", "view", String(run.databaseId), "--log-failed");
+				} catch (error) {
+					log = error instanceof Error ? error.message : "The log could not be read.";
+				}
+				result.push({ id: run.databaseId, name: String(run.workflowName || run.name || "workflow"), url: String(run.url ?? ""), log: tailLog(log) });
+			}
+			return result;
 		},
 
 		/** Files changed between the base and the working tree (committed and uncommitted tracked changes). */
@@ -251,7 +439,7 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 				return toPullRequest(JSON.parse(await gh(cwd, "pr", "view", branch, "--json", PR_FIELDS)));
 			} catch (error) {
 				const err = error as { stderr?: unknown; message?: unknown };
-				if (/no pull requests found|could not find/i.test(String(err?.stderr ?? err?.message ?? ""))) return null;
+				if (NO_PULL_REQUEST.test(String(err?.stderr ?? err?.message ?? ""))) return null;
 				throw error;
 			}
 		},
@@ -310,3 +498,19 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 }
 
 export type SessionGit = ReturnType<typeof createSessionGit>;
+
+// ANSI color codes in CI logs (the escape character is intentional here).
+// oxlint-disable-next-line no-control-regex
+const ANSI_COLOR = /\x1b\[[0-9;]*m/g;
+
+/** Keep the end of a CI log (where the error is), without the job/step/timestamp prefix gh adds. */
+export function tailLog(log: string, maxLines = 80, maxChars = 3500) {
+	const lines = log.split("\n").map(line => {
+		const parts = line.split("\t");
+		const text = parts.length >= 3 ? parts.slice(2).join("\t") : line;
+		return text.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z\s?/, "").replace(ANSI_COLOR, "");
+	}).filter(line => line.trim());
+	let tail = lines.slice(-maxLines).join("\n");
+	if (tail.length > maxChars) tail = tail.slice(-maxChars);
+	return tail;
+}

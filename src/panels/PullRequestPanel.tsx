@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react"
-import { AlertTriangle, CheckCircle2, CircleDashed, ExternalLink, GitBranch, GitMerge, GitPullRequest, RefreshCw, Upload, XCircle } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { AlertTriangle, CheckCircle2, CircleDashed, ExternalLink, GitBranch, GitMerge, GitPullRequest, MessageSquare, RefreshCw, Send, Upload, Wrench, XCircle } from "lucide-react"
 import { request } from "../../api"
+import { fixCiPrompt, resolveConflictsPrompt, reviewFeedbackPrompt, type PromptFailedRun } from "../../packages/protocol/agent-prompts.ts"
 
 type BranchStatus = {
   branch: string | null
@@ -12,7 +13,28 @@ type BranchStatus = {
   behindUpstream: number
   hasRemote: boolean
   uncommitted: number
+  baseRef: string | null
+  behindBase: number
+  conflicts: string[]
+  mergeInProgress: boolean
 }
+
+type FeedbackItem = {
+  id: string
+  kind: "thread" | "review" | "comment"
+  author: string
+  body: string
+  createdAt: string
+  path?: string
+  line?: number | null
+  resolved?: boolean
+  outdated?: boolean
+  replies?: Array<{ author: string; body: string; createdAt: string }>
+  state?: string
+}
+
+/** Unresolved feedback is selected by default; approvals without text never show up. */
+const selectedByDefault = (item: FeedbackItem) => !item.resolved && item.state !== "APPROVED"
 
 type Check = { name: string; status: "pending" | "success" | "failure" | "neutral"; url: string | null }
 
@@ -55,6 +77,8 @@ export function PullRequestPanel({
   onOpenExternal,
   onOpenChanges,
   onPullRequestChange,
+  agentBusy = false,
+  onAskAgent,
 }: {
   sessionId: string
   sessionLabel: string
@@ -64,6 +88,9 @@ export function PullRequestPanel({
   onOpenExternal: (url: string) => void
   onOpenChanges: () => void
   onPullRequestChange?: (pr: PullRequestInfo | null) => void
+  agentBusy?: boolean
+  /** Hand a prompt (feedback, CI logs, conflicts) to the session's agent. */
+  onAskAgent?: (text: string) => Promise<void>
 }) {
   const [status, setStatus] = useState<BranchStatus | null>(null)
   const [pr, setPr] = useState<PullRequestInfo | null | undefined>(undefined)
@@ -74,6 +101,11 @@ export function PullRequestPanel({
   const [mergeMethod, setMergeMethod] = useState<"squash" | "merge" | "rebase">("squash")
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState("")
+  const [sent, setSent] = useState("")
+  const [feedback, setFeedback] = useState<{ number: number; items: FeedbackItem[] } | null>(null)
+  const [feedbackError, setFeedbackError] = useState("")
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [showResolved, setShowResolved] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -94,10 +126,12 @@ export function PullRequestPanel({
     }
   }, [sessionId, onPullRequestChange])
 
+  const fetchedFor = useRef<string | null>(null)
   useEffect(() => {
     let cancelled = false
     void Promise.all([
-      request<BranchStatus>(`/api/sessions/${encodeURIComponent(sessionId)}/branch`),
+      // Fetch the base branch once per session when the panel opens, so "behind main" is current.
+      request<BranchStatus>(`/api/sessions/${encodeURIComponent(sessionId)}/branch${fetchedFor.current === sessionId ? "" : "?fetch=1"}`),
       request<{ pullRequest: PullRequestInfo | null }>(`/api/sessions/${encodeURIComponent(sessionId)}/pr`).catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Could not read the pull request from GitHub.")
         return { pullRequest: null }
@@ -105,6 +139,7 @@ export function PullRequestPanel({
     ])
       .then(([branch, pull]) => {
         if (cancelled) return
+        fetchedFor.current = sessionId
         setStatus(branch)
         setPr(pull.pullRequest)
         onPullRequestChange?.(pull.pullRequest)
@@ -117,6 +152,110 @@ export function PullRequestPanel({
       })
     return () => { cancelled = true }
   }, [sessionId, onPullRequestChange, refreshKey])
+
+  // Reviewer feedback for an open pull request.
+  const prNumber = pr && pr.state === "OPEN" ? pr.number : null
+  const loadFeedback = useCallback(() => request<{ feedback: { number: number; items: FeedbackItem[] } | null }>(`/api/sessions/${encodeURIComponent(sessionId)}/pr/feedback`)
+    .then(result => {
+      setFeedback(result.feedback)
+      setFeedbackError("")
+      setSelected(new Set((result.feedback?.items ?? []).filter(selectedByDefault).map(item => item.id)))
+    })
+    .catch((err: unknown) => setFeedbackError(err instanceof Error ? err.message : "Could not read the review comments.")), [sessionId])
+  useEffect(() => {
+    if (prNumber === null) return
+    let cancelled = false
+    void request<{ feedback: { number: number; items: FeedbackItem[] } | null }>(`/api/sessions/${encodeURIComponent(sessionId)}/pr/feedback`)
+      .then(result => {
+        if (cancelled) return
+        setFeedback(result.feedback)
+        setSelected(new Set((result.feedback?.items ?? []).filter(selectedByDefault).map(item => item.id)))
+      })
+      .catch((err: unknown) => { if (!cancelled) setFeedbackError(err instanceof Error ? err.message : "Could not read the review comments.") })
+    return () => { cancelled = true }
+  }, [sessionId, prNumber])
+
+  /** Send a prompt to the agent and show a short confirmation. */
+  const ask = async (name: string, build: () => Promise<string> | string, confirmation: string) => {
+    if (!onAskAgent) return
+    setBusy(name)
+    setError("")
+    setSent("")
+    try {
+      await onAskAgent(await build())
+      setSent(confirmation)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send this to the agent.")
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const askToFixCi = () => ask("fix-ci", async () => {
+    const { runs } = await request<{ runs: PromptFailedRun[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/pr/failed-runs`)
+    const failing = (pr?.checks ?? []).filter(check => check.status === "failure").map(check => check.name)
+    return fixCiPrompt(runs, failing)
+  }, "Sent the failing CI logs to the agent.")
+
+  const askToAddress = () => ask("address", () => reviewFeedbackPrompt(
+    (feedback?.items ?? []).filter(item => selected.has(item.id)).map(item => ({ kind: item.kind, author: item.author, body: item.body, path: item.path, line: item.line, replies: item.replies })),
+    feedback?.number,
+  ), "Sent the review comments to the agent.")
+
+  const updateBranch = async () => {
+    setBusy("update")
+    setError("")
+    setSent("")
+    try {
+      const result = await request<{ result: "up-to-date" | "updated" | "conflicts"; baseRef: string; status: BranchStatus }>(`/api/sessions/${encodeURIComponent(sessionId)}/branch/update`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      })
+      setStatus(result.status)
+      if (result.result === "updated") setSent(`Merged the latest ${result.baseRef} into this branch.`)
+      if (result.result === "up-to-date") setSent(`Already up to date with ${result.baseRef}.`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update the branch.")
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const finishUpdate = async () => {
+    setBusy("finish")
+    setError("")
+    try {
+      const result = await request<{ status: BranchStatus }>(`/api/sessions/${encodeURIComponent(sessionId)}/branch/finish-update`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      })
+      setStatus(result.status)
+      setSent(`Finished the update from ${result.status.baseRef ?? "the base branch"}.`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not finish the update.")
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const abortUpdate = async () => {
+    setBusy("abort")
+    setError("")
+    try {
+      const result = await request<{ status: BranchStatus }>(`/api/sessions/${encodeURIComponent(sessionId)}/branch/abort-update`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      })
+      setStatus(result.status)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not abort the update.")
+    } finally {
+      setBusy(null)
+    }
+  }
 
   // Keep checks fresh while they are running.
   useEffect(() => {
@@ -151,6 +290,11 @@ export function PullRequestPanel({
   }
 
   const onBaseBranch = Boolean(status.branch && status.baseBranch && status.branch === status.baseBranch)
+  const baseName = status.baseRef ?? status.baseBranch ?? "the base branch"
+  const askDisabled = Boolean(busy) || agentBusy
+  const askTitle = agentBusy ? "The agent is working. Try again when it is done." : undefined
+  const visibleFeedback = (feedback?.items ?? []).filter(item => showResolved || !item.resolved)
+  const resolvedCount = (feedback?.items ?? []).filter(item => item.resolved).length
 
   return (
     <div className="ade-pane-body ade-pr-panel">
@@ -165,6 +309,7 @@ export function PullRequestPanel({
       </div>
 
       {error ? <div className="ade-banner-error" role="alert">{error}</div> : null}
+      {sent ? <div className="ade-banner-ok" role="status"><CheckCircle2 className="size-3.5" /> {sent}</div> : null}
 
       <div className="ade-pr-body">
         <section className="ade-pr-facts" aria-label="Branch status">
@@ -177,6 +322,44 @@ export function PullRequestPanel({
           <p className="ade-pr-note"><AlertTriangle className="size-3.5" /> This repository has no <code>origin</code> remote, so it can’t be pushed or opened as a pull request.</p>
         ) : onBaseBranch ? (
           <p className="ade-pr-note"><AlertTriangle className="size-3.5" /> This session works directly on <code>{status.branch}</code>. Start a worktree session to get its own branch and pull request.</p>
+        ) : null}
+
+        {status.mergeInProgress ? (
+          <section className="ade-review-section is-error" aria-label="Update stopped on conflicts">
+            <header><AlertTriangle className="size-3.5" /><span>Update from {baseName} stopped on conflicts</span></header>
+            {status.conflicts.length ? (
+              <ul className="ade-conflict-list">{status.conflicts.map(file => <li key={file}>{file}</li>)}</ul>
+            ) : <p>All conflicts are resolved.</p>}
+            <p>Resolve the files (or ask the agent), then finish the update. ADE stages the resolved files and commits the merge.</p>
+            <div className="ade-review-actions">
+              {onAskAgent && status.conflicts.length ? (
+                <button type="button" className="ade-btn ade-btn-primary ade-btn-xs" disabled={askDisabled} title={askTitle}
+                  onClick={() => void ask("conflicts", () => resolveConflictsPrompt(baseName, status.conflicts), "Asked the agent to resolve the conflicts.")}>
+                  <Wrench className="size-3.5" /> {busy === "conflicts" ? "Sending…" : "Ask the agent to resolve"}
+                </button>
+              ) : null}
+              <button type="button" className="ade-chip-btn" disabled={Boolean(busy) || agentBusy} title={agentBusy ? "Wait for the agent to finish" : "Stage the resolved files and commit the merge"} onClick={() => void finishUpdate()}>
+                <GitMerge className="size-3" /> {busy === "finish" ? "Finishing…" : "Finish update"}
+              </button>
+              <button type="button" className="ade-chip-btn" disabled={Boolean(busy)} onClick={() => { if (confirm("Abort the update and go back to the branch as it was?")) void abortUpdate() }}>
+                {busy === "abort" ? "Aborting…" : "Abort update"}
+              </button>
+              <button type="button" className="ade-chip-btn" onClick={onOpenChanges}>Open Changes</button>
+            </div>
+          </section>
+        ) : status.behindBase > 0 ? (
+          <section className="ade-review-section is-warn" aria-label="Branch is behind">
+            <header>
+              <GitBranch className="size-3.5" />
+              <span>{status.behindBase} new commit{status.behindBase === 1 ? "" : "s"} on {baseName}</span>
+              <button type="button" className="ade-chip-btn" disabled={Boolean(busy) || agentBusy}
+                title={agentBusy ? "Wait for the agent to finish" : `Merge ${baseName} into this branch`}
+                onClick={() => void updateBranch()}>
+                {busy === "update" ? "Updating…" : "Update branch"}
+              </button>
+            </header>
+            <p>Bring them in now to catch conflicts early. ADE merges {baseName} into the session’s branch; nothing is rewritten.</p>
+          </section>
         ) : null}
 
         {status.uncommitted > 0 ? (
@@ -218,6 +401,13 @@ export function PullRequestPanel({
                 </ul>
               </div>
             ) : <p className="ade-muted ade-xs">No checks reported for this pull request.</p>}
+            {pr.state === "OPEN" && pr.checksSummary === "failure" && onAskAgent ? (
+              <div className="ade-review-actions">
+                <button type="button" className="ade-btn ade-btn-primary ade-btn-xs" disabled={askDisabled} title={askTitle ?? "Send the failing logs to the agent and ask it to fix them"} onClick={() => void askToFixCi()}>
+                  <Wrench className="size-3.5" /> {busy === "fix-ci" ? "Reading logs…" : "Ask the agent to fix CI"}
+                </button>
+              </div>
+            ) : null}
             <div className="ade-pr-actions">
               <button type="button" className="ade-chip-btn" onClick={() => onOpenExternal(pr.url)}><ExternalLink className="size-3" /> Open on GitHub</button>
               {pr.state === "OPEN" && status.unpushed > 0 ? (
@@ -251,7 +441,61 @@ export function PullRequestPanel({
             ) : null}
             {pr.state === "MERGED" ? <p className="ade-muted ade-xs">Merged. You can archive this session to clean up its worktree.</p> : null}
           </section>
-        ) : status.hasRemote && !onBaseBranch && status.branch ? (
+        ) : null}
+
+        {pr && pr.state === "OPEN" ? (
+          <section className="ade-review-section" aria-label="Review comments">
+            <header>
+              <MessageSquare className="size-3.5" />
+              <span>Review comments{feedback ? ` · ${feedback.items.length - resolvedCount} open` : ""}</span>
+              <button type="button" className="ade-icon-btn" onClick={() => void loadFeedback()} title="Reload comments" aria-label="Reload review comments"><RefreshCw className="size-3" /></button>
+            </header>
+            {feedbackError ? <p>{feedbackError}</p>
+              : !feedback ? <p>Loading comments…</p>
+                : !feedback.items.length ? <p>No review comments yet.</p>
+                  : (
+                    <>
+                      <ul className="ade-feedback-list">
+                        {visibleFeedback.map(item => (
+                          <li key={item.id} className={`ade-feedback-item ${item.resolved ? "is-resolved" : ""}`}>
+                            <input
+                              type="checkbox"
+                              aria-label={`Include comment from ${item.author}`}
+                              checked={selected.has(item.id)}
+                              onChange={event => setSelected(current => {
+                                const next = new Set(current)
+                                if (event.target.checked) next.add(item.id); else next.delete(item.id)
+                                return next
+                              })}
+                            />
+                            <div>
+                              <div className="ade-feedback-meta">
+                                <strong>{item.author}</strong>
+                                {item.path ? <code>{item.path}{item.line ? `:${item.line}` : ""}</code> : <span>{item.kind === "review" ? (item.state === "CHANGES_REQUESTED" ? "requested changes" : "reviewed") : "commented"}</span>}
+                                {item.resolved ? <span>resolved</span> : item.outdated ? <span>outdated</span> : null}
+                              </div>
+                              <div className="ade-feedback-body">{item.body}</div>
+                              {item.replies?.map((reply, index) => <div key={index} className="ade-feedback-reply">↳ {reply.author}: {reply.body}</div>)}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="ade-review-actions">
+                        {onAskAgent ? (
+                          <button type="button" className="ade-btn ade-btn-primary ade-btn-xs" disabled={askDisabled || selected.size === 0} title={askTitle} onClick={() => void askToAddress()}>
+                            <Send className="size-3.5" /> {busy === "address" ? "Sending…" : `Ask the agent to address ${selected.size}`}
+                          </button>
+                        ) : null}
+                        {resolvedCount ? (
+                          <button type="button" className="ade-link-btn" onClick={() => setShowResolved(value => !value)}>
+                            {showResolved ? "Hide resolved" : `Show ${resolvedCount} resolved`}
+                          </button>
+                        ) : null}
+                      </div>
+                    </>
+                  )}
+          </section>
+        ) : !pr && status.hasRemote && !onBaseBranch && status.branch ? (
           <form
             className="ade-pr-form"
             onSubmit={event => {

@@ -9,9 +9,10 @@ import {
   X,
 } from "lucide-react"
 import { request } from "../../api"
-import type { ApprovalPolicy, GitHubIssue, ProviderCatalogEntry, TaskStart } from "../../app-types"
+import type { ApprovalPolicy, GitHubIssue, ProviderCatalogEntry, StartFrom, TaskStart } from "../../app-types"
 import type { Project } from "../../ProjectsView"
 import { ModelPicker } from "../composer/ModelPicker"
+import { StartFromPicker, type StartChoice } from "./StartFromPicker"
 
 type EngineId = "pi" | "claude-code" | "codex"
 type EngineOption = { id: EngineId; name: string; description: string; available: boolean }
@@ -70,6 +71,8 @@ export function NewSessionView({
     prompt: string
     githubIssue?: GitHubIssue
     engine: EngineId
+    startFrom?: StartFrom
+    title?: string
   }) => Promise<void>
   onLookupIssue?: (projectId: string, url: string) => Promise<GitHubIssue>
 }) {
@@ -86,6 +89,7 @@ export function NewSessionView({
   const [lookingUp, setLookingUp] = useState(false)
   const [engines, setEngines] = useState<EngineOption[]>([])
   const [engine, setEngine] = useState<EngineId>("pi")
+  const [startChoice, setStartChoice] = useState<StartChoice>({ mode: "new" })
 
   useEffect(() => {
     let active = true
@@ -101,6 +105,7 @@ export function NewSessionView({
   const handleProjectChange = (nextId: string) => {
     const id = nextId === "__none__" ? null : nextId
     onSelectProject(id)
+    setStartChoice({ mode: "new" })
     const proj = projects.find(p => p.id === id)
     setRepository(proj?.repository ?? "")
     setKind(proj?.repository ? "worktree" : "checkout")
@@ -164,9 +169,20 @@ export function NewSessionView({
     }
   }
 
+  // Starting from existing work: the prompt is optional, the session is named after the branch or PR.
+  const canStartFrom = kind === "worktree" && Boolean(activeProject?.repository)
+  const startFrom: StartFrom | undefined = !canStartFrom ? undefined
+    : startChoice.mode === "branch" && startChoice.branch ? { branch: startChoice.branch }
+      : startChoice.mode === "pr" && startChoice.number ? { pullRequest: startChoice.number }
+        : undefined
+  const startFromIncomplete = canStartFrom && startChoice.mode !== "new" && !startFrom
+  const startTitle = startChoice.mode === "branch" ? startChoice.branch
+    : startChoice.mode === "pr" && startChoice.number ? `PR #${startChoice.number}${startChoice.title ? `: ${startChoice.title}` : ""}` : undefined
+  const canSubmit = !starting && !startFromIncomplete && (Boolean(prompt.trim()) || Boolean(startFrom)) && (kind === "none" || Boolean(effectiveRepo.trim()))
+
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
-    if (!prompt.trim()) return
+    if (!canSubmit) return
     void onStart({
       projectId: selectedProjectId,
       kind,
@@ -174,6 +190,7 @@ export function NewSessionView({
       prompt: prompt.trim(),
       githubIssue: linkedIssue ?? undefined,
       engine: engineAllowed(engine) ? engine : "pi",
+      ...(startFrom ? { startFrom, title: startTitle } : {}),
     })
   }
 
@@ -248,6 +265,16 @@ export function NewSessionView({
               </div>
             </div>
           </div>
+
+          {canStartFrom && activeProject ? (
+            <StartFromPicker
+              key={activeProject.id}
+              projectId={activeProject.id}
+              hasGitHub={Boolean(activeProject.githubUrl)}
+              value={startChoice}
+              onChange={setStartChoice}
+            />
+          ) : null}
 
           {/* Which agent does the work */}
           {engines.length > 1 ? (
@@ -364,13 +391,13 @@ export function NewSessionView({
             <textarea
               className="w-full bg-transparent border-0 outline-none resize-none px-4 pt-3.5 pb-2 text-[13.5px] leading-relaxed text-[rgb(var(--foreground))]"
               rows={4}
-              placeholder="Describe the task. Enter to start, Shift+Enter for a new line."
+              placeholder={startFrom ? "Optional: what should the agent do on this branch? Leave empty to just open it." : "Describe the task. Enter to start, Shift+Enter for a new line."}
               value={prompt}
               onChange={e => setPrompt(e.target.value)}
               onKeyDown={e => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault()
-                  if (prompt.trim()) handleSubmit(e)
+                  if (canSubmit) handleSubmit(e)
                 }
               }}
             />
@@ -394,7 +421,7 @@ export function NewSessionView({
               <button
                 type="submit"
                 className="sf-btn-primary"
-                disabled={starting || !prompt.trim() || (kind !== "none" && !effectiveRepo.trim())}
+                disabled={!canSubmit}
               >
                 <ArrowUp className="size-3.5" />
                 {starting ? "Starting…" : "Start session"}

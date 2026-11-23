@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { request } from "../../api"
-import type { Conversation, GitHubIssue, PendingApproval, TaskStart } from "../../app-types"
+import type { Conversation, GitHubIssue, PendingApproval, StartFrom, TaskStart } from "../../app-types"
 import { clearPendingStart, pendingStarts, storePendingStart } from "../../pending-task-starts"
 import type { Project } from "../../ProjectsView"
 import type { Settings } from "../../useSettings"
@@ -244,6 +244,40 @@ export function useSessions(params: {
     if (added.length) setAttachments(prev => [...prev, ...added])
   }, [onError])
 
+  /** Post a message to the active session's agent. */
+  const postMessage = useCallback(async (content: string) => {
+    const payload = {
+      id: crypto.randomUUID(),
+      content: content.slice(0, 8000),
+      provider: effectiveProvider,
+      model: selectedModel,
+      reasoning: settings.reasoning,
+      async: true,
+    }
+    const endpoint = activeSession.chatThread
+      ? `/api/chat-threads/${encodeURIComponent(activeSession.id)}/messages`
+      : isCodingTask
+        ? `/api/coding-tasks/${encodeURIComponent(activeSession.id)}/messages`
+        : `/api/sessions/${activeSession.mode}/messages`
+    await request<{ session: Conversation }>(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+    await loadSessions()
+  }, [effectiveProvider, selectedModel, settings.reasoning, activeSession, isCodingTask, loadSessions])
+
+  /** Send a prompt ADE wrote for the user (review feedback, CI logs, conflicts) without touching the composer. */
+  const askAgent = useCallback(async (text: string, onAfterSend?: (sessionId: string) => void) => {
+    try {
+      await postMessage(text)
+      onAfterSend?.(activeSession.id)
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Could not send the message to the agent.")
+      throw err
+    }
+  }, [postMessage, activeSession.id, onError])
+
   const sendMessage = useCallback(async (text: string, onAfterSend?: (sessionId: string) => void) => {
     const attachmentBlock = attachments.length
       ? `\n\n${attachments.map(a => `--- Attached file: ${a.name} ---\n\`\`\`\n${a.content}\n\`\`\``).join("\n\n")}`
@@ -253,32 +287,14 @@ export function useSessions(params: {
     setAttachments([])
     setSending(true)
     try {
-      const payload = {
-        id: crypto.randomUUID(),
-        content,
-        provider: effectiveProvider,
-        model: selectedModel,
-        reasoning: settings.reasoning,
-        async: true,
-      }
-      const endpoint = activeSession.chatThread
-        ? `/api/chat-threads/${encodeURIComponent(activeSession.id)}/messages`
-        : isCodingTask
-          ? `/api/coding-tasks/${encodeURIComponent(activeSession.id)}/messages`
-          : `/api/sessions/${activeSession.mode}/messages`
-      await request<{ session: Conversation }>(endpoint, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      await loadSessions()
+      await postMessage(content)
       onAfterSend?.(activeSession.id)
     } catch (err) {
       onError(err instanceof Error ? err.message : "Could not send message.")
     } finally {
       setSending(false)
     }
-  }, [attachments, effectiveProvider, selectedModel, settings.reasoning, activeSession, isCodingTask, loadSessions, onError])
+  }, [attachments, postMessage, activeSession.id, onError])
 
   const steerSession = useCallback(async (text: string, mode: "steer" | "follow-up") => {
     setDraft("")
@@ -325,6 +341,9 @@ export function useSessions(params: {
     prompt: string
     githubIssue?: GitHubIssue
     engine?: "pi" | "claude-code" | "codex"
+    startFrom?: StartFrom
+    /** Session name when there is no prompt to name it after (e.g. "PR #12: Fix login"). */
+    title?: string
   }) => {
     setCreatingSession(true)
     setLaunchError("")
@@ -333,12 +352,13 @@ export function useSessions(params: {
     const taskId = crypto.randomUUID()
     const start: TaskStart = {
       id: taskId,
-      title: input.prompt.replace(/\s+/g, " ").trim().slice(0, 80) || "New session",
+      title: (input.title || input.prompt).replace(/\s+/g, " ").trim().slice(0, 80) || "New session",
       repository: input.repository,
       kind: input.kind,
       environmentId: activeEnvironmentId,
       projectId: input.projectId,
       githubIssue: input.githubIssue,
+      ...(input.startFrom ? { startFrom: input.startFrom } : {}),
       ...(!external && modelReady && input.prompt.trim()
         ? {
             initialMessage: {
@@ -545,6 +565,7 @@ export function useSessions(params: {
     toggleArchive,
     attachFiles,
     sendMessage,
+    askAgent,
     steerSession,
     abortSession,
     compactSession,

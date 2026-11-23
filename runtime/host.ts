@@ -26,6 +26,9 @@ import { TurnExecutor } from "./services/turn-executor.ts";
 import { ProcessManager } from "./shell-tools.ts";
 import type { ConversationTimelineSnapshot } from "./timeline.ts";
 import type { WorktreeManager } from "./worktrees.ts";
+import { createStartFrom } from "./start-from.ts";
+
+const startFromService = createStartFrom();
 
 export { detectGitHubRemoteFromCheckout, sessionBranchName, type SessionMode };
 
@@ -190,6 +193,7 @@ export class LocalAgentHost {
 			isCredentialChangeBusy: () => this.#models.credentialChangeBusy,
 			getModelConfig: (provider) => this.#models.getConfig(provider),
 			resumeInitialTurn: (taskId, savedTurn, config) => this.#turnExecutor.resumeInitialTurn(taskId, savedTurn, config),
+			prepareBranch: (repository, startFrom) => startFromService.prepare(repository, startFrom),
 		});
 		return this.sessions().find(item => item.id === id);
 	}

@@ -69,6 +69,8 @@ export type CodingTaskRow = {
 	issueState: string | null;
 	archivedAt: number | null;
 	worktreeRemoved: number;
+	/** 1 when the session checks out a branch that already existed (started from a branch or pull request). */
+	existingBranch: number;
 };
 
 export type ChatThreadRow = {

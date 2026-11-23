@@ -66,8 +66,12 @@ export type TaskStart = {
   environmentId?: string
   projectId?: string | null
   githubIssue?: GitHubIssue
+  /** Check out an existing branch or pull request instead of creating a new branch. */
+  startFrom?: StartFrom
   initialMessage?: { id: string; content: string; provider: string; model: string; reasoning: string }
 }
+
+export type StartFrom = { branch: string } | { pullRequest: number }
 
 // --- Rich ADE Streaming, Subagent, Browser, Skills & MCP UI Types ---
 

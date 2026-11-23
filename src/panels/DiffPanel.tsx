@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react"
-import { Check, FileCode2, GitCommit, Minus, Plus, RefreshCw, RotateCcw } from "lucide-react"
+import { Check, FileCode2, GitCommit, Minus, Plus, RefreshCw, RotateCcw, Send } from "lucide-react"
 import { request } from "../../api"
+import { reviewFeedbackPrompt } from "../../packages/protocol/agent-prompts.ts"
+import { DiffLines } from "./DiffLines"
+import { useDiffNotes } from "./diff-notes"
 import type { WorkspaceGitSummary } from "../../app-types"
 import { CheckpointList } from "./CheckpointList"
 
@@ -13,6 +16,7 @@ export function DiffPanel({
   onOpenFile,
   agentBusy = false,
   initialMode = "working",
+  onAskAgent,
 }: {
   sessionId: string
   summary: WorkspaceGitSummary
@@ -21,7 +25,25 @@ export function DiffPanel({
   /** The agent is working; rewinding is disabled until it stops. */
   agentBusy?: boolean
   initialMode?: "working" | "branch" | "history"
+  /** Send the line notes to the session's agent. */
+  onAskAgent?: (text: string) => Promise<void>
 }) {
+  const diffNotes = useDiffNotes(sessionId)
+  const [sendingNotes, setSendingNotes] = useState(false)
+  const sendNotes = async () => {
+    if (!onAskAgent || !diffNotes.notes.length) return
+    setSendingNotes(true)
+    setError("")
+    try {
+      await onAskAgent(reviewFeedbackPrompt(diffNotes.notes.map(note => ({ kind: "note", body: note.code ? `${note.text}\n(at: ${note.code})` : note.text, path: note.path, line: note.line }))))
+      diffNotes.clear()
+      setNotice("Notes sent to the agent.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send the notes.")
+    } finally {
+      setSendingNotes(false)
+    }
+  }
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [showStaged, setShowStaged] = useState(false)
   const [diffText, setDiffText] = useState("")
@@ -170,7 +192,6 @@ export function DiffPanel({
     )
   }
 
-  const diffLines = displayedDiffText ? displayedDiffText.replace(/\n$/, "").split("\n") : []
   const stagedCount = summary.files.filter(f => f.staged).length
   const modeToggle = (
     <div className="ade-segmented" role="tablist" aria-label="Diff scope">
@@ -194,25 +215,30 @@ export function DiffPanel({
       </div>
     )
   }
-  const renderDiff = () => (
-    <div className="ade-diff-code">
-      {diffLines.length === 0 ? (
-        <div className="ade-pane-note">No diff lines to show.</div>
-      ) : (
-        diffLines.map((line, i) => {
-          const cls = line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff ") || line.startsWith("index ")
-            ? "is-meta"
-            : line.startsWith("@@")
-              ? "is-hunk"
-              : line.startsWith("+")
-                ? "is-add"
-                : line.startsWith("-")
-                  ? "is-del"
-                  : ""
-          return <div key={i} className={`ade-diff-line ${cls}`}>{line || " "}</div>
-        })
-      )}
+  const noteFiles = new Set(diffNotes.notes.map(note => note.path)).size
+  const notesBar = onAskAgent && diffNotes.notes.length ? (
+    <div className="ade-notes-bar" role="status">
+      <span>{diffNotes.notes.length} note{diffNotes.notes.length === 1 ? "" : "s"} for the agent in {noteFiles} file{noteFiles === 1 ? "" : "s"}</span>
+      <button type="button" className="ade-chip-btn" onClick={() => { if (confirm("Remove all notes?")) diffNotes.clear() }}>Clear</button>
+      <button
+        type="button"
+        className="ade-btn ade-btn-primary ade-btn-xs"
+        disabled={sendingNotes || agentBusy}
+        title={agentBusy ? "The agent is working. Send the notes when it is done." : "Send all notes to the agent as one message"}
+        onClick={() => void sendNotes()}
+      >
+        <Send className="size-3" /> {sendingNotes ? "Sending…" : "Send to agent"}
+      </button>
     </div>
+  ) : null
+  const renderDiff = () => (
+    <DiffLines
+      diff={displayedDiffText}
+      path={activeDiffPath ?? null}
+      notes={diffNotes.notes}
+      onAddNote={onAskAgent ? diffNotes.add : undefined}
+      onRemoveNote={diffNotes.remove}
+    />
   )
 
   if (mode === "branch") {
@@ -227,6 +253,8 @@ export function DiffPanel({
           </div>
         </div>
         {error ? <div className="ade-banner-error">{error}</div> : null}
+        {notice ? <div className="ade-banner-ok"><Check className="size-3.5" /> {notice}</div> : null}
+        {notesBar}
         {branchFiles === null ? <div className="ade-pane-empty"><p>Loading branch changes…</p></div>
           : branchFiles.length === 0 ? <div className="ade-pane-empty"><p>No changes on <code>{summary.branch || "HEAD"}</code> since the session started.</p></div>
           : (
@@ -271,6 +299,7 @@ export function DiffPanel({
 
       {error ? <div className="ade-banner-error">{error}</div> : null}
       {notice ? <div className="ade-banner-ok"><Check className="size-3.5" /> {notice}</div> : null}
+      {notesBar}
 
       {summary.files.length === 0 ? (
         <div className="ade-pane-empty">

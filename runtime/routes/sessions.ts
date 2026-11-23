@@ -47,7 +47,56 @@ export function registerSessionRoutes(
 	// --- Session branch, push and pull requests ---
 	router.get("/api/sessions/:id/branch", async (ctx) => {
 		const workspace = ctx.requireWorkspace(ctx.params.id);
+		// ?fetch=1 refreshes the base branch first so "behind main" is current.
+		if (ctx.url.searchParams.get("fetch") === "1") await sessionGit.fetchBase(workspace);
 		ctx.json(200, await sessionGit.status(workspace, host.getWorkspaceBase(ctx.params.id)));
+	});
+
+	router.post(
+		"/api/sessions/:id/branch/update",
+		async (ctx) => {
+			const workspace = ctx.requireWorkspace(ctx.params.id);
+			await ctx.readBody();
+			if (viewSessions().find(session => session.id === ctx.params.id)?.status === "working") throw conflict("Wait for the agent to finish before updating the branch.");
+			const update = await sessionGit.updateFromBase(workspace);
+			inbox.invalidate(ctx.params.id);
+			ctx.json(200, { ...update, status: await sessionGit.status(workspace, host.getWorkspaceBase(ctx.params.id)) });
+		},
+		{ originError: "Use ADE to change the branch or pull request." },
+	);
+
+	router.post(
+		"/api/sessions/:id/branch/finish-update",
+		async (ctx) => {
+			const workspace = ctx.requireWorkspace(ctx.params.id);
+			await ctx.readBody();
+			await sessionGit.finishMerge(workspace);
+			inbox.invalidate(ctx.params.id);
+			ctx.json(200, { status: await sessionGit.status(workspace, host.getWorkspaceBase(ctx.params.id)) });
+		},
+		{ originError: "Use ADE to change the branch or pull request." },
+	);
+
+	router.post(
+		"/api/sessions/:id/branch/abort-update",
+		async (ctx) => {
+			const workspace = ctx.requireWorkspace(ctx.params.id);
+			await ctx.readBody();
+			await sessionGit.abortMerge(workspace);
+			inbox.invalidate(ctx.params.id);
+			ctx.json(200, { status: await sessionGit.status(workspace, host.getWorkspaceBase(ctx.params.id)) });
+		},
+		{ originError: "Use ADE to change the branch or pull request." },
+	);
+
+	router.get("/api/sessions/:id/pr/feedback", async (ctx) => {
+		const workspace = ctx.requireWorkspace(ctx.params.id);
+		ctx.json(200, { feedback: await sessionGit.reviewFeedback(workspace) });
+	});
+
+	router.get("/api/sessions/:id/pr/failed-runs", async (ctx) => {
+		const workspace = ctx.requireWorkspace(ctx.params.id);
+		ctx.json(200, { runs: await sessionGit.failedRuns(workspace) });
 	});
 
 	router.get("/api/sessions/:id/branch-diff", async (ctx) => {

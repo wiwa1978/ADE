@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { engineArgs, gitWritableDirs } from "./engines.ts";
 import { sessionBranchName } from "./host.ts";
 import { createSessionGit } from "./session-git.ts";
 import { removeWorktree, restoreWorktree } from "./worktrees.ts";
@@ -99,6 +100,122 @@ test("worktree removal only touches ADE worktrees, keeps the branch, and restore
 		await restoreWorktree({ repository: f.repo, path: f.workspace, branch: "ade/test-session-1", allowedRoot: f.worktrees });
 		assert.equal(existsSync(join(f.workspace, "a.txt")), true);
 		await assert.rejects(restoreWorktree({ repository: f.repo, path: f.workspace, branch: "ade/test-session-1", allowedRoot: f.worktrees }), /already exists/);
+	} finally {
+		f.cleanup();
+	}
+});
+
+test("update from base: behind count, clean merge, conflicts and abort", async () => {
+	const f = fixture();
+	try {
+		const sessionGit = createSessionGit();
+		// New work lands on main and is pushed while the session works on its branch.
+		writeFileSync(join(f.repo, "c.txt"), "from main\n");
+		git(f.repo, "add", ".");
+		git(f.repo, "commit", "-m", "main work");
+		git(f.repo, "push", "origin", "main");
+		git(f.workspace, "config", "user.email", "ade@test");
+		git(f.workspace, "config", "user.name", "ADE Test");
+		assert.equal(await sessionGit.fetchBase(f.workspace), true);
+		let status = await sessionGit.status(f.workspace, f.base);
+		assert.equal(status.baseRef, "origin/main");
+		assert.equal(status.behindBase, 1);
+
+		let update = await sessionGit.updateFromBase(f.workspace);
+		assert.equal(update.result, "updated");
+		status = await sessionGit.status(f.workspace, f.base);
+		assert.equal(status.behindBase, 0);
+		assert.equal((await sessionGit.updateFromBase(f.workspace)).result, "up-to-date");
+
+		// Both sides change the same line: the merge stops on a conflict.
+		writeFileSync(join(f.repo, "a.txt"), "main says hi\n");
+		git(f.repo, "commit", "-am", "main edit");
+		git(f.repo, "push", "origin", "main");
+		writeFileSync(join(f.workspace, "a.txt"), "branch says hi\n");
+		git(f.workspace, "commit", "-am", "branch edit");
+		writeFileSync(join(f.workspace, "a.txt"), "dirty\n");
+		await assert.rejects(sessionGit.updateFromBase(f.workspace), /uncommitted/);
+		git(f.workspace, "checkout", "--", "a.txt");
+		update = await sessionGit.updateFromBase(f.workspace);
+		assert.equal(update.result, "conflicts");
+		assert.deepEqual(update.conflicts, ["a.txt"]);
+		status = await sessionGit.status(f.workspace, f.base);
+		assert.equal(status.mergeInProgress, true);
+		assert.deepEqual(status.conflicts, ["a.txt"]);
+		await assert.rejects(sessionGit.updateFromBase(f.workspace), /already in progress/);
+		await assert.rejects(sessionGit.finishMerge(f.workspace), /Conflict markers are still in a\.txt/);
+		await sessionGit.abortMerge(f.workspace);
+		status = await sessionGit.status(f.workspace, f.base);
+		assert.equal(status.mergeInProgress, false);
+		assert.equal(status.behindBase, 1);
+
+		// Resolve by hand (as an agent would), then finish the update from ADE.
+		await sessionGit.updateFromBase(f.workspace);
+		writeFileSync(join(f.workspace, "a.txt"), "branch says hi\nmain says hi\n");
+		await sessionGit.finishMerge(f.workspace);
+		status = await sessionGit.status(f.workspace, f.base);
+		assert.equal(status.mergeInProgress, false);
+		assert.equal(status.behindBase, 0);
+		assert.equal(status.uncommitted, 0);
+	} finally {
+		f.cleanup();
+	}
+});
+
+test("review feedback and failed CI runs are read through gh", async () => {
+	const f = fixture();
+	try {
+		const head = git(f.workspace, "rev-parse", "HEAD").trim();
+		const sessionGit = createSessionGit(async (command, args, cwd) => {
+			if (command === "git") return execFileSync("git", args, { cwd, encoding: "utf8" });
+			const call = args.join(" ");
+			if (call.startsWith("pr view")) return JSON.stringify({
+				number: 7,
+				url: "https://github.com/acme/app/pull/7",
+				reviews: [{ author: { login: "rev" }, state: "CHANGES_REQUESTED", body: "Please add tests", submittedAt: "2026-01-01" }, { author: { login: "rev" }, state: "APPROVED", body: "" }],
+				comments: [{ author: { login: "pm" }, body: "Can we rename this?", createdAt: "2026-01-02" }],
+			});
+			if (call.startsWith("api graphql")) {
+				assert.ok(args.includes("owner=acme") && args.includes("name=app") && args.includes("number=7"));
+				return JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: [
+					{ id: "T1", isResolved: false, isOutdated: false, path: "a.txt", line: 3, comments: { nodes: [{ author: { login: "rev" }, body: "Off by one", createdAt: "x" }, { author: { login: "me" }, body: "Will fix", createdAt: "y" }] } },
+					{ id: "T2", isResolved: true, isOutdated: false, path: "b.txt", line: null, originalLine: 9, comments: { nodes: [{ author: { login: "rev" }, body: "Done", createdAt: "z" }] } },
+				] } } } } });
+			}
+			if (call.startsWith("run list")) return JSON.stringify([
+				{ databaseId: 1, workflowName: "CI", conclusion: "failure", headSha: head, url: "u1" },
+				{ databaseId: 2, workflowName: "Lint", conclusion: "success", headSha: head, url: "u2" },
+				{ databaseId: 3, workflowName: "CI", conclusion: "failure", headSha: "old", url: "u3" },
+			]);
+			if (call.startsWith("run view 1")) return "build\tTest\t2026-01-01T00:00:00.0000000Z \u001b[31mFAIL\u001b[0m expected 2 got 3\n";
+			throw new Error(`unexpected ${call}`);
+		});
+		const feedback = await sessionGit.reviewFeedback(f.workspace);
+		assert.equal(feedback?.number, 7);
+		assert.deepEqual(feedback?.items.map(item => [item.kind, item.author, item.path ?? null, item.line ?? null, item.resolved ?? null]), [
+			["thread", "rev", "a.txt", 3, false],
+			["thread", "rev", "b.txt", 9, true],
+			["review", "rev", null, null, null],
+			["comment", "pm", null, null, null],
+		]);
+		assert.equal(feedback?.items[0].replies?.[0].body, "Will fix");
+		const runs = await sessionGit.failedRuns(f.workspace);
+		assert.deepEqual(runs.map(run => [run.id, run.name, run.log]), [[1, "CI", "FAIL expected 2 got 3"]]);
+	} finally {
+		f.cleanup();
+	}
+});
+
+test("sandboxed agents may write the worktree's Git metadata in the main repository", () => {
+	const f = fixture();
+	try {
+		const dirs = gitWritableDirs(f.workspace);
+		assert.equal(dirs.length, 1);
+		assert.equal(realpathSync(dirs[0]), realpathSync(join(f.repo, ".git")));
+		assert.deepEqual(gitWritableDirs(f.repo), [], "a normal checkout needs nothing extra");
+		const args = engineArgs("codex", "hi", null, "auto-safe", null, dirs);
+		assert.deepEqual(args.slice(args.indexOf("--add-dir"), args.indexOf("--add-dir") + 2), ["--add-dir", dirs[0]]);
+		assert.ok(!engineArgs("codex", "hi", null, "ask", null, dirs).includes("--add-dir"), "read-only sessions stay read-only");
 	} finally {
 		f.cleanup();
 	}

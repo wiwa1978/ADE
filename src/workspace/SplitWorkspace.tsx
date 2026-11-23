@@ -53,6 +53,7 @@ export function SplitWorkspace({
   onAttachFiles,
   onRemoveAttachment,
   onSendMessage,
+  onAskAgent,
   onSteerSession,
   onAbortSession,
   onCompactSession,
@@ -104,6 +105,7 @@ export function SplitWorkspace({
   onAttachFiles?: (files: FileList | null) => void
   onRemoveAttachment?: (id: string) => void
   onSendMessage: (text: string) => void
+  onAskAgent: (text: string) => Promise<void>
   onSteerSession: (text: string, mode: "steer" | "follow-up") => void
   onAbortSession: () => void
   onCompactSession: () => void
@@ -490,6 +492,7 @@ export function SplitWorkspace({
               onOpenDiff={() => openDiff()}
               onOpenBrowser={openBrowser}
               agentBusy={isBusy}
+              onAskAgent={onAskAgent}
               diffMode={diffMode}
               onRunStatusChange={setRunStatus}
               onOpenProjectSettings={onOpenProjectSettings}

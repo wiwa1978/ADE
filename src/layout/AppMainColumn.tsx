@@ -3,7 +3,7 @@ import { InboxView } from "../inbox/InboxView"
 import { sessionStateInfo, type InboxEntry } from "../session-state"
 import { Sparkles } from "lucide-react"
 import { request } from "../../api"
-import type { Conversation, EnvironmentDirectory, GitHubIssue, ProviderCatalogEntry, RuntimeHealth, Screen, SessionArtifact, WorkspaceTab } from "../../app-types"
+import type { Conversation, EnvironmentDirectory, GitHubIssue, StartFrom, ProviderCatalogEntry, RuntimeHealth, Screen, SessionArtifact, WorkspaceTab } from "../../app-types"
 import { ProjectSettings, ProjectsView, type Project, type ProjectActivity, type ProjectInput } from "../../ProjectsView"
 import { SettingsView, type SettingsCategory } from "../../SettingsView"
 import { WorktreeDiagnostics } from "../../WorktreeDiagnostics"
@@ -88,7 +88,7 @@ type AppMainColumnProps = {
   onStartFactoryRun: (project: Project, opts?: { issueNumber?: number; issueTitle?: string; issueBody?: string }) => Promise<void>
   onFactoryRunAction: (runId: string, action: "step" | "approve" | "pause" | "steer", note?: string) => Promise<void>
   onUnarchiveSession: (id: string) => void
-  onStartNewSession: (input: { projectId: string | null; kind: "none" | "checkout" | "worktree"; repository: string; prompt: string; githubIssue?: GitHubIssue }) => Promise<void>
+  onStartNewSession: (input: { projectId: string | null; kind: "none" | "checkout" | "worktree"; repository: string; prompt: string; githubIssue?: GitHubIssue; engine?: "pi" | "claude-code" | "codex"; startFrom?: StartFrom; title?: string }) => Promise<void>
   onDeleteSession: (sess: Conversation) => void
   onOpenExternalRequest: (tab: WorkspaceTab) => void
   onClearExternalOpenRequest: () => void
@@ -96,6 +96,8 @@ type AppMainColumnProps = {
   onAttachFiles: (files: FileList | null) => void
   onRemoveAttachment: (id: string) => void
   onSendMessage: (text: string) => void
+  /** Send a prompt ADE wrote (review feedback, CI logs, conflicts) to the active session's agent. */
+  onAskAgent: (text: string) => Promise<void>
   onSteerSession: (text: string, mode: "steer" | "follow-up") => void
   onAbortSession: () => void
   onCompactSession: () => void
@@ -370,6 +372,7 @@ export function AppMainColumn(props: AppMainColumnProps) {
           onAttachFiles={props.onAttachFiles}
           onRemoveAttachment={props.onRemoveAttachment}
           onSendMessage={props.onSendMessage}
+          onAskAgent={props.onAskAgent}
           onSteerSession={props.onSteerSession}
           onAbortSession={props.onAbortSession}
           onCompactSession={props.onCompactSession}

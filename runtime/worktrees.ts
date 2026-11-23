@@ -169,7 +169,7 @@ export class WorktreeManager {
 		return this.#db.prepare("SELECT * FROM operations WHERE id=?").get(id) as WorktreeOperationRow | undefined;
 	}
 
-	async create(input: { id?: unknown; repository?: unknown; branch?: unknown; base?: unknown } | null | undefined): Promise<WorktreeOperationRow> {
+	async create(input: { id?: unknown; repository?: unknown; branch?: unknown; base?: unknown; existingBranch?: boolean } | null | undefined): Promise<WorktreeOperationRow> {
 		if (typeof input?.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.id)) {
 			throw inputError("A valid operation ID is required.");
 		}
@@ -199,7 +199,9 @@ export class WorktreeManager {
 		try {
 			// Validation is read-only and happens before admission.
 			await git(repository, ["check-ref-format", `refs/heads/${branch}`]).catch(() => { throw inputError("Enter a valid new Git branch name."); });
-			const commitHash = await resolveBaseCommit(repository, base);
+			const existingBranch = input.existingBranch === true;
+			// An existing branch is checked out at its own tip; a new branch starts at the base.
+			const commitHash = await resolveBaseCommit(repository, existingBranch ? `refs/heads/${branch}` : base);
 			let filterKeys: string[] = [];
 			try {
 				const result = await git(repository, ["config", "--includes", "--null", "--name-only", "--get-regexp", "^filter\\..*\\.(clean|smudge|process)$"]);
@@ -209,13 +211,18 @@ export class WorktreeManager {
 			}
 			const filters = [...new Set(filterKeys.map(key => key.slice(0, key.lastIndexOf("."))))];
 			if (filters.some(key => !/^filter\.[^\r\n=]+$/i.test(key))) throw inputError("A Git filter name cannot be safely disabled.");
-			try {
-				await git(repository, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
-				throw inputError("That branch already exists. Choose a new branch name.");
-			} catch (error) {
-				const errObj = error as { statusCode?: number; code?: unknown };
-				if (errObj?.statusCode) throw error;
-				if (errObj?.code !== 1) throw inputError("Could not verify whether the branch exists.");
+			if (existingBranch) {
+				const holder = (await inspectWorktrees(repository)).find(item => item.branch === branch);
+				if (holder) throw inputError(`Branch ${branch} is already checked out in ${holder.path}. Switch that checkout to another branch first.`, 409);
+			} else {
+				try {
+					await git(repository, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
+					throw inputError("That branch already exists. Choose a new branch name.");
+				} catch (error) {
+					const errObj = error as { statusCode?: number; code?: unknown };
+					if (errObj?.statusCode) throw error;
+					if (errObj?.code !== 1) throw inputError("Could not verify whether the branch exists.");
+				}
 			}
 			const target = join(this.#stateDirectory, "worktrees", opId);
 			if (existsSync(target)) throw inputError("The managed worktree target already exists; it will not be overwritten.", 409);
@@ -224,7 +231,7 @@ export class WorktreeManager {
 			mkdirSync(join(this.#stateDirectory, "worktrees"), { recursive: true });
 			this.#db.prepare("INSERT INTO operations (id,repository,branch,base,commitHash,target,status,message,createdAt,filters) VALUES (?,?,?,?,?,?, 'running', ?, ?, ?)")
 				.run(opId, repository, branch, base, commitHash, target, "Creating worktree.", Date.now(), JSON.stringify(filters));
-			const operation = this.#createAdmitted({ id: opId, repository, branch, commitHash, target, hooks, filters });
+			const operation = this.#createAdmitted({ id: opId, repository, branch, commitHash, target, hooks, filters, existingBranch });
 			this.#active.set(opId, operation);
 			return await operation;
 		} finally {
@@ -233,7 +240,7 @@ export class WorktreeManager {
 		}
 	}
 
-	async #createAdmitted({ id, repository, branch, commitHash, target, hooks, filters }: {
+	async #createAdmitted({ id, repository, branch, commitHash, target, hooks, filters, existingBranch }: {
 		id: string;
 		repository: string;
 		branch: string;
@@ -241,6 +248,7 @@ export class WorktreeManager {
 		target: string;
 		hooks: string;
 		filters: string[];
+		existingBranch: boolean;
 	}): Promise<WorktreeOperationRow> {
 		let status: string;
 		let message: string;
@@ -248,7 +256,7 @@ export class WorktreeManager {
 			await git(repository, [
 				"-c", `core.hooksPath=${hooks}`, "-c", "core.fsmonitor=false", "-c", "submodule.recurse=false",
 				...filters.flatMap(filter => ["-c", `${filter}.clean=`, "-c", `${filter}.smudge=`, "-c", `${filter}.process=`, "-c", `${filter}.required=false`]),
-				"worktree", "add", "-b", branch, "--", target, commitHash,
+				...(existingBranch ? ["worktree", "add", "--", target, branch] : ["worktree", "add", "-b", branch, "--", target, commitHash]),
 			]);
 			const observed = await inspectWorktrees(repository);
 			const entry = observed.find(item => samePath(item.path, target));

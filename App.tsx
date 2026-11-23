@@ -366,6 +366,7 @@ function AppInner() {
         onAttachFiles={files => void sess.attachFiles(files)}
         onRemoveAttachment={id => sess.setAttachments(prev => prev.filter(a => a.id !== id))}
         onSendMessage={text => void sess.sendMessage(text, id => void stream.refreshTimeline(id))}
+        onAskAgent={text => sess.askAgent(text, id => void stream.refreshTimeline(id))}
         onSteerSession={(text, mode) => void sess.steerSession(text, mode)}
         onAbortSession={() => void sess.abortSession()}
         onCompactSession={() => void sess.compactSession()}
