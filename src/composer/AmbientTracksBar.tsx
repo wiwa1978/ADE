@@ -43,6 +43,7 @@ export function AmbientTracksBar({
   onOpenProcesses,
   onChangeApprovalPolicy,
   usage,
+  onOpenProgress,
 }: {
   subagents: SubagentInfo[]
   gitSummary: WorkspaceGitSummary
@@ -60,6 +61,8 @@ export function AmbientTracksBar({
   onChangeApprovalPolicy: (policy: ApprovalPolicy) => void
   /** This session's tokens and cost so far. */
   usage?: { inputTokens: number; outputTokens: number; totalCost?: number } | null
+  /** Open the Progress panel (from the tasks pill). */
+  onOpenProgress?: () => void
 }) {
   const [expandedTrack, setExpandedTrack] = useState<"subagents" | "tasks" | null>(null)
 
@@ -184,7 +187,7 @@ export function AmbientTracksBar({
           <button
             type="button"
             className="ade-track-pill"
-            onClick={() => setExpandedTrack(v => v === "tasks" ? null : "tasks")}
+            onClick={() => (onOpenProgress ? onOpenProgress() : setExpandedTrack(v => v === "tasks" ? null : "tasks"))}
           >
             <ListChecks className="size-3.5" />
             <span>{doneTasks}/{tasks.length} tasks</span>

@@ -48,6 +48,8 @@ export function WorkspaceHeaderBar({
   onOpenProcesses,
   onOpenRun,
   onOpenTranscript,
+  onOpenProgress,
+  progressCount,
   runStatus,
   projectName,
   onOpenProject,
@@ -78,6 +80,9 @@ export function WorkspaceHeaderBar({
   onOpenProcesses: () => void
   onOpenRun: () => void
   onOpenTranscript?: () => void
+  onOpenProgress?: () => void
+  /** Agents and tasks done out of the total, for the Progress button. */
+  progressCount?: { done: number; total: number }
   runStatus: { setup: string; run: string; check?: string; url: string | null } | null
   /** Breadcrumb back to the session's project. */
   projectName?: string
@@ -127,7 +132,20 @@ export function WorkspaceHeaderBar({
       </div>
 
       <div className="ade-workspace-header-tools">
-        {subagents.length > 0 ? (
+        {onOpenProgress && (subagents.length > 0 || (progressCount?.total ?? 0) > 1) ? (
+          <button
+            type="button"
+            className={`ade-header-tool-btn ${activeBesideTab?.kind === "progress" || activeBesideTab?.kind === "subagent" ? "is-active" : ""}`}
+            onClick={onOpenProgress}
+            title="Progress: every agent this session started and what each has done"
+          >
+            <Bot className="size-3.5" />
+            <span>Progress</span>
+            {progressCount ? (
+              <span className={`ade-count-badge ${runningSubagentsCount > 0 ? "is-accent" : ""}`}>{progressCount.done}/{progressCount.total}</span>
+            ) : null}
+          </button>
+        ) : subagents.length > 0 ? (
           <button
             type="button"
             className={`ade-header-tool-btn ${activeBesideTab?.kind === "subagent" ? "is-active" : ""}`}
@@ -136,9 +154,6 @@ export function WorkspaceHeaderBar({
           >
             <Bot className="size-3.5" />
             <span>Subagents</span>
-            <span className={`ade-count-badge ${runningSubagentsCount > 0 ? "is-accent" : ""}`}>
-              {runningSubagentsCount > 0 ? `${runningSubagentsCount}/${subagents.length}` : subagents.length}
-            </span>
           </button>
         ) : null}
 

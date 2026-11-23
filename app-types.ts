@@ -178,6 +178,7 @@ export type WorkspaceTabKind =
   | "pr"
   | "run"
   | "transcript"
+  | "progress"
 
 export type WorkspaceTab = {
   id: string

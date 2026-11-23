@@ -18,6 +18,7 @@ import type {
   ConversationTimelineSnapshot,
   ManagedProcessSummary,
   SessionArtifact,
+  SessionTaskItem,
   SubagentInfo,
   TimelineItem,
   WorkspaceGitSummary,
@@ -33,6 +34,7 @@ import { ArtifactPanel } from "../panels/ArtifactPanel"
 import { ProcessesPanel } from "../panels/ProcessesPanel"
 import { RunPanel, type RunStatus } from "../panels/RunPanel"
 import { TranscriptPanel } from "../panels/TranscriptPanel"
+import { ProgressPanel } from "../panels/ProgressPanel"
 import { PullRequestPanel, type PullRequestInfo } from "../panels/PullRequestPanel"
 
 export function BesidePane({
@@ -77,6 +79,7 @@ export function BesidePane({
   agentBusy = false,
   onAskAgent,
   timelineItems = [],
+  tasks = [],
   onRewind,
   diffMode = "working",
   onRunStatusChange,
@@ -123,6 +126,7 @@ export function BesidePane({
   agentBusy?: boolean
   onAskAgent?: (text: string) => Promise<void>
   timelineItems?: TimelineItem[]
+  tasks?: SessionTaskItem[]
   onRewind?: (content: string) => void
   diffMode?: "working" | "branch" | "history"
   onRunStatusChange?: (status: RunStatus) => void
@@ -254,6 +258,19 @@ export function BesidePane({
 
         {activeBesideTab.kind === "processes" ? (
           <ProcessesPanel processes={processes} onKill={onKillProcess} onRefresh={onRefreshProcesses} />
+        ) : null}
+
+        {activeBesideTab.kind === "progress" ? (
+          <ProgressPanel
+            leadLabel={session.label}
+            leadBusy={agentBusy}
+            leadFailed={session.lastTurnStatus === "failed"}
+            leadItems={timelineItems}
+            subagents={subagents}
+            subagentTimelines={subagentTimelines}
+            tasks={tasks}
+            onOpenSubagent={onOpenSubagent}
+          />
         ) : null}
 
         {activeBesideTab.kind === "transcript" ? (

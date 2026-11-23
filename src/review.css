@@ -129,3 +129,27 @@
 .ade-transcript-text { margin: 0; white-space: pre-wrap; word-break: break-word; font: inherit; font-size: 13px; }
 .ade-transcript-text.is-muted { color: rgb(var(--muted)); }
 a.ade-chip-btn { text-decoration: none; }
+
+/* Progress: agents and tasks at a glance */
+.ade-progress { overflow: auto; padding: 12px 14px; display: grid; gap: 16px; align-content: start; }
+.ade-progress-head { display: grid; gap: 8px; }
+.ade-progress-head > div:first-child { display: flex; align-items: baseline; gap: 10px; }
+.ade-progress-head strong { font-size: 15px; }
+.ade-progress-bar { display: flex; height: 6px; border-radius: 99px; overflow: hidden; background: rgb(var(--foreground) / 0.08); }
+.ade-progress-bar span { background: rgb(120 174 121); }
+.ade-progress-bar span.is-failed { background: rgb(207 98 91); }
+.ade-progress h3 { margin: 0 0 6px; font-size: 11.5px; font-weight: 600; color: rgb(var(--muted)); text-transform: uppercase; letter-spacing: 0.06em; }
+.ade-progress-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.ade-progress-table th { text-align: left; font-weight: 500; color: rgb(var(--muted)); font-size: 11.5px; padding: 6px 8px; border-bottom: 1px solid rgb(var(--border)); }
+.ade-progress-table td { padding: 8px; border-bottom: 1px solid rgb(var(--border) / 0.6); vertical-align: top; }
+.ade-progress-table td:nth-child(2) { white-space: nowrap; }
+.ade-progress-table tr.is-clickable { cursor: pointer; }
+.ade-progress-table tr.is-clickable:hover td { background: rgb(var(--surface-raised)); }
+.ade-progress-status { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
+.ade-progress-status.is-ok { color: rgb(146 197 140); }
+.ade-progress-status.is-running { color: rgb(var(--primary)); }
+.ade-progress-status.is-waiting { color: rgb(230 188 115); }
+.ade-progress-status.is-failed { color: rgb(225 125 114); }
+.ade-progress-status.is-idle { color: rgb(var(--muted)); }
+.ade-progress-table td:nth-child(3), .ade-progress-table td:nth-child(4) { display: table-cell; }
+.ade-progress-table td .ade-clamp, .ade-progress-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }

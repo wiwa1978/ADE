@@ -277,6 +277,11 @@ export function SplitWorkspace({
   }, [openBeside])
   const openRun = useCallback(() => openBeside({ id: "run", kind: "run", title: "Run" }), [openBeside])
   const openTranscript = useCallback(() => openBeside({ id: "transcript", kind: "transcript", title: "Transcript" }), [openBeside])
+  const openProgress = useCallback(() => openBeside({ id: "progress", kind: "progress", title: "Progress" }), [openBeside])
+  const progressCount = {
+    done: (timeline?.items.length && !isBusy && session.lastTurnStatus !== "failed" ? 1 : 0) + subagents.filter(sub => sub.status === "completed").length + tasks.filter(task => task.status === "done").length,
+    total: 1 + subagents.length + tasks.length,
+  }
 
   // Setup/run status for the header, polled lightly while the session has a workspace.
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null)
@@ -370,6 +375,8 @@ export function SplitWorkspace({
         onOpenPullRequest={openPullRequest}
         onOpenRun={openRun}
         onOpenTranscript={openTranscript}
+        onOpenProgress={openProgress}
+        progressCount={progressCount}
         runStatus={hasWorkspace ? runStatus : null}
         projectName={projectName}
         onOpenProject={onOpenProject}
@@ -422,6 +429,7 @@ export function SplitWorkspace({
               onOpenProcesses={openProcesses}
               onChangeApprovalPolicy={onChangeApprovalPolicy}
               usage={timeline?.usage}
+              onOpenProgress={openProgress}
             />
 
             <ComposerDock
@@ -501,6 +509,7 @@ export function SplitWorkspace({
               agentBusy={isBusy}
               onAskAgent={onAskAgent}
               timelineItems={timeline?.items ?? []}
+              tasks={tasks}
               onRewind={hasWorkspace ? content => void rewindTo(content) : undefined}
               diffMode={diffMode}
               onRunStatusChange={setRunStatus}
