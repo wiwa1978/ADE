@@ -3,7 +3,7 @@ import {
   ArrowLeft, Bell, Blocks, Bot, Check, Gauge, GitPullRequest, Palette, Search, Server, Settings2, Sparkles, Terminal, X, type LucideIcon,
 } from "lucide-react"
 import { EnvironmentSettings } from "./EnvironmentSettings"
-import { colorPalettes, paletteVariables, type Theme } from "./appearance-palettes"
+import { colorPalettes, lookPresets, paletteVariables, type Theme } from "./appearance-palettes"
 import type { ApprovalPolicy, ApprovalRule, BrowserState, EnvironmentDirectory, McpServerStatus, ProviderCatalogEntry, RuntimeHealth, SkillsAndRulesCatalog } from "./app-types"
 import type { Project } from "./ProjectsView"
 import type { Settings } from "./useSettings"
@@ -114,6 +114,20 @@ type SettingsViewProps = {
 
 // --- Building blocks -------------------------------------------------------------------------------
 
+type TextDraft = { interfaceFont: string; codeFont: string; interfaceSize: string; contentSize: string; codeSize: string; contentWidth: string }
+
+function textFromSettings(settings: Settings): TextDraft {
+  return {
+    interfaceFont: settings.interfaceFont, codeFont: settings.codeFont,
+    interfaceSize: String(settings.interfaceSize), contentSize: String(settings.contentSize),
+    codeSize: String(settings.codeSize), contentWidth: String(settings.contentWidth),
+  }
+}
+
+function sameText(a: TextDraft, b: TextDraft) {
+  return (Object.keys(a) as Array<keyof TextDraft>).every(key => a[key].trim() === b[key].trim())
+}
+
 function Section({ title, description, children, plain = false }: { title: string; description?: ReactNode; children: ReactNode; plain?: boolean }) {
   return <section className="st-section">
     <h2>{title}</h2>
@@ -155,6 +169,16 @@ export function SettingsView({
 }: SettingsViewProps) {
   const [selectedCategory, setSelectedCategory] = useState<SettingsCategory>(initialCategory ?? "general")
   const [query, setQuery] = useState("")
+  // Text and layout settings are edited as a draft and applied together (Apply or Enter).
+  const [textDraft, setTextDraft] = useState<TextDraft>(() => textFromSettings(settings))
+  const [textBase, setTextBase] = useState<TextDraft>(() => textFromSettings(settings))
+  const appliedText = textFromSettings(settings)
+  if (!sameText(appliedText, textBase)) {
+    // Changed elsewhere (a preset, another window): show the new values.
+    setTextBase(appliedText)
+    setTextDraft(appliedText)
+  }
+  const textDirty = !sameText(textDraft, appliedText)
   const [prevInitialCategory, setPrevInitialCategory] = useState(initialCategory)
   const [permission, setPermission] = useState(notificationPermission)
   const [editingKey, setEditingKey] = useState<string | null>(null)
@@ -242,14 +266,57 @@ export function SettingsView({
   </>
 
   // --- Appearance ---
-  const numberInput = (label: string, value: number, min: number, max: number, key: keyof Settings, step = 1) => (
-    <span className="st-number"><input aria-label={label} type="number" min={min} max={max} step={step} value={value} onChange={event => update({ [key]: Math.min(max, Math.max(min, Number(event.target.value) || min)) } as Partial<Settings>)} /><small>px</small></span>
+  const textLimits: Record<keyof Omit<TextDraft, "interfaceFont" | "codeFont">, [number, number]> = {
+    interfaceSize: [11, 20], contentSize: [12, 22], codeSize: [10, 18], contentWidth: [640, 1200],
+  }
+  const textInvalid = (key: keyof typeof textLimits) => {
+    const value = Number(textDraft[key])
+    return !textDraft[key].trim() || !Number.isFinite(value) || value < textLimits[key][0] || value > textLimits[key][1]
+  }
+  const textErrors = (Object.keys(textLimits) as Array<keyof typeof textLimits>).filter(textInvalid)
+  const applyText = () => {
+    if (textErrors.length) return
+    update({
+      interfaceFont: textDraft.interfaceFont.trim(),
+      codeFont: textDraft.codeFont.trim(),
+      interfaceSize: Math.round(Number(textDraft.interfaceSize)),
+      contentSize: Math.round(Number(textDraft.contentSize)),
+      codeSize: Math.round(Number(textDraft.codeSize)),
+      contentWidth: Math.round(Number(textDraft.contentWidth)),
+    })
+  }
+  const textField = (label: string, key: keyof TextDraft, placeholder?: string) => (
+    <input className="st-input" aria-label={label} value={textDraft[key]} placeholder={placeholder} spellCheck={false}
+      onChange={event => setTextDraft(current => ({ ...current, [key]: event.target.value }))}
+      onKeyDown={event => { if (event.key === "Enter") applyText() }} />
   )
+  // Free typing; checked when you apply, so the value never jumps while you type.
+  const numberField = (label: string, key: keyof typeof textLimits) => (
+    <span className={`st-number ${textInvalid(key) ? "is-invalid" : ""}`} title={`${textLimits[key][0]}–${textLimits[key][1]} px`}>
+      <input aria-label={label} inputMode="numeric" value={textDraft[key]} aria-invalid={textInvalid(key)}
+        onChange={event => setTextDraft(current => ({ ...current, [key]: event.target.value.replace(/[^0-9]/g, "") }))}
+        onKeyDown={event => { if (event.key === "Enter") applyText() }} />
+      <small>px</small>
+    </span>
+  )
+  const activePreset = lookPresets.find(preset => preset.palette === settings.palette && preset.interfaceFont === settings.interfaceFont && preset.codeFont === settings.codeFont
+    && preset.interfaceSize === settings.interfaceSize && preset.contentSize === settings.contentSize && preset.codeSize === settings.codeSize && preset.contentWidth === settings.contentWidth)
   const appearance = <>
     <Section title="Theme">
       <Row title="Mode" description={settings.theme === "system" ? `Following your system (${resolved}).` : undefined}>
         <div className="st-segmented" role="radiogroup" aria-label="Mode">
           {(["light", "system", "dark"] as const).map(value => <button type="button" role="radio" key={value} aria-checked={settings.theme === value} className={settings.theme === value ? "is-active" : ""} onClick={() => update({ theme: value })}>{value[0].toUpperCase() + value.slice(1)}</button>)}
+        </div>
+      </Row>
+      <Row title="Look" description="A palette, fonts, sizes and width in one click, in the style of familiar tools. Fine-tune below." stacked>
+        <div className="st-looks">
+          {lookPresets.map(preset => (
+            <button type="button" key={preset.id} className={`st-look ${activePreset?.id === preset.id ? "is-active" : ""}`} aria-pressed={activePreset?.id === preset.id} title={preset.description}
+              onClick={() => update({ palette: preset.palette, interfaceFont: preset.interfaceFont, codeFont: preset.codeFont, interfaceSize: preset.interfaceSize, contentSize: preset.contentSize, codeSize: preset.codeSize, contentWidth: preset.contentWidth })}>
+              <span className="st-look-swatch" style={paletteVariables(preset.palette, resolved)} aria-hidden="true"><i /><i /><i /></span>
+              <span className="st-look-text"><strong>{preset.name}</strong><small>{preset.description}</small></span>
+            </button>
+          ))}
         </div>
       </Row>
       <Row title="Color palette" description="Nine quiet themes tuned for both light and dark mode." stacked>
@@ -295,18 +362,25 @@ export function SettingsView({
       </Row>
     </Section>
     <Section title="Text">
-      <Row title="Interface font" description="Leave empty for the system font."><input className="st-input" value={settings.interfaceFont} onChange={event => update({ interfaceFont: event.target.value })} placeholder="System default" /></Row>
-      <Row title="Interface size">{numberInput("Interface size", settings.interfaceSize, 11, 20, "interfaceSize")}</Row>
-      <Row title="Chat text size">{numberInput("Chat text size", settings.contentSize, 12, 22, "contentSize")}</Row>
-      <Row title="Code font" description="Code blocks, diffs, and the terminal."><input className="st-input" value={settings.codeFont} onChange={event => update({ codeFont: event.target.value })} placeholder="SF Mono, Menlo" /></Row>
-      <Row title="Code size">{numberInput("Code size", settings.codeSize, 10, 18, "codeSize")}</Row>
+      <Row title="Interface font" description="Leave empty for the system font.">{textField("Interface font", "interfaceFont", "System default")}</Row>
+      <Row title="Interface size" description="Scales the whole app, like zooming. 14 is the default.">{numberField("Interface size", "interfaceSize")}</Row>
+      <Row title="Chat text size" description="Messages in the conversation.">{numberField("Chat text size", "contentSize")}</Row>
+      <Row title="Code font" description="Code blocks, diffs, and the terminal.">{textField("Code font", "codeFont", "SF Mono, Menlo")}</Row>
+      <Row title="Code size">{numberField("Code size", "codeSize")}</Row>
     </Section>
     <Section title="Layout">
-      <Row title="Conversation width" description="Maximum width of chat on wide screens.">{numberInput("Conversation width", settings.contentWidth, 640, 1200, "contentWidth", 10)}</Row>
+      <Row title="Conversation width" description="Maximum width of chat on wide screens.">{numberField("Conversation width", "contentWidth")}</Row>
       <Row title="Syntax colors">
         <select className="st-select" aria-label="Syntax colors" value={settings.highlightTheme} onChange={event => update({ highlightTheme: event.target.value as "auto" | "github" | "monochrome" })}><option value="auto">Automatic</option><option value="github">GitHub</option><option value="monochrome">Monochrome</option></select>
       </Row>
     </Section>
+    {textDirty ? (
+      <div className="st-apply-bar" role="status">
+        <span>{textErrors.length ? `Check the highlighted ${textErrors.length === 1 ? "value" : "values"}: interface ${textLimits.interfaceSize.join("–")}, chat ${textLimits.contentSize.join("–")}, code ${textLimits.codeSize.join("–")}, width ${textLimits.contentWidth.join("–")} px.` : "Text and layout changes aren’t applied yet."}</span>
+        <button type="button" className="st-button is-quiet" onClick={() => setTextDraft(textFromSettings(settings))}>Revert</button>
+        <button type="button" className="st-button is-primary" disabled={textErrors.length > 0} onClick={applyText}>Apply</button>
+      </div>
+    ) : null}
   </>
 
   // --- Models ---

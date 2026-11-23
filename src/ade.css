@@ -37,7 +37,8 @@
 /* App Shell */
 .ade-app-shell {
   display: flex;
-  height: 100dvh;
+  /* The interface size zooms the page; divide so the shell still fills the window exactly. */
+  height: calc(100dvh / var(--ui-zoom, 1));
   width: 100%;
   overflow: hidden;
   background: rgb(var(--background));

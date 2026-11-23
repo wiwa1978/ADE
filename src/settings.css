@@ -155,3 +155,24 @@
 .ade-sidebar .ade-nav-row { font-size: 13px; }
 .ade-sidebar .ade-nav-section-head { font-size: 10.5px; letter-spacing: 0.08em; }
 .ade-engine-badge { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid rgb(var(--border)); font-size: 12px; font-weight: 500; color: rgb(var(--foreground) / 0.85); }
+
+/* Apply bar for text and layout changes */
+.st-apply-bar { position: sticky; bottom: 12px; z-index: 5; display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 10px 12px 10px 16px; border: 1px solid rgb(var(--primary) / 0.45); border-radius: 10px; background: rgb(var(--surface)); box-shadow: 0 8px 24px rgb(0 0 0 / 0.25); font-size: 12.5px; }
+.st-apply-bar > span { flex: 1; color: rgb(var(--foreground) / 0.85); }
+.st-button.is-primary { background: rgb(var(--primary-strong)); border-color: rgb(var(--primary-strong)); color: rgb(var(--primary-foreground)); }
+.st-button.is-primary:disabled { opacity: 0.5; }
+.st-number.is-invalid input { border-color: rgb(207 98 91); box-shadow: 0 0 0 3px rgb(207 98 91 / 0.15); }
+
+/* Look presets */
+.st-looks { width: 100%; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.st-look { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid rgb(var(--border)); border-radius: 9px; background: rgb(var(--background)); color: rgb(var(--foreground)); text-align: left; cursor: pointer; min-width: 0; }
+.st-look:hover { border-color: rgb(var(--muted) / 0.7); }
+.st-look.is-active { border-color: rgb(var(--primary)); box-shadow: 0 0 0 1px rgb(var(--primary)); }
+.st-look-swatch { flex: none; display: inline-flex; border-radius: 6px; overflow: hidden; border: 1px solid rgb(var(--border)); }
+.st-look-swatch i { width: 10px; height: 26px; }
+.st-look-swatch i:nth-child(1) { background: rgb(var(--background)); }
+.st-look-swatch i:nth-child(2) { background: rgb(var(--surface)); }
+.st-look-swatch i:nth-child(3) { background: rgb(var(--primary)); }
+.st-look-text { display: grid; min-width: 0; }
+.st-look-text strong { font-size: 12.5px; font-weight: 600; }
+.st-look-text small { font-size: 11px; color: rgb(var(--muted)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

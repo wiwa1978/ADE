@@ -128,16 +128,22 @@ export function useSettings() {
     const codeFont = settings.codeFont.trim()
       ? settings.codeFont
       : '"SFMono-Regular",Menlo,Monaco,Consolas,"Liberation Mono",monospace'
+    // Interface size scales the whole app (most of the UI uses fixed pixel sizes), like zooming
+    // in an editor. Chat and code sizes are then divided by the zoom, so they land on exactly the
+    // pixel size chosen.
+    const zoom = settings.interfaceSize / 14
+    root.style.setProperty("--ui-zoom", String(zoom))
+    root.style.setProperty("zoom", zoom === 1 ? "" : String(zoom))
     root.style.setProperty("--interface-font", interfaceFont)
-    root.style.setProperty("--interface-size", `${settings.interfaceSize}px`)
-    root.style.setProperty("--input-size", `${Math.max(11, Math.round(settings.interfaceSize * 0.93))}px`)
-    root.style.setProperty("--ui-scale", String(settings.interfaceSize / 14))
-    root.style.setProperty("--content-size", `${settings.contentSize}px`)
+    root.style.setProperty("--interface-size", "14px")
+    root.style.setProperty("--input-size", "13px")
+    root.style.setProperty("--ui-scale", String(zoom))
+    root.style.setProperty("--content-size", `${settings.contentSize / zoom}px`)
     root.style.setProperty("--code-font", codeFont)
-    root.style.setProperty("--code-size", `${settings.codeSize}px`)
-    root.style.setProperty("--content-width", `${settings.contentWidth}px`)
+    root.style.setProperty("--code-size", `${settings.codeSize / zoom}px`)
+    root.style.setProperty("--content-width", `${settings.contentWidth / zoom}px`)
     root.style.fontFamily = interfaceFont
-    root.style.fontSize = `${settings.interfaceSize}px`
+    root.style.fontSize = "14px"
     root.dataset.highlightTheme = settings.highlightTheme
     Object.entries(paletteVariables(settings.palette, resolved)).forEach(([name, value]) => root.style.setProperty(name, value))
   }, [settings.palette, resolved, settings.interfaceFont, settings.interfaceSize, settings.contentSize, settings.codeFont, settings.codeSize, settings.contentWidth, settings.highlightTheme])

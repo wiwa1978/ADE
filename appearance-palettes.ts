@@ -93,3 +93,25 @@ export function paletteVariables(palette: ColorPalette, mode: ResolvedTheme): CS
     "--shadow": mode === "dark" ? "0 0 0" : foreground,
   }
 }
+
+/** A whole look in one click: palette plus fonts, sizes and width, in the style of a familiar tool. */
+export type LookPreset = {
+  id: string
+  name: string
+  description: string
+  palette: ColorPalette
+  interfaceFont: string
+  interfaceSize: number
+  contentSize: number
+  codeFont: string
+  codeSize: number
+  contentWidth: number
+}
+
+export const lookPresets: LookPreset[] = [
+  { id: "ade", name: "ADE", description: "Graphite, system font, comfortable reading width.", palette: "graphite", interfaceFont: "", interfaceSize: 14, contentSize: 15, codeFont: "", codeSize: 12, contentWidth: 820 },
+  { id: "cursor", name: "Cursor-style", description: "Crisp cool grays and blue, compact, with a narrow chat.", palette: "slate", interfaceFont: "", interfaceSize: 13, contentSize: 14, codeFont: "", codeSize: 12, contentWidth: 760 },
+  { id: "claude", name: "Claude-style", description: "Warm charcoal and terracotta, larger reading text.", palette: "paseo", interfaceFont: "", interfaceSize: 14, contentSize: 16, codeFont: "", codeSize: 13, contentWidth: 740 },
+  { id: "antigravity", name: "Antigravity-style", description: "Muted slate and frosted blue, roomy layout.", palette: "nord", interfaceFont: "", interfaceSize: 14, contentSize: 15, codeFont: "", codeSize: 13, contentWidth: 880 },
+  { id: "codex", name: "Codex-style", description: "Minimal black and white, compact.", palette: "ash", interfaceFont: "", interfaceSize: 13, contentSize: 14, codeFont: "", codeSize: 12, contentWidth: 760 },
+]
