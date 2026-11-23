@@ -35,6 +35,7 @@ export function WorkspaceHeaderBar({
   runningProcessesCount,
   pullRequest,
   activeBesideTab,
+  bottomTerminalOpen = false,
   onOpenExternalBrowser,
   onOpenSubagent,
   onOpenFiles,
@@ -62,6 +63,7 @@ export function WorkspaceHeaderBar({
   runningProcessesCount: number
   pullRequest: PullRequestInfo | null
   activeBesideTab: WorkspaceTab | null
+  bottomTerminalOpen?: boolean
   onOpenExternalBrowser: (url: string) => Promise<void>
   onOpenSubagent: (id: string) => void
   onOpenFiles: () => void
@@ -159,15 +161,6 @@ export function WorkspaceHeaderBar({
               <span>Run</span>
               {runStatus?.run === "running" ? <span className="ade-state-dot is-running" aria-label="App running" /> : null}
             </button>
-            <button
-              type="button"
-              className={`ade-header-tool-btn ${activeBesideTab?.kind === "terminal" ? "is-active" : ""}`}
-              onClick={onOpenTerminal}
-              title="Interactive Terminal"
-            >
-              <Terminal className="size-3.5" />
-              <span>Terminal</span>
-            </button>
             {session.workspace?.kind !== "none" ? (
               <button
                 type="button"
@@ -197,6 +190,16 @@ export function WorkspaceHeaderBar({
             ) : null}
           </>
         ) : null}
+
+        <button
+          type="button"
+          className={`ade-header-tool-btn ${bottomTerminalOpen || activeBesideTab?.kind === "terminal" ? "is-active" : ""}`}
+          onClick={onOpenTerminal}
+          title="Toggle Terminal Drawer (Cmd+J)"
+        >
+          <Terminal className="size-3.5" />
+          <span>Terminal</span>
+        </button>
 
         <button
           type="button"

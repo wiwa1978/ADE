@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { Columns2, Terminal, X } from "lucide-react"
+import { TerminalPanel } from "../../TerminalPanel"
 import type {
   ApprovalPolicy,
   BrowserState,
@@ -131,6 +133,12 @@ export function SplitWorkspace({
 }) {
   const [besideTabs, setBesideTabs] = useState<WorkspaceTab[]>([])
   const [activeBesideId, setActiveBesideId] = useState<string | null>(null)
+  const [bottomTerminalOpen, setBottomTerminalOpen] = useState(false)
+  const [bottomTerminalMounted, setBottomTerminalMounted] = useState(false)
+  const [bottomTerminalHeight, setBottomTerminalHeight] = useState(() => {
+    const saved = Number(localStorage.getItem("ade.terminal-height"))
+    return saved >= 140 && saved <= 520 ? saved : 240
+  })
   const [pullRequest, setPullRequest] = useState<PullRequestInfo | null>(null)
   const [prevSessionId, setPrevSessionId] = useState(session.id)
   const [prevExternalRequest, setPrevExternalRequest] = useState<WorkspaceTab | null>(null)
@@ -141,9 +149,11 @@ export function SplitWorkspace({
   })
   const containerRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef(false)
+  const bottomDraggingRef = useRef(false)
 
   const hasWorkspace = Boolean(session.workspace?.path && session.workspace.status === "ready")
   const workspacePath = session.workspace?.path ?? null
+  const terminalCwd = workspacePath ?? "~"
   const isBusy = session.status === "working" || Boolean(timeline?.busy)
 
   const openBeside = useCallback((tab: WorkspaceTab) => {
@@ -207,20 +217,42 @@ export function SplitWorkspace({
 
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
-      if (!draggingRef.current || !containerRef.current) return
-      const rect = containerRef.current.getBoundingClientRect()
-      if (!rect.width) return
-      const pct = Math.min(75, Math.max(30, ((e.clientX - rect.left) / rect.width) * 100))
-      setSplitRatio(pct)
-      localStorage.setItem("ade.split-ratio", String(Math.round(pct)))
+      if (draggingRef.current && containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect()
+        if (!rect.width) return
+        const pct = Math.min(75, Math.max(30, ((e.clientX - rect.left) / rect.width) * 100))
+        setSplitRatio(pct)
+        localStorage.setItem("ade.split-ratio", String(Math.round(pct)))
+      }
+      if (bottomDraggingRef.current) {
+        const next = Math.min(520, Math.max(140, window.innerHeight - e.clientY))
+        setBottomTerminalHeight(next)
+        localStorage.setItem("ade.terminal-height", String(Math.round(next)))
+      }
     }
-    const onUp = () => { draggingRef.current = false }
+    const onUp = () => {
+      draggingRef.current = false
+      bottomDraggingRef.current = false
+    }
     window.addEventListener("pointermove", onMove)
     window.addEventListener("pointerup", onUp)
     return () => {
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
     }
+  }, [])
+
+  // Keyboard shortcut: Cmd+J or Ctrl+` toggles bottom terminal drawer
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") || (e.ctrlKey && e.key === "`")) {
+        e.preventDefault()
+        setBottomTerminalMounted(true)
+        setBottomTerminalOpen(v => !v)
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
   }, [])
 
   const openSubagent = useCallback((subagentId: string) => {
@@ -288,6 +320,7 @@ export function SplitWorkspace({
     openBeside({ id: "artifact", kind: "artifact", title: art?.title || "Artifacts", artifactId: art?.id })
   }, [artifacts, openBeside])
   const openTerminal = useCallback((another = false) => {
+    setBottomTerminalOpen(false)
     if (!another) {
       const existing = [...besideTabs].reverse().find(t => t.kind === "terminal")
       openBeside(existing ?? { id: "terminal", kind: "terminal", title: "Terminal" })
@@ -296,6 +329,10 @@ export function SplitWorkspace({
     const count = besideTabs.filter(t => t.kind === "terminal").length
     openBeside({ id: `terminal:${Date.now()}`, kind: "terminal", title: `Terminal ${count + 1}` })
   }, [besideTabs, openBeside])
+  const toggleBottomTerminal = useCallback(() => {
+    setBottomTerminalMounted(true)
+    setBottomTerminalOpen(v => !v)
+  }, [])
   const openPullRequest = useCallback(() => openBeside({ id: "pr", kind: "pr", title: "Pull request" }), [openBeside])
   const openProcesses = useCallback(() => openBeside({ id: "processes", kind: "processes", title: "Processes" }), [openBeside])
 
@@ -319,11 +356,12 @@ export function SplitWorkspace({
         runningProcessesCount={runningProcessesCount}
         pullRequest={pullRequest}
         activeBesideTab={activeBesideTab}
+        bottomTerminalOpen={bottomTerminalOpen}
         onOpenExternalBrowser={onOpenExternalBrowser}
         onOpenSubagent={openSubagent}
         onOpenFiles={openFiles}
         onOpenDiff={() => openDiff()}
-        onOpenTerminal={() => openTerminal()}
+        onOpenTerminal={toggleBottomTerminal}
         onOpenPullRequest={openPullRequest}
         onOpenRun={openRun}
         runStatus={hasWorkspace ? runStatus : null}
@@ -404,7 +442,7 @@ export function SplitWorkspace({
                 if (panel === "files") openFiles()
                 else if (panel === "diff") openDiff()
                 else if (panel === "browser") openBrowser()
-                else if (panel === "terminal") openTerminal()
+                else if (panel === "terminal") toggleBottomTerminal()
                 else if (panel === "pr") openPullRequest()
               }}
               textareaRef={textareaRef}
@@ -469,6 +507,50 @@ export function SplitWorkspace({
           </>
         ) : null}
       </div>
+
+      {/* Bottom-Docked Resizable Terminal Drawer (stays mounted once opened so the shell session persists when collapsed) */}
+      {bottomTerminalMounted ? (
+        <section
+          className="ade-bottom-drawer"
+          style={{ height: `${bottomTerminalHeight}px` }}
+          hidden={!bottomTerminalOpen}
+          aria-label="Terminal drawer"
+        >
+          <div
+            className="ade-bottom-resize-handle"
+            role="separator"
+            aria-orientation="horizontal"
+            onPointerDown={() => { bottomDraggingRef.current = true }}
+            title="Drag to resize terminal"
+          />
+          <div className="ade-bottom-drawer-head">
+            <div className="flex items-center gap-2 min-w-0">
+              <Terminal className="size-3.5 text-[rgb(var(--primary))]" />
+              <strong>Terminal</strong>
+              <span className="ade-pill ade-mono ade-truncate">{terminalCwd}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button type="button" className="ade-chip-btn" onClick={() => openTerminal(false)} title="Open terminal in a side-by-side split pane">
+                <Columns2 className="size-3" /> Side pane
+              </button>
+              <button type="button" className="ade-icon-btn" onClick={() => setBottomTerminalOpen(false)} aria-label="Close terminal drawer" title="Close terminal drawer (Cmd+J)">
+                <X className="size-3.5" />
+              </button>
+            </div>
+          </div>
+          <div className="ade-terminal-pane-wrap">
+            <TerminalPanel
+              environmentId={environmentId}
+              workspaceKey={`${session.id}:bottom`}
+              cwd={terminalCwd}
+              visible={bottomTerminalOpen}
+              autoStart={terminalAutoStart}
+              fontSize={terminalFontSize}
+              scrollback={terminalScrollback}
+            />
+          </div>
+        </section>
+      ) : null}
     </div>
   )
 }

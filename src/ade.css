@@ -2588,3 +2588,42 @@
 .ade-checkpoint-rows li { display: flex; align-items: center; gap: 10px; padding: 9px 12px; }
 .ade-checkpoint-rows li + li { border-top: 1px solid rgb(var(--border) / 0.6); }
 .ade-msg.ade-msg-user { flex-direction: column; align-items: flex-end; }
+
+/* Bottom-Docked Resizable Terminal Drawer */
+.ade-bottom-drawer {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid rgb(var(--border));
+  background: rgb(var(--background));
+  min-height: 140px;
+  position: relative;
+}
+.ade-bottom-drawer[hidden] {
+  display: none;
+}
+.ade-bottom-resize-handle {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: row-resize;
+  z-index: 6;
+  transition: background 120ms ease;
+}
+.ade-bottom-resize-handle:hover {
+  background: rgb(var(--primary) / 0.55);
+}
+.ade-bottom-drawer-head {
+  height: 34px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 10px 0 12px;
+  border-bottom: 1px solid rgb(var(--border) / 0.7);
+  background: rgb(var(--nav));
+  font-size: 12px;
+}

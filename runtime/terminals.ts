@@ -1,5 +1,6 @@
 import { spawn as spawnPty, type IPty } from "node-pty";
 import { realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, isAbsolute, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { httpError } from "./http-error.ts";
@@ -55,18 +56,19 @@ export class TerminalManager {
 		if ([...this.#terminals.values()].filter(terminal => !terminal.exited).length >= MAX_ACTIVE_TERMINALS) {
 			throw inputError(`Close an existing terminal before starting another (limit ${MAX_ACTIVE_TERMINALS}).`, 429);
 		}
-		if (typeof input?.cwd !== "string" || !input.cwd || input.cwd.includes("\0") || !isAbsolute(input.cwd)) {
+		const requestedCwd = input?.cwd === "~" ? homedir() : input?.cwd;
+		if (typeof requestedCwd !== "string" || !requestedCwd || requestedCwd.includes("\0") || !isAbsolute(requestedCwd)) {
 			throw inputError("Choose an absolute workspace directory before opening a terminal.");
 		}
 		let cwd: string;
 		try {
-			cwd = realpathSync(input.cwd);
+			cwd = realpathSync(requestedCwd);
 			if (!statSync(cwd).isDirectory()) throw new Error("Not a directory");
 		} catch {
 			throw inputError("The terminal workspace directory is unavailable.", 404);
 		}
-		const cols = integerInRange(input.cols, 20, 300, 80, "Terminal columns");
-		const rows = integerInRange(input.rows, 5, 200, 24, "Terminal rows");
+		const cols = integerInRange(input?.cols, 20, 300, 80, "Terminal columns");
+		const rows = integerInRange(input?.rows, 5, 200, 24, "Terminal rows");
 		const shell = terminalShell(this.#environment);
 		let pty: IPty;
 		try {

@@ -114,6 +114,8 @@ test("terminal sessions reject invalid workspaces, dimensions, and oversized inp
 	assert.throws(() => manager.create({ cwd, cols: 2 }), /Terminal columns/);
 	const created = manager.create({ cwd });
 	assert.throws(() => manager.write(created.id, "x".repeat(8193)), /8192/);
+	const homeTerminal = manager.create({ cwd: "~" });
+	assert.ok(homeTerminal.cwd.length > 0);
 	manager.closeAll();
 });
 

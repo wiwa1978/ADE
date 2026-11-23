@@ -77,11 +77,11 @@ export function CommandCenter({
   const items: CommandItem[] = [
     { id: "act-new", group: "Actions", label: "New coding session", detail: "Start a fresh workspace or worktree", icon: <Plus className="size-4" />, action: onNewSession },
     { id: "act-browser", group: "Workspace", label: "Open Built-in Browser", detail: "Interactive Chrome CDP + iframe preview", icon: <Globe className="size-4" />, action: () => onOpenPanel("browser") },
+    { id: "act-term", group: "Workspace", label: "Open Terminal (Side Pane)", detail: "Interactive shell in session workspace or ~", icon: <Terminal className="size-4" />, action: () => onOpenPanel("terminal") },
     { id: "act-ext", group: "Workspace", label: "Open localhost:3000 in External Browser", detail: "Launch default system browser", icon: <ExternalLink className="size-4" />, action: () => onOpenExternalBrowser("http://localhost:3000") },
     ...(hasActiveWorkspace ? [
       { id: "act-files", group: "Workspace", label: "Open Files Explorer", detail: "Browse and edit workspace files", icon: <FolderTree className="size-4" />, action: () => onOpenPanel("files") },
       { id: "act-diff", group: "Workspace", label: "Open Git Changes & Diff", detail: "Review diffs, stage, and commit", icon: <FileDiff className="size-4" />, action: () => onOpenPanel("diff") },
-      { id: "act-term", group: "Workspace", label: "Open Terminal", detail: "Interactive shell in session workspace", icon: <Terminal className="size-4" />, action: () => onOpenPanel("terminal") },
     ] : []),
     { id: "act-settings", group: "Actions", label: "Open Settings & MCP Servers", detail: "Providers, appearance, approvals, MCP", icon: <Settings2 className="size-4" />, action: onOpenSettings },
     ...subagents.map(sub => ({

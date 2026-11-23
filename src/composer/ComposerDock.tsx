@@ -317,11 +317,11 @@ export function ComposerDock({
                     <button type="button" className="ade-icon-btn" onClick={() => onQuickOpenPanel("diff")} title="Open Git Diff pane">
                       <FileDiff className="size-3.5" />
                     </button>
-                    <button type="button" className="ade-icon-btn" onClick={() => onQuickOpenPanel("terminal")} title="Open Terminal pane">
-                      <Terminal className="size-3.5" />
-                    </button>
                   </>
                 ) : null}
+                <button type="button" className="ade-icon-btn" onClick={() => onQuickOpenPanel("terminal")} title="Toggle Terminal (Cmd+J)">
+                  <Terminal className="size-3.5" />
+                </button>
                 <button type="button" className="ade-icon-btn" onClick={() => onQuickOpenPanel("browser")} title="Open Built-in Browser pane">
                   <Globe className="size-3.5" />
                 </button>

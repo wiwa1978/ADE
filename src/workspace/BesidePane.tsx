@@ -165,7 +165,7 @@ export function BesidePane({
               </button>
             </div>
           ))}
-          {activeBesideTab.kind === "terminal" && workspacePath ? (
+          {activeBesideTab.kind === "terminal" ? (
             <button type="button" className="ade-tab-add" title="New terminal" aria-label="New terminal" onClick={() => onOpenTerminal(true)}>
               <Plus className="size-3.5" />
             </button>
@@ -272,19 +272,19 @@ export function BesidePane({
         ) : null}
 
         {/* Terminals stay mounted while hidden so the shell view and keystrokes are never lost when switching tabs. */}
-        {workspacePath ? besideTabs.filter(tab => tab.kind === "terminal").map(tab => (
+        {besideTabs.filter(tab => tab.kind === "terminal").map(tab => (
           <div key={tab.id} className="ade-terminal-pane-wrap" hidden={tab.id !== activeBesideTab.id}>
             <TerminalPanel
               environmentId={environmentId}
               workspaceKey={tab.id === "terminal" ? session.id : `${session.id}:${tab.id}`}
-              cwd={workspacePath}
+              cwd={workspacePath ?? "~"}
               visible={true}
               autoStart={terminalAutoStart}
               fontSize={terminalFontSize}
               scrollback={terminalScrollback}
             />
           </div>
-        )) : null}
+        ))}
       </div>
     </section>
   )
