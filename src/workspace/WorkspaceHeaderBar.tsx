@@ -1,5 +1,6 @@
 import {
   Play,
+  ScrollText,
   Activity,
   Bot,
   ExternalLink,
@@ -46,6 +47,7 @@ export function WorkspaceHeaderBar({
   onOpenArtifact,
   onOpenProcesses,
   onOpenRun,
+  onOpenTranscript,
   runStatus,
   projectName,
   onOpenProject,
@@ -75,6 +77,7 @@ export function WorkspaceHeaderBar({
   onOpenArtifact: () => void
   onOpenProcesses: () => void
   onOpenRun: () => void
+  onOpenTranscript?: () => void
   runStatus: { setup: string; run: string; check?: string; url: string | null } | null
   /** Breadcrumb back to the session's project. */
   projectName?: string
@@ -222,6 +225,18 @@ export function WorkspaceHeaderBar({
           <span>Browser</span>
           {browserState.agentDriving ? <span className="ade-dot ade-dot-running" /> : null}
         </button>
+
+        {onOpenTranscript ? (
+          <button
+            type="button"
+            className={`ade-header-tool-btn ${activeBesideTab?.kind === "transcript" ? "is-active" : ""}`}
+            onClick={onOpenTranscript}
+            title="Transcript: step through what the agent did, or export the session"
+            aria-label="Transcript"
+          >
+            <ScrollText className="size-3.5" />
+          </button>
+        ) : null}
 
         {artifacts.length > 0 ? (
           <button

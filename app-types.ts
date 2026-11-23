@@ -177,6 +177,7 @@ export type WorkspaceTabKind =
   | "processes"
   | "pr"
   | "run"
+  | "transcript"
 
 export type WorkspaceTab = {
   id: string

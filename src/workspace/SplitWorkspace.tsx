@@ -276,6 +276,7 @@ export function SplitWorkspace({
     openBeside({ id: "diff", kind: "diff", title: "Changes" })
   }, [openBeside])
   const openRun = useCallback(() => openBeside({ id: "run", kind: "run", title: "Run" }), [openBeside])
+  const openTranscript = useCallback(() => openBeside({ id: "transcript", kind: "transcript", title: "Transcript" }), [openBeside])
 
   // Setup/run status for the header, polled lightly while the session has a workspace.
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null)
@@ -368,6 +369,7 @@ export function SplitWorkspace({
         onOpenTerminal={toggleBottomTerminal}
         onOpenPullRequest={openPullRequest}
         onOpenRun={openRun}
+        onOpenTranscript={openTranscript}
         runStatus={hasWorkspace ? runStatus : null}
         projectName={projectName}
         onOpenProject={onOpenProject}
@@ -498,6 +500,8 @@ export function SplitWorkspace({
               onOpenBrowser={openBrowser}
               agentBusy={isBusy}
               onAskAgent={onAskAgent}
+              timelineItems={timeline?.items ?? []}
+              onRewind={hasWorkspace ? content => void rewindTo(content) : undefined}
               diffMode={diffMode}
               onRunStatusChange={setRunStatus}
               onOpenProjectSettings={onOpenProjectSettings}

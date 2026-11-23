@@ -16,6 +16,8 @@ import {
 } from "../validators.ts";
 import { restoreWorktree } from "../worktrees.ts";
 import type { RouteDeps } from "./context.ts";
+import { redactForCwd } from "../project-secrets.ts";
+import { transcriptMarkdown, type TranscriptItem } from "../../packages/protocol/transcript.ts";
 
 export function registerSessionRoutes(
 	router: Router,
@@ -267,6 +269,30 @@ export function registerSessionRoutes(
 		}
 		const conversationId = ctx.url.searchParams.get("conversationId") ?? undefined;
 		ctx.json(200, await host.getTimeline(ctx.params.id, conversationId));
+	});
+
+	// Transcript export (R15): Markdown for people, JSON for tools. Project secrets are masked.
+	router.get("/api/sessions/:id/transcript", async (ctx) => {
+		const sessionId = ctx.params.id;
+		const session = viewSessions().find(item => item.id === sessionId);
+		if (!session) throw notFound("Session not found.");
+		const timeline = engines.get(sessionId) ? engines.snapshot(sessionId) : await host.getTimeline(sessionId);
+		const workspace = host.getWorkspacePath(sessionId);
+		const project = session.projectId ? host.projects().find(item => item?.id === session.projectId)?.name ?? null : null;
+		const agent = session.engine === "claude-code" ? "Claude Code" : session.engine === "codex" ? "Codex" : "ADE agent";
+		const format = ctx.url.searchParams.get("format") === "json" ? "json" : "md";
+		const body = redactForCwd(format === "json"
+			? JSON.stringify({ session: { id: session.id, title: session.label, project, branch: session.workspace?.branch ?? null, agent }, exportedAt: new Date().toISOString(), items: timeline.items, usage: timeline.usage ?? null }, null, 2)
+			: transcriptMarkdown(timeline.items as TranscriptItem[], { title: session.label, project, branch: session.workspace?.branch ?? null, agent }, { includeThinking: ctx.url.searchParams.get("thinking") === "1" }), workspace);
+		// Paths inside the worktree are shown relative to it, which is shorter and doesn't reveal local folders.
+		const shareable = workspace ? body.split(`${workspace}/`).join("").split(workspace).join(".") : body;
+		const name = `${session.label.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "session"}.${format}`;
+		ctx.response.writeHead(200, {
+			"content-type": format === "json" ? "application/json; charset=utf-8" : "text/markdown; charset=utf-8",
+			"content-disposition": `attachment; filename="${name}"`,
+			"cache-control": "no-store",
+		});
+		ctx.response.end(shareable);
 	});
 
 	router.post(

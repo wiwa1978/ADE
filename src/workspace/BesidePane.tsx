@@ -19,6 +19,7 @@ import type {
   ManagedProcessSummary,
   SessionArtifact,
   SubagentInfo,
+  TimelineItem,
   WorkspaceGitSummary,
   WorkspaceTab,
 } from "../../app-types"
@@ -31,6 +32,7 @@ import { BrowserPanel } from "../panels/BrowserPanel"
 import { ArtifactPanel } from "../panels/ArtifactPanel"
 import { ProcessesPanel } from "../panels/ProcessesPanel"
 import { RunPanel, type RunStatus } from "../panels/RunPanel"
+import { TranscriptPanel } from "../panels/TranscriptPanel"
 import { PullRequestPanel, type PullRequestInfo } from "../panels/PullRequestPanel"
 
 export function BesidePane({
@@ -74,6 +76,8 @@ export function BesidePane({
   onPullRequestChange,
   agentBusy = false,
   onAskAgent,
+  timelineItems = [],
+  onRewind,
   diffMode = "working",
   onRunStatusChange,
   onOpenProjectSettings,
@@ -118,6 +122,8 @@ export function BesidePane({
   onPullRequestChange: (pr: PullRequestInfo | null) => void
   agentBusy?: boolean
   onAskAgent?: (text: string) => Promise<void>
+  timelineItems?: TimelineItem[]
+  onRewind?: (content: string) => void
   diffMode?: "working" | "branch" | "history"
   onRunStatusChange?: (status: RunStatus) => void
   onOpenProjectSettings?: () => void
@@ -248,6 +254,10 @@ export function BesidePane({
 
         {activeBesideTab.kind === "processes" ? (
           <ProcessesPanel processes={processes} onKill={onKillProcess} onRefresh={onRefreshProcesses} />
+        ) : null}
+
+        {activeBesideTab.kind === "transcript" ? (
+          <TranscriptPanel sessionId={session.id} items={timelineItems} onRewind={onRewind} workspacePath={workspacePath || undefined} />
         ) : null}
 
         {activeBesideTab.kind === "run" ? (

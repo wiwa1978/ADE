@@ -260,4 +260,9 @@ Features that comparable tools (Conductor, Claude Code, Cursor, Codex, Orca, Pas
 | R7 | ⚠️ Mostly | `@` in the composer mentions a workspace file; Project settings → Agent instructions edits `AGENTS.md` / `CLAUDE.md`. Not done: a context-fullness meter (agents don't report per-turn context size yet). |
 | R8 | ✅ Done | Tokens (and cost when the agent reports it) above the composer; Settings → Usage with per-project and per-session totals, 30-day chart and a monthly budget that warns in the Inbox. Usage is counted from now on; earlier ADE-agent sessions are not back-filled. |
 | R9 | ✅ Done | New session → Start from → Existing branch / Pull request. Branches checked out elsewhere are shown as in use. |
-| R10–R15 | Not started | |
+| R10 | ✅ Done | New session → Attempts (1–3, an agent per attempt). The Compare screen shows each attempt's changes, check result and usage; "Keep this one" archives the rest. Attempt sessions show "Attempt A · Compare" in the header. |
+| R11 | ✅ Done | Project → Automations: run a prompt hourly / daily / on weekdays / weekly, or when a GitHub issue gets a label (`{{issue}}` is filled in). Each run is a session in its own worktree; runs never overlap. |
+| R12 | ✅ Done | Project settings → Check: a hook that runs after every agent turn (lint, tests), shown in the header and Run panel, optionally sent back to the agent. Settings → Agents & permissions: "Always block" and "Always allow" rules. |
+| R13 | ✅ Done | Project settings → Secrets: environment variables for agents, scripts, terminals and Claude Code/Codex; write-only, stored 0600, masked in output and exports. |
+| R14 | ✅ Done | Settings → Integrations: Slack webhook (needs approval, finished, failed, automation runs) and Linear (New session → Import Linear issue). Jira is not included. |
+| R15 | ✅ Done | Transcript button (scroll icon) in a session's header: step through every message and tool call with its arguments and output; Copy, or download as .md / .json. |
