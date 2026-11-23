@@ -290,8 +290,11 @@ export function SplitWorkspace({
     let active = true
     const poll = async () => {
       try {
-        const result = await request<{ setup: { status: RunStatus["setup"] }; run: { status: RunStatus["run"]; url: string | null }; check?: { status: RunStatus["run"] } }>(`/api/sessions/${encodeURIComponent(session.id)}/scripts`)
-        if (active) setRunStatus({ setup: result.setup.status, run: result.run.status, check: result.check?.status, url: result.run.url })
+        const [result, runOn] = await Promise.all([
+          request<{ setup: { status: RunStatus["setup"] }; run: { status: RunStatus["run"]; url: string | null }; check?: { status: RunStatus["run"] } }>(`/api/sessions/${encodeURIComponent(session.id)}/scripts`),
+          request<{ target: string; state: NonNullable<RunStatus["docker"]> }>(`/api/sessions/${encodeURIComponent(session.id)}/run-on`).catch(() => null),
+        ])
+        if (active) setRunStatus({ setup: result.setup.status, run: result.run.status, check: result.check?.status, url: result.run.url, docker: runOn?.target === "docker" ? runOn.state : null })
       } catch {
         if (active) setRunStatus(null)
       }
@@ -512,7 +515,7 @@ export function SplitWorkspace({
               tasks={tasks}
               onRewind={hasWorkspace ? content => void rewindTo(content) : undefined}
               diffMode={diffMode}
-              onRunStatusChange={setRunStatus}
+              onRunStatusChange={status => setRunStatus(previous => ({ ...status, docker: previous?.docker ?? null }))}
               onOpenProjectSettings={onOpenProjectSettings}
               onOpenExternalBrowser={onOpenExternalBrowser}
               onBrowserStateChange={onBrowserStateChange}

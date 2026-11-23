@@ -266,3 +266,12 @@ Features that comparable tools (Conductor, Claude Code, Cursor, Codex, Orca, Pas
 | R13 | ✅ Done | Project settings → Secrets: environment variables for agents, scripts, terminals and Claude Code/Codex; write-only, stored 0600, masked in output and exports. |
 | R14 | ✅ Done | Settings → Integrations: Slack webhook (needs approval, finished, failed, automation runs) and Linear (New session → Import Linear issue). Jira is not included. |
 | R15 | ✅ Done | Transcript button (scroll icon) in a session's header: step through every message and tool call with its arguments and output; Copy, or download as .md / .json. |
+
+### Where agents run
+| Target | Status | Notes |
+| --- | --- | --- |
+| This Mac | ✅ Done | The default. |
+| Docker | ✅ Done | New session → Run on → Docker, or a project default (Project settings → Run sessions on, with the image). Each session gets its own container with its worktree, the repository's Git metadata and ADE's worktree folder mounted at the same paths. The ADE agent's commands and its subagents', terminals and setup/run/check scripts run inside; Run uses a published port (`HOST=0.0.0.0` is set). Run panel → Runs on switches and restarts; archiving removes the container. Claude Code and Codex still run their own commands on this Mac. |
+| SSH host | Not started | |
+| WSL2 | Not started | |
+| Boat.dev | Not started | An unused adapter exists in `packages/sandbox-remote`. |

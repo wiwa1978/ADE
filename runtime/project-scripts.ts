@@ -12,6 +12,7 @@ import { createServer } from "node:net";
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import type { RuntimeEventBus } from "./events.ts";
 import { redact, secretEnv } from "./project-secrets.ts";
+import { commandInvocation, runsInDocker, sessionPort, stopInContainer } from "./execution-targets.ts";
 
 export type ProjectScripts = {
 	setup: string;
@@ -164,15 +165,27 @@ export class ScriptRunner {
 		if (!command.trim()) throw Object.assign(new Error(`No ${kind} script is configured for this project. Add one in the project's settings.`), { statusCode: 400 });
 		const key = this.#key(sessionId, kind);
 		if (this.#children.has(key)) throw Object.assign(new Error(`The ${kind} script is already running.`), { statusCode: 409 });
-		const port = kind === "run" ? await freePort() : null;
+		// In a Docker session the Run script uses the port published by its container.
+		const docker = runsInDocker(sessionId)
+		const port = kind === "run" ? (docker ? sessionPort(sessionId) : null) ?? await freePort() : null;
 		const state: ScriptState = { kind, status: "running", command, output: "", exitCode: null, startedAt: Date.now(), endedAt: null, port, url: null };
 		this.#states.set(key, state);
+		const secrets = secretEnv(cwd);
+		const env: Record<string, string> = {
+			...secrets, ...extraEnv,
+			...(port ? { PORT: String(port) } : {}),
+			// Dev servers in a container must listen on all interfaces to be reachable from this computer.
+			...(docker ? { HOST: "0.0.0.0" } : {}),
+			FORCE_COLOR: "0",
+			CI: kind === "setup" ? "1" : this.#environment.CI ?? "",
+		};
+		// Remember the process so Stop can end it inside the container (killing `docker exec` alone doesn't).
+		const inContainer = docker ? commandInvocation(sessionId, cwd, `echo $$ > /tmp/ade-${kind}.pid; exec ${command}`, Object.keys(env)) : null;
 		const shell = process.platform === "win32" ? this.#environment.COMSPEC || "cmd.exe" : this.#environment.SHELL || "/bin/sh";
 		const args = process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-lc", command];
-		const secrets = secretEnv(cwd);
-		const child = spawn(shell, args, {
+		const child = spawn(inContainer?.file ?? shell, inContainer?.args ?? args, {
 			cwd,
-			env: { ...this.#environment, ...secrets, ...extraEnv, ...(port ? { PORT: String(port) } : {}), FORCE_COLOR: "0", CI: kind === "setup" ? "1" : this.#environment.CI ?? "" },
+			env: { ...this.#environment, ...env },
 			stdio: ["ignore", "pipe", "pipe"],
 			detached: process.platform !== "win32",
 			windowsHide: true,
@@ -220,6 +233,7 @@ export class ScriptRunner {
 		const state = this.state(sessionId, kind);
 		if (child?.pid) {
 			state.status = "stopped";
+			if (runsInDocker(sessionId)) stopInContainer(sessionId, `/tmp/ade-${kind}.pid`);
 			try {
 				// Kill the whole process group so dev servers' child processes stop too.
 				if (process.platform !== "win32") process.kill(-child.pid, "SIGTERM");

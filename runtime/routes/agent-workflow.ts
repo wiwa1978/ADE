@@ -8,7 +8,7 @@ import { readInstructions, searchWorkspaceFiles, writeInstructions } from "../ag
 
 export function registerAgentWorkflowRoutes(
 	router: Router,
-	{ host, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, usage, secrets, automations, automationRunner, integrations }: RouteDeps,
+	{ host, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, usage, secrets, automations, automationRunner, integrations, executionTargets }: RouteDeps,
 ): void {
 	// --- Usage: tokens and cost per session, project and day ---
 	router.get("/api/usage", (ctx) => {
@@ -48,6 +48,40 @@ export function registerAgentWorkflowRoutes(
 		scripts.save(project.id, await ctx.readBody());
 		ctx.json(200, scriptsResponse(project.id, project.repository));
 	}, { originError: "Use ADE to change project scripts." });
+
+	// --- Where sessions run: this computer or a Docker container ---
+	router.get("/api/docker", async (ctx) => {
+		ctx.json(200, await executionTargets.dockerAvailable());
+	});
+
+	router.get("/api/projects/:id/run-on", (ctx) => {
+		ctx.json(200, executionTargets.projectDefault(projectFor(ctx.params.id).id));
+	});
+
+	router.put("/api/projects/:id/run-on", async (ctx) => {
+		const project = projectFor(ctx.params.id);
+		ctx.json(200, executionTargets.setProjectDefault(project.id, await ctx.readBody()));
+	}, { originError: "Use ADE to change where sessions run." });
+
+	router.get("/api/sessions/:id/run-on", async (ctx) => {
+		ctx.json(200, await executionTargets.status(ctx.params.id));
+	});
+
+	router.put("/api/sessions/:id/run-on", async (ctx) => {
+		const workspace = ctx.requireWorkspace(ctx.params.id);
+		const body = await ctx.readBody();
+		if (viewSessions().find(item => item.id === ctx.params.id)?.status === "working") throw conflict("Wait for the agent to finish before changing where the session runs.");
+		scriptRunner.stopAll(ctx.params.id);
+		const repository = host.sessions().find(item => item.id === ctx.params.id)?.workspace?.repository ?? null;
+		ctx.json(200, executionTargets.setTarget(ctx.params.id, body, { workspace, repository }));
+	}, { originError: "Use ADE to change where sessions run." });
+
+	router.post("/api/sessions/:id/run-on/restart", async (ctx) => {
+		const workspace = ctx.requireWorkspace(ctx.params.id);
+		await ctx.readBody();
+		const repository = host.sessions().find(item => item.id === ctx.params.id)?.workspace?.repository ?? null;
+		ctx.json(200, await executionTargets.ensure(ctx.params.id, { workspace, repository }));
+	}, { originError: "Use ADE to change where sessions run." });
 
 	// --- Integrations: Slack notifications and Linear issues ---
 	router.get("/api/integrations", (ctx) => {

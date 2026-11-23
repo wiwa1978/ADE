@@ -31,6 +31,7 @@ export type RouteDeps = {
 	automations: import("../automations.ts").AutomationStore;
 	automationRunner: import("../automation-runner.ts").AutomationRunner;
 	integrations: import("../integrations.ts").Integrations;
+	executionTargets: import("../execution-targets.ts").ExecutionTargets;
 	cleanUpArchivedWorkspace: (
 		session: { id: string; workspace: string | null; repository: string | null; kind: string | null },
 		removeWorktreeRequested: boolean,

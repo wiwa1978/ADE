@@ -5,6 +5,7 @@ import { basename, isAbsolute, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { httpError } from "./http-error.ts";
 import { secretEnv } from "./project-secrets.ts";
+import { terminalInvocation } from "./execution-targets.ts";
 
 const MAX_INPUT_BYTES = 8_192;
 const MAX_OUTPUT_CHARACTERS = 500_000;
@@ -70,12 +71,15 @@ export class TerminalManager {
 		}
 		const cols = integerInRange(input?.cols, 20, 300, 80, "Terminal columns");
 		const rows = integerInRange(input?.rows, 5, 200, 24, "Terminal rows");
-		const shell = terminalShell(this.#environment);
+		const secrets = secretEnv(cwd);
+		// A terminal in a Docker session's workspace opens a shell inside its container.
+		const docker = terminalInvocation(cwd, [...Object.keys(secrets), "TERM", "COLORTERM"])
+		const shell = docker?.file ?? terminalShell(this.#environment);
 		let pty: IPty;
 		try {
-			pty = this.#spawn(shell, [], {
+			pty = this.#spawn(shell, docker?.args ?? [], {
 				name: "xterm-256color", cols, rows, cwd,
-				env: { ...this.#environment, ...secretEnv(cwd), TERM: "xterm-256color", COLORTERM: "truecolor" } as Record<string, string>,
+				env: { ...this.#environment, ...secrets, TERM: "xterm-256color", COLORTERM: "truecolor" } as Record<string, string>,
 			});
 		} catch {
 			throw inputError("Could not start the system shell for this workspace.", 503);

@@ -75,6 +75,7 @@ export function NewSessionView({
     startFrom?: StartFrom
     title?: string
     attempts?: EngineId[]
+    runOn?: "local" | "docker"
   }) => Promise<void>
   onLookupIssue?: (projectId: string, url: string) => Promise<GitHubIssue>
 }) {
@@ -93,6 +94,25 @@ export function NewSessionView({
   const [engine, setEngine] = useState<EngineId>("pi")
   const [startChoice, setStartChoice] = useState<StartChoice>({ mode: "new" })
   const [linearIssue, setLinearIssue] = useState<LinearIssue | null>(null)
+  // Where the session's commands run. Starts from the project's default.
+  const [runOn, setRunOn] = useState<"local" | "docker" | null>(null)
+  const [projectRunOn, setProjectRunOn] = useState<{ projectId: string; target: "local" | "docker"; image: string } | null>(null)
+  const [docker, setDocker] = useState<{ available: boolean; message: string } | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void request<{ available: boolean; message: string }>("/api/docker").then(result => { if (!cancelled) setDocker(result) }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [])
+  useEffect(() => {
+    if (!selectedProjectId) return
+    let cancelled = false
+    void request<{ target: "local" | "docker"; image: string }>(`/api/projects/${encodeURIComponent(selectedProjectId)}/run-on`)
+      .then(result => { if (!cancelled) setProjectRunOn({ projectId: selectedProjectId, ...result }) })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [selectedProjectId])
+  const defaultRunOn = projectRunOn && projectRunOn.projectId === selectedProjectId ? projectRunOn.target : "local"
+  const effectiveRunOn = runOn ?? defaultRunOn
   // Best of N: run the same task several times, each in its own worktree, possibly with different agents.
   const [attemptCount, setAttemptCount] = useState(1)
   const [attemptEngines, setAttemptEngines] = useState<Array<EngineId | null>>([null, null, null])
@@ -112,6 +132,7 @@ export function NewSessionView({
     const id = nextId === "__none__" ? null : nextId
     onSelectProject(id)
     setStartChoice({ mode: "new" })
+    setRunOn(null)
     const proj = projects.find(p => p.id === id)
     setRepository(proj?.repository ?? "")
     setKind(proj?.repository ? "worktree" : "checkout")
@@ -199,6 +220,7 @@ export function NewSessionView({
       githubIssue: linkedIssue ?? undefined,
       engine: engineAllowed(engine) ? engine : "pi",
       ...(startFrom ? { startFrom, title: startTitle } : linearIssue ? { title: `${linearIssue.identifier}: ${linearIssue.title}` } : {}),
+      ...(kind !== "none" ? { runOn: effectiveRunOn } : {}),
       ...(canAttempt && attemptCount > 1 ? { attempts: attemptEngines.slice(0, attemptCount).map(item => item ?? engine) } : {}),
     })
   }
@@ -307,6 +329,25 @@ export function NewSessionView({
                     </button>
                   )
                 })}
+              </div>
+            </div>
+          ) : null}
+
+          {kind !== "none" ? (
+            <div className="sf-label">
+              <span>Run on</span>
+              <div className="ade-attempts-row">
+                <div className="sf-segmented h-9" role="radiogroup" aria-label="Run on">
+                  <button type="button" role="radio" aria-checked={effectiveRunOn === "local"} className={`sf-seg-btn justify-center ${effectiveRunOn === "local" ? "is-active" : ""}`} style={{ minWidth: 96 }} onClick={() => setRunOn("local")}>This Mac</button>
+                  <button type="button" role="radio" aria-checked={effectiveRunOn === "docker"} disabled={docker !== null && !docker.available}
+                    title={docker && !docker.available ? docker.message : "Run the agent's commands, terminals and scripts in a Docker container"}
+                    className={`sf-seg-btn justify-center ${effectiveRunOn === "docker" ? "is-active" : ""}`} style={{ minWidth: 96 }} onClick={() => setRunOn("docker")}>Docker</button>
+                </div>
+                <small className="opacity-65">
+                  {effectiveRunOn === "docker"
+                    ? `Commands, terminals and scripts run in a container from ${projectRunOn?.image ?? "node:22-bookworm"}${engine !== "pi" ? ". Claude Code and Codex still run their own commands on this Mac" : ""}.`
+                    : docker && !docker.available ? docker.message : "Commands run directly on this computer, in the session's folder."}
+                </small>
               </div>
             </div>
           ) : null}

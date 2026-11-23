@@ -70,6 +70,8 @@ export type TaskStart = {
   startFrom?: StartFrom
   /** Shared by parallel attempts at the same task (best of N). */
   attemptGroup?: string
+  /** Where the session's commands run; defaults to the project's choice. */
+  runOn?: "local" | "docker"
   initialMessage?: { id: string; content: string; provider: string; model: string; reasoning: string }
 }
 

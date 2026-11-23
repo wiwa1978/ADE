@@ -152,7 +152,8 @@ export function validateEnvironmentActivate(body: Record<string, unknown>): { id
 
 export function validateTerminalCreate(body: Record<string, unknown>) {
 	return {
-		workspace: optionalString(body, "workspace"),
+		// The UI sends the folder as `cwd`; `workspace` is accepted too.
+		cwd: optionalString(body, "cwd") ?? optionalString(body, "workspace"),
 		cols: optionalNumber(body, "cols"),
 		rows: optionalNumber(body, "rows"),
 	};

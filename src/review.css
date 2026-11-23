@@ -153,3 +153,7 @@ a.ade-chip-btn { text-decoration: none; }
 .ade-progress-status.is-idle { color: rgb(var(--muted)); }
 .ade-progress-table td:nth-child(3), .ade-progress-table td:nth-child(4) { display: table-cell; }
 .ade-progress-table td .ade-clamp, .ade-progress-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Runs on (this computer or Docker) */
+.ade-run-on { display: grid; gap: 4px; padding: 8px 12px; border-bottom: 1px solid rgb(var(--border)); }
+.ade-run-on p { margin: 0; }

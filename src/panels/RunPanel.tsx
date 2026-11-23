@@ -22,7 +22,70 @@ const statusText: Record<ScriptState["status"], string> = {
   stopped: "Stopped",
 }
 
-export type RunStatus = { setup: ScriptState["status"]; run: ScriptState["status"]; check?: ScriptState["status"]; url: string | null }
+export type RunStatus = { setup: ScriptState["status"]; run: ScriptState["status"]; check?: ScriptState["status"]; url: string | null; docker?: DockerTarget["state"] | null }
+
+type DockerTarget = { target: "local" | "docker"; image: string; container: string | null; port: number | null; state: "absent" | "preparing" | "running" | "stopped" | "failed"; message: string }
+
+const dockerStateText: Record<DockerTarget["state"], string> = {
+  absent: "No container yet",
+  preparing: "Starting the container…",
+  running: "Container running",
+  stopped: "Container stopped",
+  failed: "Container could not start",
+}
+
+/** "Runs on" for a session: switch between this computer and Docker, see and restart the container. */
+function RunOnControls({ sessionId, busy }: { sessionId: string; busy: boolean }) {
+  const [target, setTarget] = useState<DockerTarget | null>(null)
+  const [working, setWorking] = useState(false)
+  const [error, setError] = useState("")
+  useEffect(() => {
+    let cancelled = false
+    const tick = () => {
+      void request<DockerTarget>(`/api/sessions/${encodeURIComponent(sessionId)}/run-on`)
+        .then(result => { if (!cancelled) setTarget(result) })
+        .catch(() => undefined)
+    }
+    tick()
+    const timer = window.setInterval(tick, 3000)
+    return () => { cancelled = true; window.clearInterval(timer) }
+  }, [sessionId])
+  const call = async (method: string, path: string, body: unknown) => {
+    setWorking(true)
+    setError("")
+    try {
+      setTarget(await request<DockerTarget>(`/api/sessions/${encodeURIComponent(sessionId)}/${path}`, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That didn't work.")
+    } finally {
+      setWorking(false)
+    }
+  }
+  if (!target) return null
+  const docker = target.target === "docker"
+  return (
+    <div className="ade-run-on">
+      <div className="ade-diff-header-meta">
+        <strong className="ade-xs">Runs on</strong>
+        <div className="ade-segmented" role="radiogroup" aria-label="Runs on">
+          <button type="button" role="radio" aria-checked={!docker} className={!docker ? "is-active" : ""} disabled={working || busy} onClick={() => void call("PUT", "run-on", { target: "local" })}>This Mac</button>
+          <button type="button" role="radio" aria-checked={docker} className={docker ? "is-active" : ""} disabled={working || busy} onClick={() => void call("PUT", "run-on", { target: "docker" })}>Docker</button>
+        </div>
+        {docker ? (
+          <>
+            <span className={`ade-state-dot is-${target.state === "running" ? "ok" : target.state === "failed" ? "failed" : target.state === "preparing" ? "running" : "idle"}`} />
+            <span className="ade-xs">{dockerStateText[target.state]}</span>
+            {target.state !== "preparing" && target.state !== "running" ? <button type="button" className="ade-chip-btn" disabled={working} onClick={() => void call("POST", "run-on/restart", {})}>{working ? "Starting…" : "Start container"}</button> : null}
+          </>
+        ) : null}
+      </div>
+      {docker ? <p className="ade-muted ade-xs"><code>{target.image}</code>{target.container ? <> · <code>{target.container}</code></> : null}{target.port ? <> · Run uses port {target.port}</> : null}</p> : null}
+      {docker && target.state === "failed" && target.message ? <p className="ade-xs ade-text-error">{target.message}</p> : null}
+      {busy ? <p className="ade-muted ade-xs">Wait for the agent to finish to switch.</p> : null}
+      {error ? <p className="ade-xs ade-text-error" role="alert">{error}</p> : null}
+    </div>
+  )
+}
 
 /** Session panel for the project's setup and run scripts: start the app, see its output, open it. */
 export function RunPanel({
@@ -110,6 +173,7 @@ export function RunPanel({
         </div>
       </div>
       {error ? <div className="ade-banner-error" role="alert">{error}</div> : null}
+      <RunOnControls sessionId={sessionId} busy={agentBusy} />
 
       {nothingConfigured ? (
         <div className="ade-pane-empty">

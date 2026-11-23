@@ -83,7 +83,7 @@ export function WorkspaceHeaderBar({
   onOpenProgress?: () => void
   /** Agents and tasks done out of the total, for the Progress button. */
   progressCount?: { done: number; total: number }
-  runStatus: { setup: string; run: string; check?: string; url: string | null } | null
+  runStatus: { setup: string; run: string; check?: string; url: string | null; docker?: string | null } | null
   /** Breadcrumb back to the session's project. */
   projectName?: string
   onOpenProject?: () => void
@@ -108,6 +108,12 @@ export function WorkspaceHeaderBar({
         {session.attemptGroup && onOpenAttempts ? (
           <button type="button" className="ade-row-tag is-review" onClick={() => onOpenAttempts(session.attemptGroup!)} title="This session is one of several attempts at the same task">
             {session.label.match(/ · ([A-D])$/) ? `Attempt ${session.label.match(/ · ([A-D])$/)![1]} · ` : ""}Compare
+          </button>
+        ) : null}
+        {runStatus?.docker ? (
+          <button type="button" className={`ade-row-tag is-${runStatus.docker === "running" ? "review" : runStatus.docker === "failed" ? "failed" : runStatus.docker === "preparing" ? "running" : "idle"}`} onClick={onOpenRun}
+            title="This session's commands, terminals and scripts run in a Docker container. Open Run to manage it.">
+            {runStatus.docker === "preparing" ? "Docker: starting…" : runStatus.docker === "failed" ? "Docker failed" : runStatus.docker === "running" ? "Docker" : "Docker: stopped"}
           </button>
         ) : null}
         {runStatus?.setup === "running" ? <button type="button" className="ade-row-tag is-running" onClick={onOpenRun} title="The project's setup script is running in this worktree">Setting up…</button>

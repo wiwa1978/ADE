@@ -2,6 +2,7 @@
 import { realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import { ProjectSecrets, setSecretResolver } from "./project-secrets.ts";
+import { ExecutionTargets, setExecutionTargets } from "./execution-targets.ts";
 import { checkFailedPrompt } from "../packages/protocol/agent-prompts.ts";
 import { createInbox } from "./inbox.ts";
 import { copyIntoWorktree, ProjectScriptStore, ScriptRunner } from "./project-scripts.ts";
@@ -62,6 +63,16 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		approvals: host.approvals,
 	}, sessionGit);
 	/** New worktree sessions: copy configured files from the project checkout, then run the setup script. */
+	// Where each session's commands run: this computer or its own Docker container.
+	const executionTargets = new ExecutionTargets(stateDirectory, { worktreesRoot: worktreeManager?.root ?? null });
+	setExecutionTargets(executionTargets, cwd => executionTargets.sessionForPath(cwd, (host.sessions?.() ?? []).map(item => ({ id: item.id, path: item.workspace?.path }))));
+	// Containers stop when the computer restarts; start them again for Docker sessions that are still open.
+	for (const session of host.sessions?.() ?? []) {
+		if (executionTargets.isDocker(session.id) && session.workspace?.path && !session.archivedAt) {
+			void executionTargets.ensure(session.id, { workspace: session.workspace.path, repository: session.workspace.repository }).catch(() => undefined);
+		}
+	}
+
 	function prepareWorktree(session: Conversation) {
 		const workspace = session.workspace;
 		if (workspace?.kind !== "worktree" || workspace.status !== "ready" || !workspace.path || !session.projectId) return;
@@ -71,7 +82,12 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		const effective = scripts.effective(project.id, project.repository);
 		const copied = effective.copy.length ? copyIntoWorktree(project.repository, workspace.path, effective.copy) : [];
 		if (!effective.setup) return;
-		void scriptRunner.start(session.id, "setup", effective.setup, workspace.path, { ADE_PROJECT_ROOT: project.repository })
+		// A Docker session runs setup inside its container, so wait until the container is up.
+		const ready = executionTargets.isDocker(session.id)
+			? executionTargets.ensure(session.id, { workspace: workspace.path, repository: workspace.repository })
+			: Promise.resolve(null);
+		void ready
+			.then(() => scriptRunner.start(session.id, "setup", effective.setup, workspace.path!, { ADE_PROJECT_ROOT: project.repository! }))
 			.then(state => { if (copied.length) state.output = `Copied from the project: ${copied.join(", ")}\n\n${state.output}`; })
 			.catch(() => undefined);
 	}
@@ -187,5 +203,5 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 			notify("automations", sessionId, (label, project) => `🤖 Automation started *${label}* (${project}).`);
 		},
 	});
-	return { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner, integrations };
+	return { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner, integrations, executionTargets };
 }

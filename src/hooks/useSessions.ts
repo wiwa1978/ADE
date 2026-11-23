@@ -354,6 +354,7 @@ export function useSessions(params: {
     title?: string
     /** Best of N: one agent per attempt; each gets its own worktree and the same task. */
     attempts?: Array<"pi" | "claude-code" | "codex">
+    runOn?: "local" | "docker"
   }) => {
     setCreatingSession(true)
     setLaunchError("")
@@ -376,6 +377,7 @@ export function useSessions(params: {
         githubIssue: input.githubIssue,
         ...(input.startFrom ? { startFrom: input.startFrom } : {}),
         ...(attemptGroup ? { attemptGroup } : {}),
+        ...(input.runOn ? { runOn: input.runOn } : {}),
         ...(!external && modelReady && input.prompt.trim()
           ? {
               initialMessage: {

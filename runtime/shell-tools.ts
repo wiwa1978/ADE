@@ -9,6 +9,7 @@ import type { RuntimeEventBus } from "./events.ts";
 import { isErrorCode, logger } from "./log.ts";
 import { conflict, notFound } from "./http-error.ts";
 import { redact, secretEnv } from "./project-secrets.ts";
+import { commandInvocation } from "./execution-targets.ts";
 
 export type { ManagedProcessSummary };
 
@@ -113,10 +114,13 @@ export class ProcessManager {
 		onChunk?: (chunk: string) => void;
 	}): { proc: ManagedProcess; done: Promise<{ exitCode: number | null; output: string }> } {
 		const id = randomUUID();
-		const invocation = buildShellInvocation(opts.command, opts.cwd, Boolean(opts.sandbox));
+		const secrets = secretEnv(opts.cwd);
+		// Sessions that run in Docker execute in their container; others on this computer.
+		const invocation = commandInvocation(opts.sessionId, opts.cwd, opts.command, [...Object.keys(secrets), "TERM", "CI"])
+			?? buildShellInvocation(opts.command, opts.cwd, Boolean(opts.sandbox));
 		const child = spawn(invocation.file, invocation.args, {
 			cwd: opts.cwd,
-			env: { ...process.env, ...secretEnv(opts.cwd), TERM: "dumb", CI: "1" },
+			env: { ...process.env, ...secrets, TERM: "dumb", CI: "1" },
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		const proc: ManagedProcess = {
@@ -138,7 +142,6 @@ export class ProcessManager {
 
 		let lastEmit = 0;
 		// Project secrets are in the environment; keep their values out of the transcript.
-		const secrets = secretEnv(opts.cwd);
 		const append = (buf: Buffer) => {
 			const text = redact(buf.toString("utf8"), secrets);
 			proc.output = trimOutput(proc.output + text);

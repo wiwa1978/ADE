@@ -21,7 +21,7 @@ import { transcriptMarkdown, type TranscriptItem } from "../../packages/protocol
 
 export function registerSessionRoutes(
 	router: Router,
-	{ host, worktreeManager, sessionGit, cleanUpArchivedWorkspace, engines, inbox, viewSessions, prepareWorktree, sendToAgent }: RouteDeps,
+	{ host, worktreeManager, sessionGit, cleanUpArchivedWorkspace, engines, inbox, viewSessions, prepareWorktree, sendToAgent, executionTargets }: RouteDeps,
 ): void {
 	router.get("/api/sessions", (ctx) => {
 		ctx.json(200, { sessions: viewSessions() });
@@ -200,7 +200,14 @@ export function registerSessionRoutes(
 	router.post(
 		"/api/coding-tasks",
 		async (ctx) => {
-			const session = await host.createCodingTask(validateCodingTaskCreate(await ctx.readBody()), worktreeManager);
+			const body = await ctx.readBody();
+			const session = await host.createCodingTask(validateCodingTaskCreate(body), worktreeManager);
+			// Run on: the request's choice, else the project's default. Set before setup starts.
+			if (session?.workspace?.path && session.workspace.kind !== "none") {
+				const fallback = executionTargets.projectDefault(session.projectId);
+				const target = body.runOn === "docker" || body.runOn === "local" ? body.runOn : fallback.target;
+				if (target === "docker") executionTargets.setTarget(session.id, { target, image: typeof body.dockerImage === "string" ? body.dockerImage : fallback.image }, { workspace: session.workspace.path, repository: session.workspace.repository });
+			}
 			if (session) prepareWorktree(session);
 			ctx.json(200, { session });
 		},

@@ -81,3 +81,9 @@ test("API boundary rejects wrong-type inputs with 400 on git and workspace-file 
 		rmSync(repoDir, { recursive: true, force: true });
 	}
 });
+
+test("terminal start keeps the folder the UI sends", async () => {
+	const { validateTerminalCreate } = await import("./validators.ts");
+	assert.equal(validateTerminalCreate({ cwd: "/tmp/x", cols: 80, rows: 24 }).cwd, "/tmp/x");
+	assert.equal(validateTerminalCreate({ workspace: "/tmp/y" }).cwd, "/tmp/y");
+});

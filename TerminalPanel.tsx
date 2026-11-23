@@ -5,6 +5,11 @@ import type { Terminal as XTermInstance } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
 import { request } from "./api"
 
+/** The runtime accepts 20–300 columns and 5–200 rows; a short drawer can measure less. */
+function terminalSize(cols: number, rows: number) {
+  return { cols: Math.min(300, Math.max(20, Math.round(cols))), rows: Math.min(200, Math.max(5, Math.round(rows))) }
+}
+
 type TerminalStart = { id: string; shell: string; cwd: string; cols: number; rows: number }
 type TerminalOutput = { data: string; cursor: number; baseCursor: number; truncated: boolean; exited: boolean; exitCode: number | null; shell: string }
 
@@ -112,7 +117,7 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
           const id = terminalIdRef.current
           if (!id) return
           void request(`/api/terminals/${id}/resize`, {
-            method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cols, rows }),
+            method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(terminalSize(cols, rows)),
           }).catch(cause => setError(cause instanceof Error ? cause.message : "Could not resize the terminal."))
         })
 
@@ -193,7 +198,7 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
       const terminal = terminalRef.current
       const result = await request<TerminalStart>("/api/terminals", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cwd, cols: terminal?.cols ?? 80, rows: terminal?.rows ?? 24 }),
+        body: JSON.stringify({ cwd, ...terminalSize(terminal?.cols ?? 80, terminal?.rows ?? 24) }),
       })
       terminalIdRef.current = result.id
       cursorRef.current = 0
@@ -245,6 +250,6 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
     {!cwd && <p className="terminal-empty">Open a coding session with a checkout or worktree to start a terminal.</p>}
     {error && <p className="terminal-error" role="alert">{error}</p>}
     <div className="terminal-viewport" ref={hostRef} aria-label="Terminal output" />
-    <p className="terminal-safety-note">Commands run as the active host user. Terminal input is user-operated and is not exposed as an agent tool.</p>
+    <p className="terminal-safety-note">{status.endsWith("· docker") ? "Commands run inside this session's Docker container." : "Commands run as the active host user."} Terminal input is user-operated and is not exposed as an agent tool.</p>
   </div>
 }
