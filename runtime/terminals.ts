@@ -79,7 +79,7 @@ export class TerminalManager {
 		try {
 			pty = this.#spawn(shell, docker?.args ?? [], {
 				name: "xterm-256color", cols, rows, cwd,
-				env: { ...this.#environment, ...secrets, TERM: "xterm-256color", COLORTERM: "truecolor" } as Record<string, string>,
+				env: { ...this.#environment, ...secrets, TERM: "xterm-256color", COLORTERM: "truecolor", ...docker?.env } as Record<string, string>,
 			});
 		} catch {
 			throw inputError("Could not start the system shell for this workspace.", 503);

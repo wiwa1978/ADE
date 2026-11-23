@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { ExternalLink, Globe, Play, RefreshCw, Settings2, Square } from "lucide-react"
 import { request } from "../../api"
 import { checkFailedPrompt } from "../../packages/protocol/agent-prompts.ts"
+import { runTargetDescriptions, targetLabel, targetUnavailable, useRunTargets, type RunTarget, type TargetSettings, type TargetState } from "../run-targets"
 
 type ScriptState = {
   kind: "setup" | "run" | "check"
@@ -22,27 +23,28 @@ const statusText: Record<ScriptState["status"], string> = {
   stopped: "Stopped",
 }
 
-export type RunStatus = { setup: ScriptState["status"]; run: ScriptState["status"]; check?: ScriptState["status"]; url: string | null; docker?: DockerTarget["state"] | null }
+export type RunStatus = { setup: ScriptState["status"]; run: ScriptState["status"]; check?: ScriptState["status"]; url: string | null; docker?: TargetState | null; target?: RunTarget }
 
-type DockerTarget = { target: "local" | "docker"; image: string; container: string | null; port: number | null; state: "absent" | "preparing" | "running" | "stopped" | "failed"; message: string }
+type SessionTarget = TargetSettings & { container: string | null; port: number | null; boatId: string | null; state: TargetState; message: string }
 
-const dockerStateText: Record<DockerTarget["state"], string> = {
-  absent: "No container yet",
-  preparing: "Starting the container…",
-  running: "Container running",
-  stopped: "Container stopped",
-  failed: "Container could not start",
+const stateText: Record<TargetState, string> = {
+  absent: "Not started",
+  preparing: "Starting…",
+  running: "Ready",
+  stopped: "Stopped",
+  failed: "Not available",
 }
 
-/** "Runs on" for a session: switch between this computer and Docker, see and restart the container. */
+/** "Runs on" for a session: switch where its commands run, see the machine's state, start it again. */
 function RunOnControls({ sessionId, busy }: { sessionId: string; busy: boolean }) {
-  const [target, setTarget] = useState<DockerTarget | null>(null)
+  const info = useRunTargets()
+  const [target, setTarget] = useState<SessionTarget | null>(null)
   const [working, setWorking] = useState(false)
   const [error, setError] = useState("")
   useEffect(() => {
     let cancelled = false
     const tick = () => {
-      void request<DockerTarget>(`/api/sessions/${encodeURIComponent(sessionId)}/run-on`)
+      void request<SessionTarget>(`/api/sessions/${encodeURIComponent(sessionId)}/run-on`)
         .then(result => { if (!cancelled) setTarget(result) })
         .catch(() => undefined)
     }
@@ -54,7 +56,7 @@ function RunOnControls({ sessionId, busy }: { sessionId: string; busy: boolean }
     setWorking(true)
     setError("")
     try {
-      setTarget(await request<DockerTarget>(`/api/sessions/${encodeURIComponent(sessionId)}/${path}`, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) }))
+      setTarget(await request<SessionTarget>(`/api/sessions/${encodeURIComponent(sessionId)}/${path}`, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) }))
     } catch (err) {
       setError(err instanceof Error ? err.message : "That didn't work.")
     } finally {
@@ -62,25 +64,37 @@ function RunOnControls({ sessionId, busy }: { sessionId: string; busy: boolean }
     }
   }
   if (!target) return null
-  const docker = target.target === "docker"
+  const remote = target.target !== "local"
+  const detail = target.target === "docker" ? <><code>{target.image}</code>{target.container ? <> · <code>{target.container}</code></> : null}{target.port ? <> · Run uses port {target.port}</> : null}</>
+    : target.target === "ssh" ? <><code>{target.sshHost}</code> · <code>{target.remoteRoot}</code></>
+      : target.target === "boat" ? <>{target.boatId ? <code>{target.boatId}</code> : "VM not created yet"}</>
+        : target.target === "wsl" ? <code>{target.wslDistro || "default distribution"}</code> : null
   return (
     <div className="ade-run-on">
       <div className="ade-diff-header-meta">
         <strong className="ade-xs">Runs on</strong>
         <div className="ade-segmented" role="radiogroup" aria-label="Runs on">
-          <button type="button" role="radio" aria-checked={!docker} className={!docker ? "is-active" : ""} disabled={working || busy} onClick={() => void call("PUT", "run-on", { target: "local" })}>This Mac</button>
-          <button type="button" role="radio" aria-checked={docker} className={docker ? "is-active" : ""} disabled={working || busy} onClick={() => void call("PUT", "run-on", { target: "docker" })}>Docker</button>
+          {(info?.available ?? ["local", "docker"]).map(option => {
+            const blocked = targetUnavailable(option, info)
+            return (
+              <button key={option} type="button" role="radio" aria-checked={target.target === option} className={target.target === option ? "is-active" : ""}
+                disabled={working || busy || Boolean(blocked)} title={blocked || runTargetDescriptions[option]}
+                onClick={() => void call("PUT", "run-on", { target: option })}>
+                {targetLabel(option)}
+              </button>
+            )
+          })}
         </div>
-        {docker ? (
+        {remote ? (
           <>
             <span className={`ade-state-dot is-${target.state === "running" ? "ok" : target.state === "failed" ? "failed" : target.state === "preparing" ? "running" : "idle"}`} />
-            <span className="ade-xs">{dockerStateText[target.state]}</span>
-            {target.state !== "preparing" && target.state !== "running" ? <button type="button" className="ade-chip-btn" disabled={working} onClick={() => void call("POST", "run-on/restart", {})}>{working ? "Starting…" : "Start container"}</button> : null}
+            <span className="ade-xs">{stateText[target.state]}</span>
+            {target.state !== "preparing" && target.state !== "running" ? <button type="button" className="ade-chip-btn" disabled={working} onClick={() => void call("POST", "run-on/restart", {})}>{working ? "Starting…" : "Start again"}</button> : null}
           </>
         ) : null}
       </div>
-      {docker ? <p className="ade-muted ade-xs"><code>{target.image}</code>{target.container ? <> · <code>{target.container}</code></> : null}{target.port ? <> · Run uses port {target.port}</> : null}</p> : null}
-      {docker && target.state === "failed" && target.message ? <p className="ade-xs ade-text-error">{target.message}</p> : null}
+      {remote ? <p className="ade-muted ade-xs">{detail}</p> : null}
+      {remote && target.state === "failed" && target.message ? <p className="ade-xs ade-text-error">{target.message}</p> : null}
       {busy ? <p className="ade-muted ade-xs">Wait for the agent to finish to switch.</p> : null}
       {error ? <p className="ade-xs ade-text-error" role="alert">{error}</p> : null}
     </div>

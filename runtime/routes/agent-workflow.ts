@@ -54,6 +54,12 @@ export function registerAgentWorkflowRoutes(
 		ctx.json(200, await executionTargets.dockerAvailable());
 	});
 
+	// Which run targets this computer offers, and whether each is set up.
+	router.get("/api/run-targets", async (ctx) => {
+		const docker = await executionTargets.dockerAvailable();
+		ctx.json(200, { available: executionTargets.available(), docker, boat: { configured: integrations.status().boat.configured } });
+	});
+
 	router.get("/api/projects/:id/run-on", (ctx) => {
 		ctx.json(200, executionTargets.projectDefault(projectFor(ctx.params.id).id));
 	});
@@ -72,8 +78,10 @@ export function registerAgentWorkflowRoutes(
 		const body = await ctx.readBody();
 		if (viewSessions().find(item => item.id === ctx.params.id)?.status === "working") throw conflict("Wait for the agent to finish before changing where the session runs.");
 		scriptRunner.stopAll(ctx.params.id);
-		const repository = host.sessions().find(item => item.id === ctx.params.id)?.workspace?.repository ?? null;
-		ctx.json(200, executionTargets.setTarget(ctx.params.id, body, { workspace, repository }));
+		const session = host.sessions().find(item => item.id === ctx.params.id);
+		// Settings not given (SSH host, image, …) come from the session, or the project the first time.
+		const base = executionTargets.session(ctx.params.id).updatedAt ? {} : executionTargets.projectDefault(session?.projectId);
+		ctx.json(200, executionTargets.setTarget(ctx.params.id, { ...base, ...body }, { workspace, repository: session?.workspace?.repository ?? null }));
 	}, { originError: "Use ADE to change where sessions run." });
 
 	router.post("/api/sessions/:id/run-on/restart", async (ctx) => {
@@ -106,6 +114,13 @@ export function registerAgentWorkflowRoutes(
 	}, { originError: "Use ADE to change integrations." });
 	router.delete("/api/integrations/linear", (ctx) => {
 		ctx.json(200, integrations.removeLinear());
+	}, { originError: "Use ADE to change integrations." });
+	router.put("/api/integrations/boat", async (ctx) => {
+		const body = await ctx.readBody();
+		ctx.json(200, await integrations.setBoat(body.apiKey));
+	}, { originError: "Use ADE to change integrations." });
+	router.delete("/api/integrations/boat", (ctx) => {
+		ctx.json(200, integrations.removeBoat());
 	}, { originError: "Use ADE to change integrations." });
 	router.get("/api/integrations/linear/issues", async (ctx) => {
 		ctx.json(200, { issues: await integrations.linearIssues(ctx.url.searchParams.get("q") ?? "") });

@@ -354,7 +354,7 @@ export function useSessions(params: {
     title?: string
     /** Best of N: one agent per attempt; each gets its own worktree and the same task. */
     attempts?: Array<"pi" | "claude-code" | "codex">
-    runOn?: "local" | "docker"
+    runOn?: "local" | "docker" | "wsl" | "ssh" | "boat"
   }) => {
     setCreatingSession(true)
     setLaunchError("")

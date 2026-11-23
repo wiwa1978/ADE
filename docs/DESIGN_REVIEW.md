@@ -268,10 +268,14 @@ Features that comparable tools (Conductor, Claude Code, Cursor, Codex, Orca, Pas
 | R15 | ✅ Done | Transcript button (scroll icon) in a session's header: step through every message and tool call with its arguments and output; Copy, or download as .md / .json. |
 
 ### Where agents run
-| Target | Status | Notes |
+Choose in New session → Run on, as a project default in Project settings → Run sessions on, or per session in Run → Runs on. Everything a session runs goes there: the ADE agent's commands and its subagents', Claude Code and Codex, terminals, and setup/run/check scripts. Stop ends a command and everything it started on that machine. If the target isn't ready, commands fail with a clear message instead of running on this computer.
+
+| Target | Status | How it works |
 | --- | --- | --- |
-| This Mac | ✅ Done | The default. |
-| Docker | ✅ Done | New session → Run on → Docker, or a project default (Project settings → Run sessions on, with the image). Each session gets its own container with its worktree, the repository's Git metadata and ADE's worktree folder mounted at the same paths. The ADE agent's commands and its subagents', terminals and setup/run/check scripts run inside; Run uses a published port (`HOST=0.0.0.0` is set). Run panel → Runs on switches and restarts; archiving removes the container. Claude Code and Codex still run their own commands on this Mac. |
-| SSH host | Not started | |
-| WSL2 | Not started | |
-| Boat.dev | Not started | An unused adapter exists in `packages/sandbox-remote`. |
+| This computer | ✅ | The default. |
+| Docker | ✅ Tested with a real container | A container per session; the worktree, the repository's Git metadata, ADE's worktree folder and the Claude Code/Codex sign-in folders are mounted at the same paths. Run gets a published port and `HOST=0.0.0.0`. Removed on archive. |
+| SSH host | ✅ Tested with real rsync and a stand-in ssh | The worktree is copied with rsync before each command and back after it (ignored files like node_modules stay put; background commands never undo local edits). Plain `git` commands run on this computer. Run forwards its port. Needs an SSH key (no password prompt) and rsync on the host. |
+| Boat.dev | ✅ Built to Boat's API docs, not tried with a real account | Settings → Integrations → Boat.dev API key. ADE creates a VM per session, authorizes its own SSH key, pins the VM's host key, resumes the VM when Boat has stopped it, and deletes it on archive. Then it works like an SSH host. |
+| WSL2 | ✅ Built, not tried on Windows | Only offered on Windows. Commands run with `wsl.exe` in the chosen distribution; Windows paths become `/mnt/<drive>/…` and secrets pass through `WSLENV`. |
+
+Claude Code and Codex on another machine: ADE installs the CLI with npm if it's missing. Codex and Claude Code in Docker use your sign-in folders; Claude Code on macOS keeps its login in the Keychain, so in Docker, on SSH hosts and on Boat it needs `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `ANTHROPIC_API_KEY` as a project secret. Codex can use `OPENAI_API_KEY`.

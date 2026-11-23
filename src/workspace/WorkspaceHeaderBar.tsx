@@ -83,7 +83,7 @@ export function WorkspaceHeaderBar({
   onOpenProgress?: () => void
   /** Agents and tasks done out of the total, for the Progress button. */
   progressCount?: { done: number; total: number }
-  runStatus: { setup: string; run: string; check?: string; url: string | null; docker?: string | null } | null
+  runStatus: { setup: string; run: string; check?: string; url: string | null; docker?: string | null; target?: string } | null
   /** Breadcrumb back to the session's project. */
   projectName?: string
   onOpenProject?: () => void
@@ -112,8 +112,11 @@ export function WorkspaceHeaderBar({
         ) : null}
         {runStatus?.docker ? (
           <button type="button" className={`ade-row-tag is-${runStatus.docker === "running" ? "review" : runStatus.docker === "failed" ? "failed" : runStatus.docker === "preparing" ? "running" : "idle"}`} onClick={onOpenRun}
-            title="This session's commands, terminals and scripts run in a Docker container. Open Run to manage it.">
-            {runStatus.docker === "preparing" ? "Docker: starting…" : runStatus.docker === "failed" ? "Docker failed" : runStatus.docker === "running" ? "Docker" : "Docker: stopped"}
+            title="This session's commands, terminals, scripts and agents don't run on this computer. Open Run to manage where they run.">
+            {(() => {
+              const name = runStatus.target === "ssh" ? "SSH" : runStatus.target === "boat" ? "Boat.dev" : runStatus.target === "wsl" ? "WSL2" : "Docker"
+              return runStatus.docker === "preparing" ? `${name}: starting…` : runStatus.docker === "failed" ? `${name} unavailable` : runStatus.docker === "running" ? name : `${name}: stopped`
+            })()}
           </button>
         ) : null}
         {runStatus?.setup === "running" ? <button type="button" className="ade-row-tag is-running" onClick={onOpenRun} title="The project's setup script is running in this worktree">Setting up…</button>

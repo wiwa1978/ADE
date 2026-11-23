@@ -14,6 +14,7 @@ import type { Project } from "../../ProjectsView"
 import { ModelPicker } from "../composer/ModelPicker"
 import { StartFromPicker, type StartChoice } from "./StartFromPicker"
 import { LinearIssuePicker, type LinearIssue } from "./LinearIssuePicker"
+import { runTargetDescriptions, targetLabel, targetUnavailable, useRunTargets, type RunTarget, type TargetSettings } from "../run-targets"
 
 type EngineId = "pi" | "claude-code" | "codex"
 type EngineOption = { id: EngineId; name: string; description: string; available: boolean }
@@ -75,7 +76,7 @@ export function NewSessionView({
     startFrom?: StartFrom
     title?: string
     attempts?: EngineId[]
-    runOn?: "local" | "docker"
+    runOn?: RunTarget
   }) => Promise<void>
   onLookupIssue?: (projectId: string, url: string) => Promise<GitHubIssue>
 }) {
@@ -95,18 +96,13 @@ export function NewSessionView({
   const [startChoice, setStartChoice] = useState<StartChoice>({ mode: "new" })
   const [linearIssue, setLinearIssue] = useState<LinearIssue | null>(null)
   // Where the session's commands run. Starts from the project's default.
-  const [runOn, setRunOn] = useState<"local" | "docker" | null>(null)
-  const [projectRunOn, setProjectRunOn] = useState<{ projectId: string; target: "local" | "docker"; image: string } | null>(null)
-  const [docker, setDocker] = useState<{ available: boolean; message: string } | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    void request<{ available: boolean; message: string }>("/api/docker").then(result => { if (!cancelled) setDocker(result) }).catch(() => undefined)
-    return () => { cancelled = true }
-  }, [])
+  const [runOn, setRunOn] = useState<RunTarget | null>(null)
+  const [projectRunOn, setProjectRunOn] = useState<({ projectId: string } & TargetSettings) | null>(null)
+  const runTargets = useRunTargets()
   useEffect(() => {
     if (!selectedProjectId) return
     let cancelled = false
-    void request<{ target: "local" | "docker"; image: string }>(`/api/projects/${encodeURIComponent(selectedProjectId)}/run-on`)
+    void request<TargetSettings>(`/api/projects/${encodeURIComponent(selectedProjectId)}/run-on`)
       .then(result => { if (!cancelled) setProjectRunOn({ projectId: selectedProjectId, ...result }) })
       .catch(() => undefined)
     return () => { cancelled = true }
@@ -336,19 +332,23 @@ export function NewSessionView({
           {kind !== "none" ? (
             <div className="sf-label">
               <span>Run on</span>
-              <div className="ade-attempts-row">
-                <div className="sf-segmented h-9" role="radiogroup" aria-label="Run on">
-                  <button type="button" role="radio" aria-checked={effectiveRunOn === "local"} className={`sf-seg-btn justify-center ${effectiveRunOn === "local" ? "is-active" : ""}`} style={{ minWidth: 96 }} onClick={() => setRunOn("local")}>This Mac</button>
-                  <button type="button" role="radio" aria-checked={effectiveRunOn === "docker"} disabled={docker !== null && !docker.available}
-                    title={docker && !docker.available ? docker.message : "Run the agent's commands, terminals and scripts in a Docker container"}
-                    className={`sf-seg-btn justify-center ${effectiveRunOn === "docker" ? "is-active" : ""}`} style={{ minWidth: 96 }} onClick={() => setRunOn("docker")}>Docker</button>
-                </div>
-                <small className="opacity-65">
-                  {effectiveRunOn === "docker"
-                    ? `Commands, terminals and scripts run in a container from ${projectRunOn?.image ?? "node:22-bookworm"}${engine !== "pi" ? ". Claude Code and Codex still run their own commands on this Mac" : ""}.`
-                    : docker && !docker.available ? docker.message : "Commands run directly on this computer, in the session's folder."}
-                </small>
+              <div className="sf-segmented h-9 w-full justify-between" role="radiogroup" aria-label="Run on">
+                {(runTargets?.available ?? ["local", "docker"]).map(target => {
+                  const blocked = targetUnavailable(target, runTargets, projectRunOn && projectRunOn.projectId === selectedProjectId ? projectRunOn : { sshHost: "" })
+                  return (
+                    <button key={target} type="button" role="radio" aria-checked={effectiveRunOn === target} disabled={Boolean(blocked)}
+                      title={blocked || runTargetDescriptions[target]}
+                      className={`sf-seg-btn flex-1 justify-center ${effectiveRunOn === target ? "is-active" : ""}`} onClick={() => setRunOn(target)}>
+                      {targetLabel(target)}
+                    </button>
+                  )
+                })}
               </div>
+              <small className="opacity-65">
+                {effectiveRunOn === "docker" ? `${runTargetDescriptions.docker} Image: ${projectRunOn?.image ?? "node:22-bookworm"}.`
+                  : effectiveRunOn === "ssh" ? `${runTargetDescriptions.ssh} Host: ${projectRunOn?.sshHost}.`
+                    : runTargetDescriptions[effectiveRunOn]}
+              </small>
             </div>
           ) : null}
 

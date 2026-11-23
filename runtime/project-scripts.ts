@@ -12,7 +12,7 @@ import { createServer } from "node:net";
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import type { RuntimeEventBus } from "./events.ts";
 import { redact, secretEnv } from "./project-secrets.ts";
-import { commandInvocation, runsInDocker, sessionPort, stopInContainer } from "./execution-targets.ts";
+import { commandInvocation, sessionPort, sessionTarget, stopOnTarget } from "./execution-targets.ts";
 
 export type ProjectScripts = {
 	setup: string;
@@ -35,6 +35,8 @@ export type ScriptState = {
 	endedAt: number | null;
 	port: number | null;
 	url: string | null;
+	/** Folder the script runs in. */
+	cwd?: string;
 };
 
 const MAX_OUTPUT = 200_000;
@@ -165,10 +167,12 @@ export class ScriptRunner {
 		if (!command.trim()) throw Object.assign(new Error(`No ${kind} script is configured for this project. Add one in the project's settings.`), { statusCode: 400 });
 		const key = this.#key(sessionId, kind);
 		if (this.#children.has(key)) throw Object.assign(new Error(`The ${kind} script is already running.`), { statusCode: 409 });
-		// In a Docker session the Run script uses the port published by its container.
-		const docker = runsInDocker(sessionId)
-		const port = kind === "run" ? (docker ? sessionPort(sessionId) : null) ?? await freePort() : null;
-		const state: ScriptState = { kind, status: "running", command, output: "", exitCode: null, startedAt: Date.now(), endedAt: null, port, url: null };
+		// Sessions that run elsewhere run their scripts there. Docker publishes one port for Run;
+		// SSH and Boat.dev forward a free local port to the same port on the remote machine.
+		const target = sessionTarget(sessionId);
+		const docker = target !== "local";
+		const port = kind === "run" ? (target === "docker" ? sessionPort(sessionId) : null) ?? await freePort() : null;
+		const state: ScriptState = { kind, status: "running", command, output: "", exitCode: null, startedAt: Date.now(), endedAt: null, port, url: null, cwd };
 		this.#states.set(key, state);
 		const secrets = secretEnv(cwd);
 		const env: Record<string, string> = {
@@ -179,13 +183,14 @@ export class ScriptRunner {
 			FORCE_COLOR: "0",
 			CI: kind === "setup" ? "1" : this.#environment.CI ?? "",
 		};
-		// Remember the process so Stop can end it inside the container (killing `docker exec` alone doesn't).
-		const inContainer = docker ? commandInvocation(sessionId, cwd, `echo $$ > /tmp/ade-${kind}.pid; exec ${command}`, Object.keys(env)) : null;
+		// The pid file lets Stop end the script and its children over there (killing the local client alone doesn't).
+		const pidFile = `/tmp/ade-${kind}-${sessionId.slice(0, 12)}.pid`;
+		const inContainer = docker ? commandInvocation(sessionId, cwd, command, Object.keys(env), { pidFile, background: kind === "run", forwardPort: kind === "run" && (target === "ssh" || target === "boat") ? port : null }) : null;
 		const shell = process.platform === "win32" ? this.#environment.COMSPEC || "cmd.exe" : this.#environment.SHELL || "/bin/sh";
 		const args = process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-lc", command];
 		const child = spawn(inContainer?.file ?? shell, inContainer?.args ?? args, {
 			cwd,
-			env: { ...this.#environment, ...env },
+			env: { ...this.#environment, ...env, ...inContainer?.env },
 			stdio: ["ignore", "pipe", "pipe"],
 			detached: process.platform !== "win32",
 			windowsHide: true,
@@ -233,7 +238,7 @@ export class ScriptRunner {
 		const state = this.state(sessionId, kind);
 		if (child?.pid) {
 			state.status = "stopped";
-			if (runsInDocker(sessionId)) stopInContainer(sessionId, `/tmp/ade-${kind}.pid`);
+			if (sessionTarget(sessionId) !== "local") stopOnTarget(sessionId, `/tmp/ade-${kind}-${sessionId.slice(0, 12)}.pid`, state.cwd ?? "");
 			try {
 				// Kill the whole process group so dev servers' child processes stop too.
 				if (process.platform !== "win32") process.kill(-child.pid, "SIGTERM");

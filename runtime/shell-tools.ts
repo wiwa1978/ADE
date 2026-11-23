@@ -9,13 +9,15 @@ import type { RuntimeEventBus } from "./events.ts";
 import { isErrorCode, logger } from "./log.ts";
 import { conflict, notFound } from "./http-error.ts";
 import { redact, secretEnv } from "./project-secrets.ts";
-import { commandInvocation } from "./execution-targets.ts";
+import { commandInvocation, stopOnTarget } from "./execution-targets.ts";
 
 export type { ManagedProcessSummary };
 
 type ManagedProcess = ManagedProcessSummary & {
 	child: ChildProcess;
 	output: string;
+	/** Set when the command runs on another machine (container, WSL2, SSH host, Boat VM). */
+	remotePidFile?: string;
 };
 
 const MAX_OUTPUT_CHARS = 80_000;
@@ -83,6 +85,8 @@ export class ProcessManager {
 		if (proc.status === "running") {
 			proc.status = "killed";
 			proc.endedAt = Date.now();
+			// Killing the local client (docker exec, ssh, wsl.exe) doesn't end the command over there.
+			if (proc.remotePidFile) stopOnTarget(proc.sessionId, proc.remotePidFile, proc.cwd);
 			try {
 				proc.child.kill("SIGTERM");
 				setTimeout(() => {
@@ -115,12 +119,14 @@ export class ProcessManager {
 	}): { proc: ManagedProcess; done: Promise<{ exitCode: number | null; output: string }> } {
 		const id = randomUUID();
 		const secrets = secretEnv(opts.cwd);
-		// Sessions that run in Docker execute in their container; others on this computer.
-		const invocation = commandInvocation(opts.sessionId, opts.cwd, opts.command, [...Object.keys(secrets), "TERM", "CI"])
-			?? buildShellInvocation(opts.command, opts.cwd, Boolean(opts.sandbox));
+		// Sessions that run elsewhere (Docker, WSL2, SSH, Boat.dev) execute there; others on this computer.
+		// The pid file lets Stop end the command and everything it started on that machine.
+		const pidFile = `/tmp/ade-proc-${id}.pid`;
+		const remote = commandInvocation(opts.sessionId, opts.cwd, opts.command, [...Object.keys(secrets), "TERM", "CI"], { pidFile, background: Boolean(opts.background) });
+		const invocation = remote ?? buildShellInvocation(opts.command, opts.cwd, Boolean(opts.sandbox));
 		const child = spawn(invocation.file, invocation.args, {
 			cwd: opts.cwd,
-			env: { ...process.env, ...secrets, TERM: "dumb", CI: "1" },
+			env: { ...process.env, ...secrets, TERM: "dumb", CI: "1", ...remote?.env },
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		const proc: ManagedProcess = {
@@ -136,6 +142,7 @@ export class ProcessManager {
 			outputTail: "",
 			output: "",
 			child,
+			...(remote ? { remotePidFile: pidFile } : {}),
 		};
 		this.#processes.set(id, proc);
 		this.#emitUpdate(opts.sessionId);

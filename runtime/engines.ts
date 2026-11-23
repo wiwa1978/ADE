@@ -9,6 +9,7 @@ import { join, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { RuntimeEventBus } from "./events.ts";
 import { redact, secretEnv } from "./project-secrets.ts";
+import { commandInvocation, q, sessionTarget, stopOnTarget } from "./execution-targets.ts";
 
 export type EngineId = "claude-code" | "codex";
 export type ApprovalPolicy = "ask" | "auto-safe" | "auto-all";
@@ -128,7 +129,7 @@ export function gitWritableDirs(cwd: string): string[] {
 	return [];
 }
 
-export function engineArgs(engine: EngineId, prompt: string, externalId: string | null, policy: ApprovalPolicy, model: string | null, writableDirs: string[] = []) {
+export function engineArgs(engine: EngineId, prompt: string, externalId: string | null, policy: ApprovalPolicy, model: string | null, writableDirs: string[] = [], contained = false) {
 	if (engine === "claude-code") {
 		const mode = policy === "auto-all" ? "bypassPermissions" : policy === "ask" ? "default" : "acceptEdits";
 		const args = ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", mode];
@@ -137,7 +138,9 @@ export function engineArgs(engine: EngineId, prompt: string, externalId: string 
 		args.push(prompt);
 		return args;
 	}
-	const sandbox = policy === "auto-all" ? ["--dangerously-bypass-approvals-and-sandbox"] : ["-s", policy === "ask" ? "read-only" : "workspace-write"];
+	// In a container, VM or WSL the machine itself is the sandbox, and Codex's own sandbox often
+	// can't start there, so it only stays on for read-only ("ask") sessions.
+	const sandbox = policy === "auto-all" || (contained && policy !== "ask") ? ["--dangerously-bypass-approvals-and-sandbox"] : ["-s", policy === "ask" ? "read-only" : "workspace-write"];
 	const args = ["exec", "--json", "--skip-git-repo-check", ...sandbox];
 	if (policy !== "ask" && policy !== "auto-all") for (const dir of writableDirs) args.push("--add-dir", dir);
 	if (model) args.push("-m", model);
@@ -150,6 +153,7 @@ export class EngineManager {
 	#dir: string;
 	#events?: RuntimeEventBus;
 	#running = new Map<string, ChildProcess>();
+	#cwd = new Map<string, string>();
 	#cache = new Map<string, EngineSession>();
 	#available: Record<EngineId, boolean> | null = null;
 	#environment: NodeJS.ProcessEnv;
@@ -240,13 +244,28 @@ export class EngineManager {
 		this.#save(sessionId, state);
 		const command = engineInfo[state.engine].command;
 		const secrets = secretEnv(cwd);
-		const child = spawn(command, engineArgs(state.engine, content, state.externalId, policy, model, gitWritableDirs(cwd)), {
+		const target = sessionTarget(sessionId);
+		const args = engineArgs(state.engine, content, state.externalId, policy, model, target === "local" ? gitWritableDirs(cwd) : [], target !== "local");
+		const env: Record<string, string> = { ...secrets, NO_COLOR: "1", IS_SANDBOX: "1" };
+		// Sessions that run in Docker, WSL2, on an SSH host or a Boat.dev VM run the agent CLI there.
+		// It's installed with npm on first use if missing; it signs in with ANTHROPIC_API_KEY /
+		// CLAUDE_CODE_OAUTH_TOKEN / OPENAI_API_KEY (as project secrets) or its own sign-in on that machine.
+		let remote: ReturnType<typeof commandInvocation> = null;
+		if (target !== "local") {
+			const pkg = state.engine === "claude-code" ? "@anthropic-ai/claude-code" : "@openai/codex";
+			const install = `command -v ${command} >/dev/null 2>&1 || npm install -g ${pkg} >/dev/null 2>&1 || { echo "ADE: ${engineInfo[state.engine].name} isn't installed on this machine and couldn't be installed with npm (npm install -g ${pkg})." >&2; exit 127; }`;
+			const signIn = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "CODEX_API_KEY"].filter(name => this.#environment[name] || secrets[name]);
+			for (const name of signIn) if (!env[name] && this.#environment[name]) env[name] = String(this.#environment[name]);
+			remote = commandInvocation(sessionId, cwd, `${install}; ${command} ${args.map(q).join(" ")}`, [...Object.keys(secrets), ...signIn, "NO_COLOR", "IS_SANDBOX"], { pidFile: this.#pidFile(sessionId) });
+		}
+		const child = spawn(remote?.file ?? command, remote?.args ?? args, {
 			cwd,
-			env: { ...this.#environment, ...secrets, NO_COLOR: "1" },
+			env: { ...this.#environment, ...env, ...remote?.env },
 			stdio: ["ignore", "pipe", "pipe"],
 			windowsHide: true,
 		});
 		this.#running.set(sessionId, child);
+		this.#cwd.set(sessionId, cwd);
 		this.#events?.emit("sessions.changed", { id: sessionId });
 		let buffer = "";
 		let stderr = "";
@@ -301,7 +320,13 @@ export class EngineManager {
 		const child = this.#running.get(sessionId);
 		if (!child) return { ok: false };
 		child.kill("SIGTERM");
+		// On another machine, end the agent there too (killing the local client alone doesn't).
+		if (sessionTarget(sessionId) !== "local") stopOnTarget(sessionId, this.#pidFile(sessionId), this.#cwd.get(sessionId) ?? "");
 		return { ok: true };
+	}
+
+	#pidFile(sessionId: string) {
+		return `/tmp/ade-engine-${sessionId.slice(0, 12)}.pid`;
 	}
 
 	abortAll() {

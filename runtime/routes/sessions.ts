@@ -18,6 +18,7 @@ import { restoreWorktree } from "../worktrees.ts";
 import type { RouteDeps } from "./context.ts";
 import { redactForCwd } from "../project-secrets.ts";
 import { transcriptMarkdown, type TranscriptItem } from "../../packages/protocol/transcript.ts";
+import { RUN_TARGETS, type RunTarget } from "../execution-targets.ts";
 
 export function registerSessionRoutes(
 	router: Router,
@@ -205,8 +206,8 @@ export function registerSessionRoutes(
 			// Run on: the request's choice, else the project's default. Set before setup starts.
 			if (session?.workspace?.path && session.workspace.kind !== "none") {
 				const fallback = executionTargets.projectDefault(session.projectId);
-				const target = body.runOn === "docker" || body.runOn === "local" ? body.runOn : fallback.target;
-				if (target === "docker") executionTargets.setTarget(session.id, { target, image: typeof body.dockerImage === "string" ? body.dockerImage : fallback.image }, { workspace: session.workspace.path, repository: session.workspace.repository });
+				const target = RUN_TARGETS.includes(body.runOn as RunTarget) ? body.runOn as RunTarget : fallback.target;
+				if (target !== "local") executionTargets.setTarget(session.id, { ...fallback, target, ...(typeof body.dockerImage === "string" ? { image: body.dockerImage } : {}) }, { workspace: session.workspace.path, repository: session.workspace.repository });
 			}
 			if (session) prepareWorktree(session);
 			ctx.json(200, { session });

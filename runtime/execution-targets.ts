@@ -1,42 +1,75 @@
-// Where a session's commands run: on this computer, or in a Docker container of its own.
+// Where a session's commands run: this computer, its own Docker container, WSL2 (Windows), an
+// SSH host, or a Boat.dev cloud VM.
 //
-// A Docker session gets one long-running container ("ade-<id>") from the project's image. Its
-// worktree, the repository's Git metadata and ADE's worktree folder are mounted at the same
-// absolute paths, so file paths are identical inside and out and subagent worktrees work too.
-// The ADE agent's shell commands (and its subagents'), terminals and setup/run/check scripts are
-// run with `docker exec` in that container. One port is published for the Run script.
+// Every target answers three questions: how to run a command (the agent's shell commands and its
+// subagents', Claude Code and Codex, setup/run/check scripts), how to open a terminal, and how to
+// stop a command together with everything it started. Spawn points ask this module and fall back
+// to this computer only for sessions that run locally. If a session's target isn't ready, commands
+// fail with a clear message instead of quietly running on this computer.
 //
-// If a Docker session's container isn't available, commands fail with a clear message instead
-// of quietly running on this computer.
+// - Docker: one long-running container per session. The worktree, the repository's Git metadata
+//   and ADE's worktree folder are mounted at the same absolute paths, so paths match inside and out.
+// - WSL2: commands go through wsl.exe in the chosen distribution; Windows paths become /mnt/<drive>.
+// - SSH and Boat.dev: the worktree is copied to the remote machine with rsync before each command
+//   and copied back after it (ignored files such as node_modules stay where they are). Git commands
+//   run on this computer, where the repository is.
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { badRequest, httpError } from "./http-error.ts";
 import { freePort } from "./project-scripts.ts";
 
 const execute = promisify(execFile);
 
-export type RunTarget = "local" | "docker";
+export type RunTarget = "local" | "docker" | "wsl" | "ssh" | "boat";
+export const RUN_TARGETS: RunTarget[] = ["local", "docker", "wsl", "ssh", "boat"];
 export const DEFAULT_DOCKER_IMAGE = "node:22-bookworm";
+export const DEFAULT_REMOTE_ROOT = "ade-workspaces";
 
-export type DockerState = "absent" | "preparing" | "running" | "stopped" | "failed";
+export type TargetState = "absent" | "preparing" | "running" | "stopped" | "failed";
+/** @deprecated kept for older imports */
+export type DockerState = TargetState;
 
-type SessionTarget = {
+export type Invocation = { file: string; args: string[]; env?: Record<string, string> };
+
+export type TargetSettings = {
 	target: RunTarget;
+	/** Docker */
 	image: string;
+	/** WSL2 distribution; empty = the default distribution. */
+	wslDistro: string;
+	/** SSH host or alias from ~/.ssh/config (user@host also works). */
+	sshHost: string;
+	/** Folder on the remote machine for workspaces, relative to its home folder unless absolute. */
+	remoteRoot: string;
+};
+
+type SessionTarget = TargetSettings & {
 	container: string | null;
 	port: number | null;
-	/** Absolute paths mounted into the container (at the same path). */
+	/** Docker: absolute paths mounted at the same path. */
 	mounts: string[];
-	state: DockerState;
+	/** Boat.dev */
+	boatId: string | null;
+	sshEndpoint: { host: string; port: number; user: string } | null;
+	state: TargetState;
 	message: string;
 	updatedAt: number;
 };
 
-type Stored = { sessions: Record<string, SessionTarget>; projects: Record<string, { target: RunTarget; image: string }> };
+type Stored = { sessions: Record<string, SessionTarget>; projects: Record<string, TargetSettings> };
 
 export type DockerRunner = (args: string[], options?: { timeout?: number }) => Promise<string>;
+export type CommandRunner = (file: string, args: string[], options?: { timeout?: number }) => Promise<string>;
+export type BoatApi = {
+	create(name: string): Promise<{ id: string }>;
+	get(id: string): Promise<{ state: string }>;
+	resume(id: string): Promise<void>;
+	authorizeKey(id: string, publicKey: string): Promise<{ hostKey: string; host: string; port: number }>;
+	remove(id: string): Promise<void>;
+};
 
 const defaultDocker: DockerRunner = async (args, options = {}) => {
 	try {
@@ -51,6 +84,32 @@ const defaultDocker: DockerRunner = async (args, options = {}) => {
 	}
 };
 
+const defaultRun: CommandRunner = async (file, args, options = {}) => {
+	try {
+		const { stdout } = await execute(file, args, { timeout: options.timeout ?? 30_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true });
+		return stdout;
+	} catch (error) {
+		const err = error as { code?: unknown; stderr?: unknown; message?: unknown };
+		if (err?.code === "ENOENT") throw httpError(503, `${file} was not found on this computer.`);
+		const detail = String(err?.stderr || err?.message || "").trim().split("\n").filter(Boolean).slice(-2).join(" ");
+		throw httpError(502, detail || `${file} failed.`);
+	}
+};
+
+/** Single-quote a string for a POSIX shell. */
+export function q(value: string) {
+	return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/** Kill a process and all its descendants by pid file, using /proc (works without procps). */
+export function killTreeScript(pidFile: string) {
+	return [
+		`pid=$(cat ${q(pidFile)} 2>/dev/null) || exit 0`,
+		'tree() { for p in /proc/[0-9]*; do pp=$(awk \'{print $4}\' "$p/stat" 2>/dev/null); [ "$pp" = "$1" ] && tree "${p#/proc/}"; done; kill -TERM "$1" 2>/dev/null; }',
+		'tree "$pid"; rm -f ' + q(pidFile) + "; true",
+	].join("\n");
+}
+
 /** `docker exec` arguments for a command in a session's container. Env values are passed by name only. */
 export function dockerExecArgs(container: string, cwd: string, command: string, envNames: string[], interactive = false) {
 	// Prefer bash, fall back to sh for minimal images.
@@ -62,6 +121,21 @@ export function dockerShellArgs(container: string, cwd: string, envNames: string
 	return ["exec", "-it", "-w", cwd, ...envNames.flatMap(name => ["-e", name]), container, "sh", "-c", "if command -v bash >/dev/null 2>&1; then exec bash -l; else exec sh -l; fi"];
 }
 
+/** C:\Users\me\code → /mnt/c/Users/me/code; \\wsl$\Ubuntu\home\me → /home/me. */
+export function toWslPath(path: string) {
+	const unc = /^\\\\wsl(?:\$|\.localhost)\\[^\\]+(\\.*)?$/i.exec(path);
+	if (unc) return (unc[1] ?? "\\").replace(/\\/g, "/");
+	const drive = /^([a-zA-Z]):[\\/]?(.*)$/.exec(path);
+	if (drive) return `/mnt/${drive[1].toLowerCase()}/${drive[2].replace(/\\/g, "/")}`.replace(/\/+$/, "") || "/";
+	return path.replace(/\\/g, "/");
+}
+
+/** WSLENV makes the named Windows environment variables available inside WSL. */
+export function wslEnv(names: string[], existing = "") {
+	const list = [...new Set([...existing.split(":").filter(Boolean), ...names.map(name => `${name}/u`)])];
+	return list.join(":");
+}
+
 function validImage(value: unknown) {
 	if (typeof value !== "string" || !value.trim()) return DEFAULT_DOCKER_IMAGE;
 	const image = value.trim();
@@ -69,21 +143,60 @@ function validImage(value: unknown) {
 	return image;
 }
 
+function validHost(value: unknown) {
+	if (typeof value !== "string" || !value.trim()) return "";
+	const host = value.trim();
+	if (host.length > 255 || host.startsWith("-") || !/^([A-Za-z0-9._-]+@)?[A-Za-z0-9._-]+$/.test(host)) throw badRequest("Enter an SSH host or alias from ~/.ssh/config, like build-server or me@10.0.0.5.");
+	return host;
+}
+
+function validRemoteRoot(value: unknown) {
+	if (typeof value !== "string" || !value.trim()) return DEFAULT_REMOTE_ROOT;
+	const root = value.trim().replace(/\/+$/, "");
+	if (root.length > 300 || root.includes("..") || /[\0'"`$\\]/.test(root)) throw badRequest("Enter a folder like ade-workspaces or /srv/ade.");
+	return root;
+}
+
+function validDistro(value: unknown) {
+	if (typeof value !== "string" || !value.trim()) return "";
+	const distro = value.trim();
+	if (distro.length > 100 || !/^[A-Za-z0-9._-]+$/.test(distro)) throw badRequest("Enter a WSL distribution name like Ubuntu.");
+	return distro;
+}
+
 function inside(child: string, parent: string) {
 	return child === parent || child.startsWith(`${parent}${sep}`);
 }
 
+function real(path: string) {
+	try {
+		return realpathSync(path);
+	} catch {
+		return resolve(path);
+	}
+}
+
+const DEFAULT_SETTINGS: TargetSettings = { target: "local", image: DEFAULT_DOCKER_IMAGE, wslDistro: "", sshHost: "", remoteRoot: DEFAULT_REMOTE_ROOT };
+
 export class ExecutionTargets {
 	#file: string;
+	#stateDirectory: string;
 	#data: Stored;
 	#docker: DockerRunner;
+	#run: CommandRunner;
 	#worktreesRoot: string | null;
+	#boat: (() => BoatApi | null) | null;
 	#pending = new Map<string, Promise<SessionTarget>>();
+	#platform: NodeJS.Platform;
 
-	constructor(stateDirectory: string, options: { docker?: DockerRunner; worktreesRoot?: string | null } = {}) {
+	constructor(stateDirectory: string, options: { docker?: DockerRunner; run?: CommandRunner; worktreesRoot?: string | null; boat?: () => BoatApi | null; platform?: NodeJS.Platform } = {}) {
+		this.#stateDirectory = stateDirectory;
 		this.#file = join(stateDirectory, "execution-targets.json");
 		this.#docker = options.docker ?? defaultDocker;
+		this.#run = options.run ?? defaultRun;
 		this.#worktreesRoot = options.worktreesRoot ?? null;
+		this.#boat = options.boat ?? null;
+		this.#platform = options.platform ?? process.platform;
 		this.#data = this.#load();
 	}
 
@@ -106,15 +219,33 @@ export class ExecutionTargets {
 		renameSync(temp, this.#file);
 	}
 
-	// --- Project defaults ---
-
-	projectDefault(projectId: string | null | undefined) {
-		return (projectId && this.#data.projects[projectId]) || { target: "local" as RunTarget, image: DEFAULT_DOCKER_IMAGE };
+	/** Which targets this computer can offer (WSL2 only on Windows; SSH and Boat need rsync and ssh). */
+	available(): RunTarget[] {
+		return RUN_TARGETS.filter(target => target !== "wsl" || this.#platform === "win32").filter(target => !((target === "ssh" || target === "boat") && this.#platform === "win32"));
 	}
 
-	setProjectDefault(projectId: string, input: { target?: unknown; image?: unknown }) {
-		const target: RunTarget = input.target === "docker" ? "docker" : "local";
-		this.#data.projects[projectId] = { target, image: validImage(input.image) };
+	#settings(input: Partial<Record<keyof TargetSettings, unknown>>, base: TargetSettings): TargetSettings {
+		const target = RUN_TARGETS.includes(input.target as RunTarget) ? input.target as RunTarget : base.target;
+		if (!this.available().includes(target)) throw badRequest(target === "wsl" ? "WSL2 is only available on Windows." : "SSH and Boat.dev targets need ssh and rsync, which aren't available on Windows yet; use WSL2.");
+		const next: TargetSettings = {
+			target,
+			image: input.image === undefined ? base.image : validImage(input.image),
+			wslDistro: input.wslDistro === undefined ? base.wslDistro : validDistro(input.wslDistro),
+			sshHost: input.sshHost === undefined ? base.sshHost : validHost(input.sshHost),
+			remoteRoot: input.remoteRoot === undefined ? base.remoteRoot : validRemoteRoot(input.remoteRoot),
+		};
+		if (target === "ssh" && !next.sshHost) throw badRequest("Enter the SSH host to run on.");
+		return next;
+	}
+
+	// --- Project defaults ---
+
+	projectDefault(projectId: string | null | undefined): TargetSettings {
+		return { ...DEFAULT_SETTINGS, ...((projectId && this.#data.projects[projectId]) || {}) };
+	}
+
+	setProjectDefault(projectId: string, input: Partial<Record<keyof TargetSettings, unknown>>) {
+		this.#data.projects[projectId] = this.#settings(input, this.projectDefault(projectId));
 		this.#save();
 		return this.#data.projects[projectId];
 	}
@@ -122,44 +253,50 @@ export class ExecutionTargets {
 	// --- Sessions ---
 
 	session(sessionId: string): SessionTarget {
-		return this.#data.sessions[sessionId] ?? { target: "local", image: DEFAULT_DOCKER_IMAGE, container: null, port: null, mounts: [], state: "absent", message: "", updatedAt: 0 };
+		const defaults: SessionTarget = { ...DEFAULT_SETTINGS, container: null, port: null, mounts: [], boatId: null, sshEndpoint: null, state: "absent", message: "", updatedAt: 0 };
+		// Older records may miss newer fields; fill them in.
+		return { ...defaults, ...(this.#data.sessions[sessionId] as Partial<SessionTarget> | undefined) };
+	}
+
+	/** True when the session's commands run anywhere but this computer. */
+	isManaged(sessionId: string) {
+		const target = this.#data.sessions[sessionId]?.target;
+		return Boolean(target && target !== "local");
 	}
 
 	isDocker(sessionId: string) {
-		return this.#data.sessions[sessionId]?.target === "docker";
+		return this.isManaged(sessionId);
 	}
 
-	/** Choose where a session runs. Switching to Docker prepares the container in the background. */
-	setTarget(sessionId: string, input: { target?: unknown; image?: unknown }, paths: { workspace: string; repository?: string | null }) {
-		const target: RunTarget = input.target === "docker" ? "docker" : "local";
-		const current = this.session(sessionId);
-		const image = validImage(input.image ?? current.image);
-		const next: SessionTarget = { ...current, target, image, updatedAt: Date.now() };
-		if (target === "local") {
-			next.state = current.container ? "stopped" : "absent";
-			next.message = "";
-		}
-		if (target === "docker" && (image !== current.image || current.state === "absent" || current.state === "failed")) {
-			next.state = "preparing";
-			next.message = "Starting the container…";
-		}
-		this.#data.sessions[sessionId] = next;
+	#update(sessionId: string, patch: Partial<SessionTarget>) {
+		this.#data.sessions[sessionId] = { ...this.session(sessionId), ...patch, updatedAt: Date.now() };
 		this.#save();
-		if (target === "docker") {
-			if (current.container && image !== current.image) {
-				// A different image needs a new container.
-				void this.#docker(["rm", "-f", current.container]).catch(() => undefined).then(() => this.ensure(sessionId, paths)).catch(() => undefined);
-				this.#data.sessions[sessionId] = { ...next, container: null };
-			} else {
-				void this.ensure(sessionId, paths).catch(() => undefined);
-			}
-		} else if (current.container) {
-			void this.#docker(["stop", "-t", "2", current.container]).catch(() => undefined);
-		}
 		return this.session(sessionId);
 	}
 
-	/** Make sure a Docker session's container exists and is running. */
+	/** Choose where a session runs. Preparing the target happens in the background. */
+	setTarget(sessionId: string, input: Partial<Record<keyof TargetSettings, unknown>>, paths: { workspace: string; repository?: string | null }) {
+		const current = this.session(sessionId);
+		const settings = this.#settings(input, current.updatedAt ? current : { ...current, ...this.projectDefault(null) });
+		const changedMachine = settings.target !== current.target || settings.image !== current.image || settings.sshHost !== current.sshHost || settings.wslDistro !== current.wslDistro || settings.remoteRoot !== current.remoteRoot;
+		const previous = { ...current };
+		const next = this.#update(sessionId, { ...settings, ...(changedMachine ? { state: settings.target === "local" ? "absent" : "preparing", message: settings.target === "local" ? "" : "Preparing…" } : {}) });
+		if (changedMachine) {
+			void this.#release(previous).then(() => {
+				if (changedMachine && previous.target === "docker") this.#update(sessionId, { container: null, mounts: [] });
+				if (changedMachine && previous.target === "boat" && settings.target !== "boat") this.#update(sessionId, { boatId: null, sshEndpoint: null });
+				return settings.target === "local" ? null : this.ensure(sessionId, paths);
+			}).catch(() => undefined);
+		}
+		return next;
+	}
+
+	/** Stop what a previous target was using (container or VM) when a session moves elsewhere. */
+	async #release(previous: SessionTarget) {
+		if (previous.target === "docker" && previous.container) await this.#docker(["rm", "-f", previous.container]).catch(() => undefined);
+	}
+
+	/** Make sure a session's target is ready: container running, SSH host reachable, VM started. */
 	ensure(sessionId: string, paths: { workspace: string; repository?: string | null }): Promise<SessionTarget> {
 		const pending = this.#pending.get(sessionId);
 		if (pending) return pending;
@@ -170,72 +307,127 @@ export class ExecutionTargets {
 
 	async #ensure(sessionId: string, paths: { workspace: string; repository?: string | null }): Promise<SessionTarget> {
 		const record = this.session(sessionId);
-		if (record.target !== "docker") return record;
-		const update = (patch: Partial<SessionTarget>) => {
-			this.#data.sessions[sessionId] = { ...this.session(sessionId), ...patch, updatedAt: Date.now() };
-			this.#save();
-			return this.session(sessionId);
-		};
 		try {
-			if (record.container) {
-				const state = (await this.#docker(["inspect", "-f", "{{.State.Running}}", record.container]).catch(() => "missing")).trim();
-				if (state === "true") return update({ state: "running", message: "" });
-				if (state === "false") {
-					await this.#docker(["start", record.container]);
-					return update({ state: "running", message: "" });
-				}
+			if (record.target === "docker") return await this.#ensureDocker(sessionId, record, paths);
+			if (record.target === "wsl") {
+				const list = (await this.#run("wsl.exe", ["-l", "-q"], { timeout: 15_000 })).replace(/\0/g, "").split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+				if (record.wslDistro && !list.includes(record.wslDistro)) throw new Error(`WSL distribution ${record.wslDistro} isn't installed. Installed: ${list.join(", ") || "none"}.`);
+				return this.#update(sessionId, { state: "running", message: "" });
 			}
-			update({ state: "preparing", message: `Pulling ${record.image} if needed and starting the container…` });
-			const workspace = realpathSync(paths.workspace);
-			const mounts = new Set<string>([workspace]);
-			// The worktree's Git metadata lives in the main repository; mount it so git works inside.
-			try {
-				const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: workspace, encoding: "utf8", timeout: 5000 }).trim();
-				if (common) mounts.add(realpathSync(common));
-			} catch {
-				// Not a Git checkout.
+			if (record.target === "ssh" || record.target === "boat") {
+				const ready = record.target === "boat" ? await this.#ensureBoat(sessionId, record) : record;
+				// Reachable, has rsync, and the workspace folder exists.
+				await this.#run("ssh", [...this.#sshOptions(ready), this.#sshDestination(ready), "command -v rsync >/dev/null || { echo 'rsync is not installed on the remote machine' >&2; exit 3; }; mkdir -p " + this.#remoteExpr(ready.remoteRoot)], { timeout: 30_000 });
+				return this.#update(sessionId, { state: "running", message: "" });
 			}
-			// Subagents create their own worktrees next to the session's; mount that folder too.
-			if (this.#worktreesRoot && existsSync(this.#worktreesRoot)) mounts.add(realpathSync(this.#worktreesRoot));
-			// Drop mounts already covered by a parent mount.
-			const list = [...mounts].sort((a, b) => a.length - b.length).filter((path, index, all) => !all.slice(0, index).some(parent => inside(path, parent)));
-			const port = record.port ?? await freePort();
-			const name = `ade-${sessionId.replace(/[^a-z0-9]/gi, "").slice(0, 12)}`;
-			await this.#docker(["rm", "-f", name]).catch(() => undefined);
-			const user = process.platform === "linux" && typeof process.getuid === "function" ? ["--user", `${process.getuid()}:${process.getgid?.() ?? process.getuid()}`] : [];
-			await this.#docker([
-				"run", "-d", "--init", "--name", name,
-				"--label", "ade.session=" + sessionId,
-				...list.flatMap(path => ["-v", `${path}:${path}`]),
-				"-w", workspace,
-				"-p", `127.0.0.1:${port}:${port}`,
-				"-e", `PORT=${port}`,
-				...user,
-				record.image, "sleep", "infinity",
-			], { timeout: 15 * 60_000 });
-			return update({ container: name, port, mounts: list, state: "running", message: "" });
+			return record;
 		} catch (error) {
-			return update({ state: "failed", message: error instanceof Error ? error.message : String(error) });
+			return this.#update(sessionId, { state: "failed", message: error instanceof Error ? error.message : String(error) });
 		}
+	}
+
+	async #ensureDocker(sessionId: string, record: SessionTarget, paths: { workspace: string; repository?: string | null }) {
+		if (record.container) {
+			const state = (await this.#docker(["inspect", "-f", "{{.State.Running}}", record.container]).catch(() => "missing")).trim();
+			if (state === "true") return this.#update(sessionId, { state: "running", message: "" });
+			if (state === "false") {
+				await this.#docker(["start", record.container]);
+				return this.#update(sessionId, { state: "running", message: "" });
+			}
+		}
+		this.#update(sessionId, { state: "preparing", message: `Pulling ${record.image} if needed and starting the container…` });
+		const workspace = realpathSync(paths.workspace);
+		const mounts = new Set<string>([workspace]);
+		// The worktree's Git metadata lives in the main repository; mount it so git works inside.
+		try {
+			const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: workspace, encoding: "utf8", timeout: 5000 }).trim();
+			if (common) mounts.add(realpathSync(common));
+		} catch {
+			// Not a Git checkout.
+		}
+		// Subagents create their own worktrees next to the session's; mount that folder too.
+		if (this.#worktreesRoot && existsSync(this.#worktreesRoot)) mounts.add(realpathSync(this.#worktreesRoot));
+		// Claude Code and Codex keep their sign-in and conversations here; mount them so they work inside.
+		const home = homedir();
+		const agentHomes = [join(home, ".codex"), join(home, ".claude")].filter(path => existsSync(path)).map(path => realpathSync(path));
+		const agentFiles = [join(home, ".claude.json")].filter(path => existsSync(path));
+		const list = [...mounts].sort((a, b) => a.length - b.length).filter((path, index, all) => !all.slice(0, index).some(parent => inside(path, parent)));
+		const port = record.port ?? await freePort();
+		const name = `ade-${sessionId.replace(/[^a-z0-9]/gi, "").slice(0, 12)}`;
+		await this.#docker(["rm", "-f", name]).catch(() => undefined);
+		const user = this.#platform === "linux" && typeof process.getuid === "function" ? ["--user", `${process.getuid()}:${process.getgid?.() ?? process.getuid()}`] : [];
+		await this.#docker([
+			"run", "-d", "--init", "--name", name,
+			"--label", "ade.session=" + sessionId,
+			...list.flatMap(path => ["-v", `${path}:${path}`]),
+			...agentHomes.flatMap(path => ["-v", `${path}:${path}`]),
+			...agentFiles.flatMap(path => ["-v", `${path}:${path}`]),
+			"-w", workspace,
+			"-p", `127.0.0.1:${port}:${port}`,
+			"-e", `PORT=${port}`,
+			// Same home folder as on this computer, so the mounted agent sign-ins are found.
+			"-e", `HOME=${home}`,
+			// The container is the sandbox: let Claude Code skip permission prompts when asked to, even as root.
+			"-e", "IS_SANDBOX=1",
+			...user,
+			record.image, "sleep", "infinity",
+		], { timeout: 15 * 60_000 });
+		return this.#update(sessionId, { container: name, port, mounts: list, state: "running", message: "" });
+	}
+
+	async #ensureBoat(sessionId: string, record: SessionTarget): Promise<SessionTarget> {
+		const api = this.#boat?.();
+		if (!api) throw new Error("Add a Boat.dev API key in Settings → Integrations first.");
+		let boatId = record.boatId;
+		if (!boatId) {
+			this.#update(sessionId, { state: "preparing", message: "Creating a Boat.dev VM…" });
+			boatId = (await api.create(`ade-${sessionId.slice(0, 8)}`)).id;
+			this.#update(sessionId, { boatId });
+		}
+		// Wait until the VM runs; resume it if Boat stopped it (it keeps the disk).
+		for (let attempt = 0; attempt < 120; attempt++) {
+			const { state } = await api.get(boatId);
+			if (["ready", "idle", "running"].includes(state)) break;
+			if (state === "archived") {
+				this.#update(sessionId, { state: "preparing", message: "Resuming the Boat.dev VM…" });
+				await api.resume(boatId);
+			} else if (state === "error" || state === "cancelled") {
+				throw new Error(`The Boat.dev VM is in state "${state}".`);
+			}
+			await new Promise(resolveWait => setTimeout(resolveWait, 2000));
+		}
+		// Authorize ADE's key and pin the VM's host key (it changes after every resume).
+		const key = this.#boatKey();
+		const access = await api.authorizeKey(boatId, readFileSync(`${key}.pub`, "utf8").trim());
+		writeFileSync(join(this.#stateDirectory, "boat_known_hosts"), `${boatId} ${access.hostKey}\n`, { mode: 0o600 });
+		return this.#update(sessionId, { boatId, sshEndpoint: { host: access.host, port: access.port, user: "user" } });
+	}
+
+	#boatKey() {
+		const key = join(this.#stateDirectory, "boat_ed25519");
+		if (!existsSync(key)) {
+			mkdirSync(this.#stateDirectory, { recursive: true });
+			execFileSync("ssh-keygen", ["-t", "ed25519", "-N", "", "-C", "ade", "-f", key], { stdio: "ignore" });
+			chmodSync(key, 0o600);
+		}
+		return key;
 	}
 
 	async status(sessionId: string) {
 		const record = this.session(sessionId);
 		if (record.target !== "docker" || !record.container || record.state === "preparing") return record;
 		const running = (await this.#docker(["inspect", "-f", "{{.State.Running}}", record.container]).catch(() => "missing")).trim();
-		const state: DockerState = running === "true" ? "running" : running === "false" ? "stopped" : "absent";
-		if (state !== record.state && record.state !== "failed") {
-			this.#data.sessions[sessionId] = { ...record, state };
-			this.#save();
-		}
+		const state: TargetState = running === "true" ? "running" : running === "false" ? "stopped" : "absent";
+		if (state !== record.state && record.state !== "failed") this.#update(sessionId, { state });
 		return this.session(sessionId);
 	}
 
-	/** Remove a session's container (archive or delete). Its files stay in the worktree. */
+	/** Remove what a session used (container, Boat VM) when it's archived. Its files stay in the worktree. */
 	async remove(sessionId: string) {
 		const record = this.#data.sessions[sessionId];
 		if (!record) return;
 		if (record.container) await this.#docker(["rm", "-f", record.container]).catch(() => undefined);
+		if (record.boatId) await this.#boat?.()?.remove(record.boatId).catch(() => undefined);
 		delete this.#data.sessions[sessionId];
 		this.#save();
 	}
@@ -248,98 +440,220 @@ export class ExecutionTargets {
 		}
 	}
 
-	/**
-	 * How to run a command for this session: null = on this computer; otherwise the docker exec
-	 * invocation, or a command that explains why the container isn't available.
-	 */
-	commandFor(sessionId: string | null | undefined, cwd: string, command: string, envNames: string[]): { file: string; args: string[] } | null {
-		const record = sessionId ? this.#data.sessions[sessionId] : undefined;
-		if (!record || record.target !== "docker") return null;
-		if (!record.container || record.state === "failed" || record.state === "preparing" || !this.#covers(record, cwd)) {
-			return { file: "/bin/sh", args: ["-c", `echo "${this.#unavailable(record, cwd).replace(/"/g, "'")}" >&2; exit 125`] };
+	// --- SSH helpers (SSH hosts and Boat.dev VMs) ---
+
+	#sshOptions(record: SessionTarget, interactive = false) {
+		const options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=30"];
+		if (interactive) options.push("-t");
+		if (record.target === "boat" && record.boatId && record.sshEndpoint) {
+			options.push("-i", join(this.#stateDirectory, "boat_ed25519"), "-o", "IdentitiesOnly=yes", "-o", `UserKnownHostsFile=${join(this.#stateDirectory, "boat_known_hosts")}`, "-o", `HostKeyAlias=${record.boatId}`, "-o", "StrictHostKeyChecking=yes", "-p", String(record.sshEndpoint.port));
 		}
-		return { file: "docker", args: dockerExecArgs(record.container, cwd, command, envNames) };
+		return options;
 	}
 
-	shellFor(sessionId: string | null | undefined, cwd: string, envNames: string[]): { file: string; args: string[] } | null {
-		const record = sessionId ? this.#data.sessions[sessionId] : undefined;
-		if (!record || record.target !== "docker") return null;
-		if (!record.container || record.state === "failed" || record.state === "preparing" || !this.#covers(record, cwd)) {
-			return { file: "/bin/sh", args: ["-c", `echo "${this.#unavailable(record, cwd).replace(/"/g, "'")}"; exec sleep 3600`] };
+	#sshDestination(record: SessionTarget) {
+		if (record.target === "boat") {
+			if (!record.sshEndpoint) throw new Error("The Boat.dev VM isn't ready yet.");
+			return `${record.sshEndpoint.user}@${record.sshEndpoint.host}`;
 		}
-		return { file: "docker", args: dockerShellArgs(record.container, cwd, envNames) };
+		return record.sshHost;
+	}
+
+	/** A remote path in shell form: relative paths are under the remote user's home folder. */
+	#remoteExpr(path: string) {
+		return path.startsWith("/") ? q(path) : `"$HOME"/${q(path)}`;
+	}
+
+	/** The local folder that gets synced for a working directory, and its remote counterpart. */
+	#remoteFor(record: SessionTarget, cwd: string, workspaces: string[]) {
+		const target = real(cwd);
+		let base = workspaces.map(real).find(path => inside(target, path)) ?? null;
+		if (!base && this.#worktreesRoot) {
+			const root = real(this.#worktreesRoot);
+			if (inside(target, root) && target !== root) base = join(root, relative(root, target).split(sep)[0]);
+		}
+		if (!base) return null;
+		const remoteBase = `${record.remoteRoot}/${basename(base)}`;
+		const rel = relative(base, target).split(sep).join("/");
+		return { base, remoteBase, remoteCwd: rel ? `${remoteBase}/${rel}` : remoteBase };
+	}
+
+	/** rsync exclude patterns: .git plus the project's root .gitignore (negations can't be expressed, so they're dropped). */
+	#excludeFile(base: string) {
+		const lines = [".git", ".ade-run.pid"];
+		try {
+			lines.push(...readFileSync(join(base, ".gitignore"), "utf8").split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith("#") && !line.startsWith("!")));
+		} catch {
+			// No .gitignore.
+		}
+		const file = join(this.#stateDirectory, "sync-excludes", `${basename(base)}.txt`);
+		mkdirSync(dirname(file), { recursive: true });
+		writeFileSync(file, `${lines.join("\n")}\n`);
+		return file;
+	}
+
+	#sshInvocation(record: SessionTarget, cwd: string, command: string, envNames: string[], workspaces: string[], options: { pidFile?: string; background?: boolean; forwardPort?: number | null; interactive?: boolean }): Invocation {
+		const remote = this.#remoteFor(record, cwd, workspaces);
+		if (!remote) return failing(`ADE: ${cwd} isn't part of this session's workspace, so it can't run on the remote machine.`);
+		const ssh = ["ssh", ...this.#sshOptions(record)].map(q).join(" ");
+		const destination = q(this.#sshDestination(record));
+		const excludes = q(this.#excludeFile(remote.base));
+		const rsyncUp = `rsync -az --delete --exclude-from=${excludes} -e ${q(["ssh", ...this.#sshOptions(record)].join(" "))} ${q(`${remote.base}/`)} ${destination}:${q(`${remote.remoteBase}/`)}`;
+		// Foreground commands also bring deletions back; background ones only bring new and changed
+		// files, so they never undo edits made on this computer while they ran.
+		const rsyncDown = `rsync -azu ${options.background ? "" : "--delete "}--exclude-from=${excludes} -e ${q(["ssh", ...this.#sshOptions(record)].join(" "))} ${destination}:${q(`${remote.remoteBase}/`)} ${q(`${remote.base}/`)}`;
+		const remoteDir = this.#remoteExpr(remote.remoteCwd);
+		const pid = options.pidFile ? `echo $$ > ${q(options.pidFile)}; ` : "";
+		if (options.interactive) {
+			const shell = `cd ${remoteDir} 2>/dev/null || cd; exec "\${SHELL:-bash}" -l`;
+			return { file: "/bin/sh", args: ["-c", `${rsyncUp} || echo 'ADE: could not copy the workspace to the remote machine.'\nssh ${["-t", ...this.#sshOptions(record)].map(q).join(" ")} ${destination} ${q(shell)}\n${rsyncDown}`] };
+		}
+		// Secrets travel as NUL-separated NAME=value pairs on stdin, never on a command line.
+		const remoteScript = `mkdir -p ${remoteDir} && cd ${remoteDir} || exit 125; while IFS= read -r -d '' kv; do export "$kv"; done; ${pid}exec bash -lc ${q(command)}`;
+		const envPairs = envNames.length ? `printf '%s\\0' ${envNames.map(name => `"${name}=\${${name}:-}"`).join(" ")}` : "true";
+		const forward = options.forwardPort ? `-L ${options.forwardPort}:127.0.0.1:${options.forwardPort} ` : "";
+		const script = [
+			`${rsyncUp} || { echo 'ADE: could not copy the workspace to the remote machine.' >&2; exit 125; }`,
+			`${envPairs} | ${ssh} ${forward}${destination} ${q(`bash -c ${q(remoteScript)}`)}`,
+			"code=$?",
+			rsyncDown,
+			"exit $code",
+		].join("\n");
+		return { file: "/bin/sh", args: ["-c", script] };
+	}
+
+	// --- Running things ---
+
+	/**
+	 * How to run a command for this session: null = on this computer; otherwise the invocation,
+	 * or a command that explains why the target isn't available.
+	 */
+	commandFor(sessionId: string | null | undefined, cwd: string, command: string, envNames: string[], options: { pidFile?: string; background?: boolean; forwardPort?: number | null; workspaces?: string[] } = {}): Invocation | null {
+		const record = sessionId ? this.#data.sessions[sessionId] : undefined;
+		if (!record || record.target === "local") return null;
+		const full = this.session(sessionId!);
+		if (full.state === "failed" || full.state === "preparing" || full.state === "absent") return failing(this.#unavailable(full));
+		const pid = options.pidFile ? `echo $$ > ${q(options.pidFile)}; ` : "";
+		if (full.target === "docker") {
+			if (!full.container || !this.#covers(full, cwd)) return failing(this.#unavailable(full, cwd));
+			return { file: "docker", args: dockerExecArgs(full.container, cwd, `${pid}${command}`, envNames) };
+		}
+		if (full.target === "wsl") {
+			const args = [...(full.wslDistro ? ["-d", full.wslDistro] : []), "--cd", toWslPath(cwd), "--", "bash", "-lc", `${pid}${command}`];
+			return { file: "wsl.exe", args, env: { WSLENV: wslEnv(envNames, process.env.WSLENV) } };
+		}
+		// SSH and Boat: Git runs here, where the repository is; everything else runs remotely.
+		if (/^\s*git(\s|$)/.test(command) && !/[;&|`$<>]/.test(command)) return null;
+		return this.#sshInvocation(full, cwd, command, envNames, options.workspaces ?? [], options);
+	}
+
+	shellFor(sessionId: string | null | undefined, cwd: string, envNames: string[], workspaces: string[] = []): Invocation | null {
+		const record = sessionId ? this.#data.sessions[sessionId] : undefined;
+		if (!record || record.target === "local") return null;
+		const full = this.session(sessionId!);
+		const explain = (text: string) => ({ file: "/bin/sh", args: ["-c", `echo ${q(text)}; exec sleep 3600`] });
+		if (full.state === "failed" || full.state === "preparing" || full.state === "absent") return explain(this.#unavailable(full));
+		if (full.target === "docker") {
+			if (!full.container || !this.#covers(full, cwd)) return explain(this.#unavailable(full, cwd));
+			return { file: "docker", args: dockerShellArgs(full.container, cwd, envNames) };
+		}
+		if (full.target === "wsl") {
+			return { file: "wsl.exe", args: [...(full.wslDistro ? ["-d", full.wslDistro] : []), "--cd", toWslPath(cwd)], env: { WSLENV: wslEnv(envNames, process.env.WSLENV) } };
+		}
+		return this.#sshInvocation(full, cwd, "", envNames, workspaces, { interactive: true });
+	}
+
+	/** Stop a command started with a pid file, with everything it started, on the session's target. */
+	stopProcess(sessionId: string, pidFile: string, cwd: string, workspaces: string[] = []) {
+		const record = this.session(sessionId);
+		const script = killTreeScript(pidFile);
+		if (record.target === "docker" && record.container) {
+			execFile("docker", ["exec", record.container, "sh", "-c", script], { timeout: 10_000 }, () => undefined);
+		} else if (record.target === "wsl") {
+			execFile("wsl.exe", [...(record.wslDistro ? ["-d", record.wslDistro] : []), "--", "sh", "-c", script], { timeout: 10_000 }, () => undefined);
+		} else if ((record.target === "ssh" || record.target === "boat") && this.#remoteFor(record, cwd, workspaces)) {
+			try {
+				execFile("ssh", [...this.#sshOptions(record), this.#sshDestination(record), `sh -c ${q(script)}`], { timeout: 15_000 }, () => undefined);
+			} catch {
+				// The remote machine is gone; nothing to stop.
+			}
+		}
 	}
 
 	/** The session whose workspace contains this folder (for terminals, which only know a folder). */
 	sessionForPath(cwd: string, workspaces: Array<{ id: string; path: string | null | undefined }>) {
-		let real: string;
-		try {
-			real = realpathSync(cwd);
-		} catch {
-			real = resolve(cwd);
-		}
+		const target = real(cwd);
 		for (const item of workspaces) {
-			if (!item.path || !this.isDocker(item.id)) continue;
-			let base: string;
-			try {
-				base = realpathSync(item.path);
-			} catch {
-				continue;
-			}
-			if (inside(real, base)) return item.id;
+			if (!item.path || !this.isManaged(item.id)) continue;
+			if (inside(target, real(item.path))) return item.id;
 		}
 		return null;
 	}
 
 	#covers(record: SessionTarget, cwd: string) {
-		let real: string;
-		try {
-			real = realpathSync(cwd);
-		} catch {
-			real = resolve(cwd);
-		}
-		return record.mounts.some(mount => inside(real, mount));
+		const target = real(cwd);
+		return record.mounts.some(mount => inside(target, mount));
 	}
 
-	#unavailable(record: SessionTarget, cwd: string) {
-		if (record.state === "preparing") return "ADE: this session runs in Docker and its container is still starting. Try again in a moment.";
-		if (record.state === "failed") return `ADE: this session runs in Docker, but its container could not start: ${record.message}`;
-		if (record.container && !this.#covers(record, cwd)) return `ADE: ${cwd} is not mounted in this session's Docker container.`;
-		return "ADE: this session runs in Docker, but its container isn't running. Open Run to start it.";
+	#unavailable(record: SessionTarget, cwd?: string) {
+		const where = record.target === "docker" ? "Docker" : record.target === "wsl" ? "WSL2" : record.target === "boat" ? "a Boat.dev VM" : `SSH host ${record.sshHost}`;
+		if (record.state === "preparing") return `ADE: this session runs on ${where}, which is still starting. Try again in a moment.`;
+		if (record.state === "failed") return `ADE: this session runs on ${where}, but it isn't available: ${record.message}`;
+		if (cwd && record.target === "docker" && record.container && !this.#covers(record, cwd)) return `ADE: ${cwd} is not mounted in this session's Docker container.`;
+		return `ADE: this session runs on ${where}, but it isn't running. Open Run to start it.`;
 	}
+}
+
+function failing(message: string): Invocation {
+	return { file: "/bin/sh", args: ["-c", `echo ${q(message)} >&2; exit 125`] };
 }
 
 // Spawn points ask the runtime where a session's commands run; the runtime installs the lookup.
 let current: ExecutionTargets | null = null;
 let terminalSession: (cwd: string) => string | null = () => null;
+let sessionWorkspaces: (sessionId: string) => string[] = () => [];
 
-export function setExecutionTargets(targets: ExecutionTargets | null, sessionForCwd?: (cwd: string) => string | null) {
+export function setExecutionTargets(targets: ExecutionTargets | null, sessionForCwd?: (cwd: string) => string | null, workspacesOf?: (sessionId: string) => string[]) {
 	current = targets;
 	terminalSession = sessionForCwd ?? (() => null);
+	sessionWorkspaces = workspacesOf ?? (() => []);
 }
 
-export function commandInvocation(sessionId: string | null | undefined, cwd: string, command: string, envNames: string[]) {
-	return current?.commandFor(sessionId, cwd, command, envNames) ?? null;
+export function commandInvocation(sessionId: string | null | undefined, cwd: string, command: string, envNames: string[], options: { pidFile?: string; background?: boolean; forwardPort?: number | null } = {}) {
+	if (!sessionId) return null;
+	return current?.commandFor(sessionId, cwd, command, envNames, { ...options, workspaces: sessionWorkspaces(sessionId) }) ?? null;
 }
 
 export function terminalInvocation(cwd: string, envNames: string[]) {
 	const sessionId = terminalSession(cwd);
-	return sessionId ? current?.shellFor(sessionId, cwd, envNames) ?? null : null;
+	return sessionId ? current?.shellFor(sessionId, cwd, envNames, sessionWorkspaces(sessionId)) ?? null : null;
 }
 
+/** The port the session's Run script should use: Docker's published port (SSH forwards a local one). */
 export function sessionPort(sessionId: string) {
 	const record = current?.session(sessionId);
 	return record?.target === "docker" ? record.port : null;
 }
 
-/** End a process started in a session's container (by its pid file) and its children. */
+export function sessionTarget(sessionId: string | null | undefined): RunTarget {
+	return (sessionId && current?.session(sessionId).target) || "local";
+}
+
+/** Stop a process started with a pid file on the session's target, and everything it started. */
+export function stopOnTarget(sessionId: string, pidFile: string, cwd: string) {
+	current?.stopProcess(sessionId, pidFile, cwd, sessionWorkspaces(sessionId));
+}
+
+/** @deprecated use stopOnTarget */
 export function stopInContainer(sessionId: string, pidFile: string) {
 	const record = current?.session(sessionId);
-	if (!record?.container) return;
-	const script = `pid=$(cat ${pidFile} 2>/dev/null) || exit 0; pkill -TERM -P "$pid" 2>/dev/null; kill -TERM "$pid" 2>/dev/null; true`;
-	execFile("docker", ["exec", record.container, "sh", "-c", script], { timeout: 10_000 }, () => undefined);
+	if (record) stopOnTarget(sessionId, pidFile, record.mounts[0] ?? "");
 }
 
 export function runsInDocker(sessionId: string | null | undefined) {
-	return Boolean(sessionId && current?.isDocker(sessionId));
+	return Boolean(sessionId && current?.isManaged(sessionId));
+}
+
+export function runsElsewhere(sessionId: string | null | undefined) {
+	return runsInDocker(sessionId);
 }

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { request } from "../../api"
 
 type SlackEvents = { finished: boolean; needsApproval: boolean; failed: boolean; automations: boolean }
-type Status = { slack: { configured: boolean; events: SlackEvents }; linear: { configured: boolean; viewer: string | null } }
+type Status = { slack: { configured: boolean; events: SlackEvents }; linear: { configured: boolean; viewer: string | null }; boat?: { configured: boolean } }
 
 const eventLabels: Array<[keyof SlackEvents, string, string]> = [
   ["needsApproval", "Needs approval", "An agent is waiting for you to approve a command."],
@@ -16,8 +16,9 @@ export function IntegrationsSettings() {
   const [status, setStatus] = useState<Status | null>(null)
   const [webhook, setWebhook] = useState("")
   const [linearKey, setLinearKey] = useState("")
+  const [boatKey, setBoatKey] = useState("")
   const [busy, setBusy] = useState<string | null>(null)
-  const [message, setMessage] = useState<{ area: "slack" | "linear"; text: string; error?: boolean } | null>(null)
+  const [message, setMessage] = useState<{ area: "slack" | "linear" | "boat"; text: string; error?: boolean } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -25,7 +26,7 @@ export function IntegrationsSettings() {
     return () => { cancelled = true }
   }, [])
 
-  const call = async (area: "slack" | "linear", name: string, path: string, method: string, body?: unknown, success?: string) => {
+  const call = async (area: "slack" | "linear" | "boat", name: string, path: string, method: string, body?: unknown, success?: string) => {
     setBusy(name)
     setMessage(null)
     try {
@@ -44,7 +45,7 @@ export function IntegrationsSettings() {
     }
   }
 
-  const note = (area: "slack" | "linear") => message?.area === area
+  const note = (area: "slack" | "linear" | "boat") => message?.area === area
     ? <div className="st-row"><span className={message.error ? "st-error" : "st-row-title"} role="status">{message.text}</span></div>
     : null
 
@@ -109,6 +110,27 @@ export function IntegrationsSettings() {
             <button type="submit" className="st-button" disabled={!linearKey.trim() || Boolean(busy)}>{busy === "linear" ? "Checking…" : status?.linear.configured ? "Replace" : "Connect"}</button>
           </form>
           {note("linear")}
+        </div>
+      </section>
+
+      <section className="st-section">
+        <h2>Boat.dev</h2>
+        <p className="st-section-desc">Run sessions on cloud VMs: with a key, “Boat.dev” appears under Run on. Each session gets its own VM, deleted when you archive the session. Create a key with <code>boat api-key create ade --preset full-sandbox</code> or in the <a href="https://boat.dev/dashboard?tab=api-keys" target="_blank" rel="noreferrer">Boat dashboard</a>.</p>
+        <div className="st-card">
+          <div className="st-row">
+            <div className="st-row-text">
+              <span className="st-row-title">{status?.boat?.configured ? "Connected" : "Not connected"}</span>
+              <p>The key stays on this computer. Boat bills VMs while they run.</p>
+            </div>
+            <div className="st-row-control">
+              {status?.boat?.configured ? <button type="button" className="st-button is-quiet" disabled={Boolean(busy)} onClick={() => void call("boat", "remove-boat", "/api/integrations/boat", "DELETE")}>Disconnect</button> : null}
+            </div>
+          </div>
+          <form className="st-inline-form" onSubmit={event => { event.preventDefault(); void call("boat", "boat", "/api/integrations/boat", "PUT", { apiKey: boatKey }, "Connected.").then(ok => { if (ok) setBoatKey("") }) }}>
+            <input type="password" aria-label="Boat.dev API key" placeholder="boat_…" value={boatKey} onChange={event => setBoatKey(event.target.value)} autoComplete="off" />
+            <button type="submit" className="st-button" disabled={!boatKey.trim() || Boolean(busy)}>{busy === "boat" ? "Checking…" : status?.boat?.configured ? "Replace" : "Connect"}</button>
+          </form>
+          {note("boat")}
         </div>
       </section>
     </>

@@ -63,9 +63,14 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		approvals: host.approvals,
 	}, sessionGit);
 	/** New worktree sessions: copy configured files from the project checkout, then run the setup script. */
-	// Where each session's commands run: this computer or its own Docker container.
-	const executionTargets = new ExecutionTargets(stateDirectory, { worktreesRoot: worktreeManager?.root ?? null });
-	setExecutionTargets(executionTargets, cwd => executionTargets.sessionForPath(cwd, (host.sessions?.() ?? []).map(item => ({ id: item.id, path: item.workspace?.path }))));
+	const integrations = new Integrations(stateDirectory);
+	// Where each session's commands run: this computer, Docker, WSL2, an SSH host or a Boat.dev VM.
+	const executionTargets = new ExecutionTargets(stateDirectory, { worktreesRoot: worktreeManager?.root ?? null, boat: () => integrations.boatApi() });
+	setExecutionTargets(
+		executionTargets,
+		cwd => executionTargets.sessionForPath(cwd, (host.sessions?.() ?? []).map(item => ({ id: item.id, path: item.workspace?.path }))),
+		sessionId => [host.sessions?.().find(item => item.id === sessionId)?.workspace?.path].filter((path): path is string => Boolean(path)),
+	);
 	// Containers stop when the computer restarts; start them again for Docker sessions that are still open.
 	for (const session of host.sessions?.() ?? []) {
 		if (executionTargets.isDocker(session.id) && session.workspace?.path && !session.archivedAt) {
@@ -110,7 +115,6 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	// Hook: after an agent turn ends, run the project's check command (lint, typecheck, tests) in the
 	// workspace. With auto-fix on, a failing check goes back to the agent, at most twice in a row.
 	// Slack notifications (R14): turn finished or failed, approval needed, automation started.
-	const integrations = new Integrations(stateDirectory);
 	const lastNotified = new Map<string, number>();
 	const notify = (event: keyof SlackEvents, sessionId: string, describe: (label: string, project: string) => string) => {
 		if (!integrations.wants(event)) return;

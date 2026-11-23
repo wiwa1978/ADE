@@ -4,17 +4,20 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { badRequest, httpError } from "./http-error.ts";
+import { createBoatApi } from "./boat.ts";
 
 export type SlackEvents = { finished: boolean; needsApproval: boolean; failed: boolean; automations: boolean };
 
 type Stored = {
 	slack?: { webhook: string; events: SlackEvents };
 	linear?: { apiKey: string; viewer: string | null };
+	boat?: { apiKey: string };
 };
 
 export type IntegrationStatus = {
 	slack: { configured: boolean; events: SlackEvents };
 	linear: { configured: boolean; viewer: string | null };
+	boat: { configured: boolean };
 };
 
 export type LinearIssue = { id: string; identifier: string; title: string; description: string; url: string; state: string; team: string };
@@ -72,6 +75,7 @@ export class Integrations {
 		return {
 			slack: { configured: Boolean(this.#data.slack?.webhook), events: this.#data.slack?.events ?? DEFAULT_EVENTS },
 			linear: { configured: Boolean(this.#data.linear?.apiKey), viewer: this.#data.linear?.viewer ?? null },
+			boat: { configured: Boolean(this.#data.boat?.apiKey) },
 		};
 	}
 
@@ -132,6 +136,26 @@ export class Integrations {
 		this.#data.linear = { apiKey: key, viewer: data.viewer?.name || data.viewer?.email || null };
 		this.#save();
 		return this.status();
+	}
+
+	// --- Boat.dev (cloud VMs to run sessions on) ---
+
+	async setBoat(apiKey: unknown) {
+		if (typeof apiKey !== "string" || !/^(boat|box)_[A-Za-z0-9_-]{8,200}$/.test(apiKey.trim())) throw badRequest("Paste a Boat.dev API key (it starts with boat_). Create one with `boat api-key create ade --preset full-sandbox` or in the Boat dashboard.");
+		await createBoatApi(apiKey.trim(), this.#fetch).check();
+		this.#data.boat = { apiKey: apiKey.trim() };
+		this.#save();
+		return this.status();
+	}
+
+	removeBoat() {
+		delete this.#data.boat;
+		this.#save();
+		return this.status();
+	}
+
+	boatApi() {
+		return this.#data.boat?.apiKey ? createBoatApi(this.#data.boat.apiKey, this.#fetch) : null;
 	}
 
 	removeLinear() {

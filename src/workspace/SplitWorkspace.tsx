@@ -292,9 +292,9 @@ export function SplitWorkspace({
       try {
         const [result, runOn] = await Promise.all([
           request<{ setup: { status: RunStatus["setup"] }; run: { status: RunStatus["run"]; url: string | null }; check?: { status: RunStatus["run"] } }>(`/api/sessions/${encodeURIComponent(session.id)}/scripts`),
-          request<{ target: string; state: NonNullable<RunStatus["docker"]> }>(`/api/sessions/${encodeURIComponent(session.id)}/run-on`).catch(() => null),
+          request<{ target: NonNullable<RunStatus["target"]>; state: NonNullable<RunStatus["docker"]> }>(`/api/sessions/${encodeURIComponent(session.id)}/run-on`).catch(() => null),
         ])
-        if (active) setRunStatus({ setup: result.setup.status, run: result.run.status, check: result.check?.status, url: result.run.url, docker: runOn?.target === "docker" ? runOn.state : null })
+        if (active) setRunStatus({ setup: result.setup.status, run: result.run.status, check: result.check?.status, url: result.run.url, docker: runOn && runOn.target !== "local" ? runOn.state : null, target: runOn?.target })
       } catch {
         if (active) setRunStatus(null)
       }
@@ -515,7 +515,7 @@ export function SplitWorkspace({
               tasks={tasks}
               onRewind={hasWorkspace ? content => void rewindTo(content) : undefined}
               diffMode={diffMode}
-              onRunStatusChange={status => setRunStatus(previous => ({ ...status, docker: previous?.docker ?? null }))}
+              onRunStatusChange={status => setRunStatus(previous => ({ ...status, docker: previous?.docker ?? null, target: previous?.target }))}
               onOpenProjectSettings={onOpenProjectSettings}
               onOpenExternalBrowser={onOpenExternalBrowser}
               onBrowserStateChange={onBrowserStateChange}
