@@ -7,12 +7,15 @@ import { colorPalettes, lookPresets, paletteVariables, type Theme } from "./appe
 import type { ApprovalPolicy, ApprovalRule, BrowserState, EnvironmentDirectory, McpServerStatus, ProviderCatalogEntry, RuntimeHealth, SkillsAndRulesCatalog } from "./app-types"
 import type { Project } from "./ProjectsView"
 import type { Settings } from "./useSettings"
-import { modelCredentialProviders, type useConnections } from "./useConnections"
+import type { useConnections } from "./useConnections"
 import { McpAndSecuritySettings } from "./src/panels/McpSettingsSection"
 import { request } from "./api"
 import { UsageSettings } from "./src/usage/UsageSettings"
 import { IntegrationsSettings } from "./src/integrations/IntegrationsSettings"
+import { CODE_FONT_OPTIONS, INTERFACE_FONT_OPTIONS } from "./src/appearance/fonts"
+import { FontPicker } from "./src/appearance/FontPicker"
 import { SubagentSettings } from "./src/subagents/SubagentSettings"
+import { ProvidersPanel } from "./src/settings/ProvidersPanel"
 
 /** Settings categories. Every category here changes something real; nothing is a placeholder. */
 export type SettingsCategory =
@@ -33,7 +36,7 @@ const groups: { label: string; items: SettingsItem[] }[] = [
   {
     label: "AI",
     items: [
-      { id: "models", label: "Models", icon: Sparkles, description: "Model providers, API keys, and the default model for new messages.", keywords: "openai anthropic claude copilot radius ollama compatible api key provider reasoning" },
+      { id: "models", label: "Providers", icon: Sparkles, description: "Model providers, CLI agents, API keys, and runtime settings.", keywords: "openai anthropic claude copilot codex pi cursor opencode radius ollama compatible api key provider reasoning models" },
       { id: "agents", label: "Agents & permissions", icon: Bot, description: "Command approvals, MCP servers, and skills available to agents.", keywords: "approval policy mcp skills rules permissions browser chrome" },
       { id: "subagents", label: "Subagents", icon: Workflow, description: "What subagents run on (Pi, Claude Code, Codex) and who picks.", keywords: "harness claude code codex pi durable subagent model delegate" },
       { id: "usage", label: "Usage", icon: Gauge, description: "Tokens and cost per project and session, and a monthly budget.", keywords: "cost spend tokens budget billing price money" },
@@ -116,33 +119,6 @@ type SettingsViewProps = {
 
 // --- Building blocks -------------------------------------------------------------------------------
 
-/** Font choices; the first entry ("") is the system default. */
-const INTERFACE_FONTS: Array<[string, string]> = [
-  ["", "System default"],
-  ['"Inter", sans-serif', "Inter"],
-  ['"SF Pro Text", -apple-system, sans-serif', "SF Pro"],
-  ['"Helvetica Neue", Helvetica, sans-serif', "Helvetica Neue"],
-  ["Arial, sans-serif", "Arial"],
-  ['"Segoe UI", sans-serif', "Segoe UI"],
-  ["Roboto, sans-serif", "Roboto"],
-  ['"IBM Plex Sans", sans-serif', "IBM Plex Sans"],
-  ['"Source Sans 3", "Source Sans Pro", sans-serif', "Source Sans"],
-  ["Avenir Next, Avenir, sans-serif", "Avenir Next"],
-  ["Georgia, serif", "Georgia (serif)"],
-]
-const CODE_FONTS: Array<[string, string]> = [
-  ["", "System default"],
-  ['"SF Mono", SFMono-Regular, monospace', "SF Mono"],
-  ["Menlo, monospace", "Menlo"],
-  ['"JetBrains Mono", monospace', "JetBrains Mono"],
-  ['"Fira Code", monospace', "Fira Code"],
-  ['"Cascadia Code", monospace', "Cascadia Code"],
-  ['"IBM Plex Mono", monospace', "IBM Plex Mono"],
-  ['"Source Code Pro", monospace', "Source Code Pro"],
-  ["Monaco, monospace", "Monaco"],
-  ["Consolas, monospace", "Consolas"],
-]
-
 type TextDraft = { interfaceFont: string; codeFont: string; interfaceSize: string; contentSize: string; codeSize: string; contentWidth: string }
 
 function textFromSettings(settings: Settings): TextDraft {
@@ -190,7 +166,7 @@ function notificationPermission(): NotificationPermission | "unsupported" {
 // --- View ------------------------------------------------------------------------------------------
 
 export function SettingsView({
-  settings, resolved, error, runtimeError, runtime, providerName, selectedModel, selectedProvider, modelCatalog,
+  settings, resolved, error, runtimeError, runtime, selectedModel, selectedProvider, modelCatalog,
   sending, credentialChangesBlocked, connections, activeEnvironmentName, update, onBack, onWorktreeDiagnostics,
   onEnvironmentChanged, onModelsChanged, mcpServers = [], approvalPolicy = "auto-safe", approvalRules = [], browserState,
   skillsCatalog, onRefreshMcp, onChangeApprovalPolicy, onDeleteApprovalRule, onAddApprovalRule, initialCategory, autoOpenAddEnvironment = false,
@@ -208,10 +184,8 @@ export function SettingsView({
     setTextDraft(appliedText)
   }
   const textDirty = !sameText(textDraft, appliedText)
-  const [customFont, setCustomFont] = useState({ interfaceFont: false, codeFont: false })
   const [prevInitialCategory, setPrevInitialCategory] = useState(initialCategory)
   const [permission, setPermission] = useState(notificationPermission)
-  const [editingKey, setEditingKey] = useState<string | null>(null)
   const [compatible, setCompatible] = useState<{ url: string; model: string; fromEnvironment: boolean } | null>(null)
   const [compatibleDraft, setCompatibleDraft] = useState({ url: "", model: "" })
   const [compatibleBusy, setCompatibleBusy] = useState(false)
@@ -235,9 +209,7 @@ export function SettingsView({
 
   const {
     githubConnection, githubStatusError, githubCliError, githubActionError, githubConnectionBusy, changeGitHubConnection,
-    copilotHealth, copilotStatusError, copilotActionError, copilotSignIn, copilotWaiting, authBusy, changeCopilotAuth,
-    modelCredentials, modelCredentialStatusError, modelCredentialActionError, modelCredentialBusy, saveModelCredential, changeModelCredential,
-    providerTools,
+    authBusy, modelCredentialBusy,
   } = connections
   const selected = allItems.find(item => item.id === selectedCategory) ?? allItems[0]
   const disabled = sending || credentialChangesBlocked || authBusy || githubConnectionBusy || Boolean(modelCredentialBusy)
@@ -314,35 +286,6 @@ export function SettingsView({
       codeSize: Math.round(Number(textDraft.codeSize)),
       contentWidth: Math.round(Number(textDraft.contentWidth)),
     })
-  }
-  const textField = (label: string, key: keyof TextDraft, placeholder?: string) => (
-    <input className="st-input" aria-label={label} value={textDraft[key]} placeholder={placeholder} spellCheck={false}
-      onChange={event => setTextDraft(current => ({ ...current, [key]: event.target.value }))}
-      onKeyDown={event => { if (event.key === "Enter") applyText() }} />
-  )
-  // Free typing; checked when you apply, so the value never jumps while you type.
-  // Fonts and sizes are picked from lists; "Custom…" keeps a free-text font for anything else installed.
-  const fontSelect = (label: string, key: "interfaceFont" | "codeFont", options: Array<[string, string]>) => {
-    const value = textDraft[key].trim()
-    // "Arial" and "Arial, sans-serif" are the same choice: compare the first font name.
-    const firstFamily = (font: string) => font.split(",")[0].replace(/["']/g, "").trim().toLowerCase()
-    const match = options.find(([fontValue]) => fontValue === value || (fontValue && value && firstFamily(fontValue) === firstFamily(value)))
-    const custom = customFont[key] || !match
-    return (
-      <span className="st-font-pick">
-        <select className="st-select" aria-label={label} value={custom ? "__custom__" : match[0]}
-          onChange={event => {
-            const next = event.target.value
-            if (next === "__custom__") { setCustomFont(current => ({ ...current, [key]: true })); return }
-            setCustomFont(current => ({ ...current, [key]: false }))
-            setTextDraft(current => ({ ...current, [key]: next }))
-          }}>
-          {options.map(([fontValue, name]) => <option key={name} value={fontValue} style={fontValue ? { fontFamily: fontValue } : undefined}>{name}</option>)}
-          <option value="__custom__">Custom…</option>
-        </select>
-        {custom ? textField(`${label} (custom)`, key, key === "codeFont" ? "e.g. Berkeley Mono" : "e.g. Avenir Next") : null}
-      </span>
-    )
   }
   const sizeSelect = (label: string, key: "interfaceSize" | "contentSize" | "codeSize") => {
     const [min, max] = textLimits[key]
@@ -426,10 +369,32 @@ export function SettingsView({
       </Row>
     </Section>
     <Section title="Text">
-      <Row title="Interface font" description="Fonts that aren't installed fall back to the system font.">{fontSelect("Interface font", "interfaceFont", INTERFACE_FONTS)}</Row>
+      <Row title="Interface font" description="Google Fonts load automatically when online; offline falls back to the system font.">
+        <FontPicker
+          label="Interface font"
+          value={textDraft.interfaceFont}
+          options={INTERFACE_FONT_OPTIONS}
+          previewGroup="interface"
+          sampleText="Aa"
+          customPlaceholder="e.g. Avenir Next"
+          onChange={next => setTextDraft(current => ({ ...current, interfaceFont: next }))}
+          onCommit={applyText}
+        />
+      </Row>
       <Row title="Interface size" description="Scales the whole app, like zooming.">{sizeSelect("Interface size", "interfaceSize")}</Row>
       <Row title="Chat text size" description="Messages in the conversation.">{sizeSelect("Chat text size", "contentSize")}</Row>
-      <Row title="Code font" description="Code blocks, diffs, and the terminal.">{fontSelect("Code font", "codeFont", CODE_FONTS)}</Row>
+      <Row title="Code font" description="Code blocks, diffs, and the terminal.">
+        <FontPicker
+          label="Code font"
+          value={textDraft.codeFont}
+          options={CODE_FONT_OPTIONS}
+          previewGroup="code"
+          sampleText="0O1l"
+          customPlaceholder="e.g. Berkeley Mono"
+          onChange={next => setTextDraft(current => ({ ...current, codeFont: next }))}
+          onCommit={applyText}
+        />
+      </Row>
       <Row title="Code size">{sizeSelect("Code size", "codeSize")}</Row>
     </Section>
     <Section title="Layout">
@@ -447,89 +412,31 @@ export function SettingsView({
     ) : null}
   </>
 
-  // --- Models ---
-  const configuredProviders = modelCatalog.filter(provider => provider.configured)
-  const activeProvider = modelCatalog.find(provider => provider.id === selectedProvider)
-  const detectedAgents = (providerTools ?? []).filter(tool => tool.kind === "cli" && tool.installed)
-  const credentialSource = (id: string) => modelCredentials?.find(item => item.provider === id)?.source
-  const credentialDisabled = Boolean(modelCredentialBusy) || credentialChangesBlocked
-
-  const models = <>
-    <Section
-      title="Default model"
-      description={!runtime?.online ? "Waiting for the ADE runtime…"
-        : activeProvider?.configured ? <Status tone="ok">Ready · {providerName} · {selectedModel}</Status>
-          : configuredProviders.length ? <Status tone="warn">{activeProvider?.name ?? selectedProvider} isn’t set up — pick a provider that is ready.</Status>
-            : <Status tone="warn">No provider is set up yet. Add one below.</Status>}
-    >
-      <Row title="Provider">
-        <select className="st-select" aria-label="Provider" value={selectedProvider} onChange={event => update({ provider: event.target.value, model: "" })}>
-          {modelCatalog.map(provider => <option key={provider.id} value={provider.id}>{provider.name}{provider.configured ? "" : " (not set up)"}</option>)}
-        </select>
-      </Row>
-      <Row title="Model">
-        <select className="st-select" aria-label="Model" value={activeProvider?.configured ? selectedModel : ""} disabled={!activeProvider?.configured} onChange={event => update({ model: event.target.value })}>
-          {!activeProvider?.configured ? <option value="">—</option> : null}
-          {activeProvider?.models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
-        </select>
-      </Row>
-      <Row title="Reasoning" description="How much the model thinks before answering. Support varies by model.">
-        <select className="st-select" aria-label="Reasoning" value={settings.reasoning === "off" ? "none" : settings.reasoning} onChange={event => update({ reasoning: event.target.value })}>
-          {reasoningLevels.map(level => <option key={level.id} value={level.id}>{level.label}</option>)}
-        </select>
-      </Row>
-    </Section>
-
-    <Section title="Providers" description="Keys are stored on this host in the system keychain and are never shown again.">
-      {modelCredentialStatusError ? <Row title={<span className="st-error">Status unavailable</span>} description={modelCredentialStatusError} /> : null}
-      {modelCredentialProviders.map(provider => {
-        const source = credentialSource(provider.id)
-        const editing = editingKey === provider.id
-        const working = modelCredentialBusy?.provider === provider.id
-        return <div key={provider.id} className="st-row-group">
-          <Row
-            title={provider.name}
-            description={provider.id === "compatible" ? "Any OpenAI-compatible server, such as Ollama or LM Studio." : undefined}
-          >
-            {source === "saved" ? <Status tone="ok">Key saved</Status> : source === "environment" ? <Status tone="ok">From environment</Status> : <Status tone="off">Not set up</Status>}
-            {!editing ? <button type="button" className="st-button" disabled={credentialDisabled} onClick={() => setEditingKey(provider.id)}>{source === "saved" ? "Replace" : "Add key"}</button> : null}
-            {source === "saved" && !editing ? <button type="button" className="st-button is-quiet" disabled={credentialDisabled} onClick={async () => { await changeModelCredential("remove", provider.id); onModelsChanged?.() }}>{working && modelCredentialBusy?.action === "remove" ? "Removing…" : "Remove"}</button> : null}
-          </Row>
-          {editing ? (
-            <form className="st-inline-form" onSubmit={async event => { await saveModelCredential(event, provider.id); setEditingKey(null); onModelsChanged?.() }}>
-              <input name="apiKey" type="password" autoFocus autoComplete="new-password" maxLength={4096} placeholder={`${provider.name} API key`} required disabled={credentialDisabled} aria-label={`${provider.name} API key`} />
-              <button className="st-button is-primary" disabled={credentialDisabled}>{working && modelCredentialBusy?.action === "save" ? "Saving…" : "Save"}</button>
-              <button type="button" className="st-button is-quiet" onClick={() => setEditingKey(null)}>Cancel</button>
-            </form>
-          ) : null}
-          {provider.id === "compatible" ? (
-            <form className="st-inline-form" onSubmit={event => void saveCompatible(event)}>
-              <input value={compatibleDraft.url} onChange={event => setCompatibleDraft(draft => ({ ...draft, url: event.target.value }))} placeholder="Endpoint, e.g. http://127.0.0.1:11434/v1" aria-label="Compatible endpoint URL" disabled={compatible?.fromEnvironment || compatibleBusy} />
-              <input className="is-narrow" value={compatibleDraft.model} onChange={event => setCompatibleDraft(draft => ({ ...draft, model: event.target.value }))} placeholder="Model" aria-label="Compatible model" disabled={compatible?.fromEnvironment || compatibleBusy} />
-              <button className="st-button" disabled={compatible?.fromEnvironment || compatibleBusy}>{compatibleBusy ? "Saving…" : "Save"}</button>
-              {compatibleMessage ? <span className="st-hint" role="status">{compatibleMessage}</span> : compatible?.fromEnvironment ? <span className="st-hint">Set by environment variables</span> : null}
-            </form>
-          ) : null}
-        </div>
-      })}
-      <div className="st-row-group">
-        <Row title="GitHub Copilot" description={copilotWaiting && copilotSignIn?.code && copilotSignIn.url
-          ? <>Open <a href={copilotSignIn.url} target="_blank" rel="noreferrer">github.com/login/device</a> and enter <strong>{copilotSignIn.code}</strong></>
-          : "Use your Copilot subscription’s models. Separate from the GitHub CLI account."}>
-          {copilotStatusError ? <Status tone="error">Unavailable</Status> : copilotHealth?.copilotSignedIn ? <Status tone="ok">Signed in</Status> : <Status tone="off">Not signed in</Status>}
-          <button type="button" className="st-button" disabled={authBusy || !copilotHealth || Boolean(copilotStatusError) || sending} onClick={() => void changeCopilotAuth(copilotWaiting ? "cancel" : "start")}>{copilotWaiting ? "Cancel" : copilotHealth?.copilotSignedIn ? "Reconnect" : "Sign in"}</button>
-          {!copilotWaiting && copilotHealth?.copilotSignedIn ? <button type="button" className="st-button is-quiet" disabled={authBusy || sending} onClick={() => void changeCopilotAuth("sign-out")}>Sign out</button> : null}
-        </Row>
-      </div>
-      {modelCredentialActionError || copilotActionError || copilotSignIn?.message ? <Row title={<span className="st-error">{modelCredentialActionError || copilotActionError || copilotSignIn?.message}</span>} /> : null}
-    </Section>
-
-    {detectedAgents.length ? (
-      <Section title="Coding agents on this host" description="Use these instead of ADE’s agent when you start a session. They use their own sign-in and subscription.">
-        {detectedAgents.map(agent => <Row key={agent.id} title={agent.name} description={<code>{agent.command}</code>}><Status tone="ok">Installed</Status></Row>)}
-      </Section>
-    ) : null}
-  </>
+  // --- Providers & Models ---
+  const models = (
+    <ProvidersPanel
+      activeEnvironmentName={activeEnvironmentName}
+      modelCatalog={modelCatalog}
+      selectedProvider={selectedProvider}
+      selectedModel={selectedModel}
+      reasoning={settings.reasoning}
+      reasoningLevels={reasoningLevels}
+      runtime={runtime}
+      connections={connections}
+      sending={sending}
+      credentialChangesBlocked={credentialChangesBlocked}
+      compatible={compatible}
+      compatibleDraft={compatibleDraft}
+      compatibleBusy={compatibleBusy}
+      compatibleMessage={compatibleMessage}
+      onCompatibleDraftChange={setCompatibleDraft}
+      onSaveCompatible={saveCompatible}
+      onSelectDefaultProvider={providerId => update({ provider: providerId, model: "" })}
+      onSelectDefaultModel={(providerId, modelId) => update({ provider: providerId, model: modelId })}
+      onSelectReasoning={level => update({ reasoning: level })}
+      onModelsChanged={onModelsChanged}
+    />
+  )
 
   // --- Agents & permissions ---
   const agents = <>
@@ -646,7 +553,7 @@ export function SettingsView({
     <section className="st-main">
       <header className="st-topbar"><span>Settings</span><span aria-hidden="true">/</span><strong>{selected.label}</strong></header>
       <div className="st-scroll">
-        <div className="st-content">
+        <div className={`st-content ${selectedCategory === "models" ? "is-wide" : ""}`}>
           <h1>{selected.label}</h1>
           <p className="st-lede">{selected.description}</p>
           {error ? <p className="st-banner is-error" role="alert">{error}</p> : null}

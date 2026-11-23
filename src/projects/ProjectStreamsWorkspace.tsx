@@ -7,6 +7,7 @@ import { CalendarClock,
   ChevronRight,
   Columns2,
   FolderGit2,
+  FolderTree,
   GitBranch,
   GitPullRequest,
   KanbanSquare,
@@ -45,7 +46,9 @@ export function ProjectStreamsWorkspace({
   focusedStreamId,
   activity,
   activityError,
+  filesOpen = false,
   settingsOpen,
+  onToggleFiles,
   onToggleSettings,
   onFocusStream,
   onCloseStreamPane,
@@ -62,6 +65,7 @@ export function ProjectStreamsWorkspace({
   onOpenAgent,
   onStartSessionFromIssue,
   onOpenExternal,
+  onSessionContextMenu,
   inboxEntries = {},
 }: {
   project: Project
@@ -72,7 +76,9 @@ export function ProjectStreamsWorkspace({
   focusedStreamId: string | null
   activity: ProjectActivity | null
   activityError: string
+  filesOpen?: boolean
   settingsOpen: boolean
+  onToggleFiles?: () => void
   onToggleSettings: () => void
   onFocusStream: (streamId: string) => void
   onCloseStreamPane: (streamId: string) => void
@@ -90,6 +96,7 @@ export function ProjectStreamsWorkspace({
   onOpenAgent: (sessionId: string, agent: FeatureAgent) => void
   onStartSessionFromIssue?: (issue: ProjectGitHubIssue) => Promise<void>
   onOpenExternal?: (url: string) => void
+  onSessionContextMenu?: (session: Conversation, x: number, y: number) => void
   inboxEntries?: Record<string, InboxEntry>
 }) {
   const [activeTab, setActiveTab] = useState<ProjectTab>("sessions")
@@ -175,16 +182,39 @@ export function ProjectStreamsWorkspace({
           >
             <Plus className="size-3.5" /> New session
           </button>
+          {onToggleFiles ? (
+            <button
+              type="button"
+              className={`ade-icon-btn ${filesOpen ? "bg-[rgb(var(--surface-raised))] text-[rgb(var(--foreground))]" : ""}`}
+              title="Project files"
+              aria-label="Project files"
+              onClick={onToggleFiles}
+            >
+              <FolderTree className="size-4" />
+            </button>
+          ) : null}
           <button
             type="button"
             className={`ade-icon-btn ${settingsOpen ? "bg-[rgb(var(--surface-raised))] text-[rgb(var(--foreground))]" : ""}`}
             title="Project settings"
+            aria-label="Project settings"
             onClick={onToggleSettings}
           >
             <Settings2 className="size-4" />
           </button>
         </div>
       </header>
+
+      {!project.repository && !project.githubUrl && !settingsOpen ? (
+        <div className="flex items-center justify-between gap-3 px-5 py-2.5 border-b border-[rgb(var(--border)/0.7)] bg-[rgb(var(--surface)/0.55)] text-xs">
+          <span className="opacity-75">
+            This project is empty. Link a local folder or GitHub repository in project settings.
+          </span>
+          <button type="button" className="sf-btn-secondary !h-7 shrink-0" onClick={onToggleSettings}>
+            <Settings2 className="size-3.5" /> Configure project
+          </button>
+        </div>
+      ) : null}
 
       <div className="ade-project-tabs-row">
         <nav className="ade-project-tabs" role="tablist" aria-label="Project views">
@@ -249,6 +279,7 @@ export function ProjectStreamsWorkspace({
             onOpenSession={onMaximizeSession}
             onOpenFactoryRun={runId => { onOpenStreamPane(`factory:${runId}`); setSessionView("side") }}
             onQuickStart={onQuickStartStream}
+            onSessionContextMenu={onSessionContextMenu}
           />
         </div>
       ) : null}

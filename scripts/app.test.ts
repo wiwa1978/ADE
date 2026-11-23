@@ -198,6 +198,13 @@ beforeEach(() => {
       const project = { id: body?.id, name: body?.name, githubUrl: body?.githubUrl || null, repository: body?.repository || null }
       projectRecords.push(project)
       payload = { project }
+    } else if (url.startsWith("/api/projects/") && url.endsWith("/scripts")) {
+      const empty = { setup: "", run: "", copy: [], check: "", checkAutoFix: false }
+      payload = { saved: empty, repository: null, effective: { ...empty, source: {} } }
+    } else if (url.startsWith("/api/projects/") && url.endsWith("/secrets")) {
+      payload = { secrets: [] }
+    } else if (url.startsWith("/api/projects/") && url.endsWith("/run-on")) {
+      payload = { target: "local", image: "node:22-bookworm", sshHost: "" }
     } else if (url === "/api/environments" && method === "GET") {
       payload = { activeId: activeEnvironmentId, environments }
     } else if (url.startsWith("/api/sessions/") && url.endsWith("/timeline")) {
@@ -385,4 +392,66 @@ test("3-column ModelPicker searches models across providers, switches thinking l
   const saved = JSON.parse(browser.localStorage.getItem("ade-settings-v1") ?? "{}") as { provider?: string; model?: string }
   assert.equal(saved.provider, "anthropic")
   assert.equal(saved.model, "claude-sonnet-4")
+})
+
+test("Appearance searchable FontPicker filters Google Fonts, loads stylesheet, and persists selection", async () => {
+  await act(async () => root.render(React.createElement(App)))
+
+  await click("Settings")
+  await click("Appearance")
+
+  const trigger = container.querySelector('button[aria-label="Interface font"]')
+  assert.ok(trigger, "Missing Interface font picker trigger")
+  await act(async () => { (trigger as HTMLElement).click() })
+
+  const searchInput = container.querySelector(".st-fp-search-input")
+  assert.ok(searchInput, "Missing FontPicker search input")
+  await act(async () => setInput(searchInput, "Geist"))
+  assert.match(container.textContent ?? "", /Geist/)
+
+  const geistOption = [...container.querySelectorAll(".st-fp-item")].find(el => el.textContent?.includes("Geist"))
+  assert.ok(geistOption, "Missing Geist option")
+  await act(async () => { (geistOption as HTMLElement).click() })
+
+  assert.ok(browser.document.head.querySelector('link[href*="fonts.googleapis.com"][href*="Geist"]'), "Expected Google Fonts link for Geist")
+
+  await click("Apply")
+  const saved = JSON.parse(browser.localStorage.getItem("ade-settings-v1") ?? "{}") as { interfaceFont?: string }
+  assert.match(saved.interfaceFont ?? "", /Geist/)
+})
+
+test("Create Project wizard steps through Environments -> Sources and Skip creates an empty project with right-side settings open", async () => {
+  await act(async () => root.render(React.createElement(App)))
+
+  const addProjectBtn = container.querySelector('button[aria-label="Add project"]')
+  assert.ok(addProjectBtn, "Expected Add project icon button next to sidebar search box")
+  await act(async () => { (addProjectBtn as HTMLElement).click() })
+
+  const dialog = container.querySelector('[role="dialog"][aria-label="Create Project"]')
+  assert.ok(dialog, "Expected Create Project wizard dialog")
+  assert.match(dialog.textContent ?? "", /Environments/)
+  assert.match(dialog.textContent ?? "", /This computer/)
+
+  // Step 1 -> Step 2 (Sources)
+  const envOption = [...dialog.querySelectorAll('[role="option"]')].find(el => el.textContent?.includes("This computer"))
+  assert.ok(envOption, "Expected This computer environment option")
+  await act(async () => { (envOption as HTMLElement).click() })
+  assert.match(dialog.textContent ?? "", /Sources/)
+  assert.match(dialog.textContent ?? "", /Local folder/)
+  assert.match(dialog.textContent ?? "", /Git URL/)
+  assert.match(dialog.textContent ?? "", /GitHub repository/)
+
+  // Click Skip -> creates empty project and opens right-side Project settings
+  const skipBtn = [...dialog.querySelectorAll("button")].find(el => el.textContent?.trim() === "Skip")
+  assert.ok(skipBtn, "Expected Skip button in wizard footer")
+  await act(async () => { (skipBtn as HTMLElement).click() })
+
+  const createReq = requests.find(r => r.url === "/api/projects" && r.method === "POST")
+  assert.ok(createReq, "Expected POST /api/projects request from Skip")
+  assert.equal(createReq.body?.repository, "")
+  assert.equal(createReq.body?.githubUrl, "")
+
+  const rightSettings = container.querySelector("#project-settings")
+  assert.ok(rightSettings, "Expected right-side Project settings panel")
+  assert.equal(rightSettings.hasAttribute("hidden"), false, "Expected right-side Project settings to be open after Skip")
 })

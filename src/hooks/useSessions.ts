@@ -317,9 +317,10 @@ export function useSessions(params: {
     }
   }, [activeSession.id, onError])
 
-  const abortSession = useCallback(async () => {
+  const abortSession = useCallback(async (targetSessionId?: string) => {
+    const id = targetSessionId ?? activeSession.id
     try {
-      await request(`/api/sessions/${encodeURIComponent(activeSession.id)}/abort`, {
+      await request(`/api/sessions/${encodeURIComponent(id)}/abort`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}",

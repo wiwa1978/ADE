@@ -33,17 +33,14 @@ type AppOverlaysProps = {
   onOpenExternalBrowser: (url: string) => void
   onOpenSettings: () => void
   onOpenSettingsSection: (category: SettingsCategory, autoOpenAdd?: boolean) => void
-  onProjectCreated: (saved: Project) => void
+  onProjectCreated: (saved: Project, options?: { openSettings?: boolean }) => void
   onSelectEnvironment: (env: EnvironmentDirectory["environments"][number]) => Promise<void>
   onOpenSplitView: (sess: Conversation) => void
   onOpenExternalApp: (app: "cursor" | "vscode" | "windsurf" | "finder", path?: string | null) => void
   onTogglePin: (id: string) => void
   onToggleUnread: (id: string) => void
   onRenameSession: (sess: Conversation) => void
-  onForkSession: (sess: Conversation) => void
-  onMoveToSection: (sess: Conversation, mode: "coding" | "personal") => void
-  onMoveUnderProject: (sess: Conversation, projectId: string | null) => void
-  onToggleArchiveSession: (id: string) => void
+  onStopSession: (sess: Conversation) => void
   onDeleteSession: (sess: Conversation) => void
   onOpenProjectSettings: (project: Project) => void
   onToggleArchiveProject: (project: Project) => void
@@ -84,10 +81,7 @@ export function AppOverlays({
   onTogglePin,
   onToggleUnread,
   onRenameSession,
-  onForkSession,
-  onMoveToSection,
-  onMoveUnderProject,
-  onToggleArchiveSession,
+  onStopSession,
   onDeleteSession,
   onOpenProjectSettings,
   onToggleArchiveProject,
@@ -117,6 +111,11 @@ export function AppOverlays({
       <AddProjectWizard
         open={addProjectOpen}
         githubLogin={githubLogin}
+        environments={environmentDirectory.environments}
+        activeEnvironmentId={activeEnvironmentId}
+        existingProjectNames={projects.map(p => p.name)}
+        onSelectEnvironment={onSelectEnvironment}
+        onAddHost={() => onOpenSettingsSection("environments", false)}
         onClose={onCloseAddProject}
         onCreated={onProjectCreated}
       />
@@ -127,7 +126,7 @@ export function AppOverlays({
         activeId={activeEnvironmentId}
         onSelect={onSelectEnvironment}
         onManageEnvironments={() => onOpenSettingsSection("environments", false)}
-        onAddHost={() => onOpenSettingsSection("environments", true)}
+        onAddHost={() => onOpenSettingsSection("environments", false)}
         onClose={onCloseEnvPalette}
       />
 
@@ -148,10 +147,7 @@ export function AppOverlays({
         onTogglePin={onTogglePin}
         onToggleUnread={onToggleUnread}
         onRenameSession={onRenameSession}
-        onForkSession={onForkSession}
-        onMoveToSection={onMoveToSection}
-        onMoveUnderProject={onMoveUnderProject}
-        onToggleArchiveSession={onToggleArchiveSession}
+        onStopSession={onStopSession}
         onDeleteSession={onDeleteSession}
         onNewProjectStream={project => onNewSession(project.id)}
         onOpenProjectSettings={onOpenProjectSettings}

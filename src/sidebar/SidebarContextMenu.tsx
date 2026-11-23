@@ -21,10 +21,7 @@ export function SidebarContextMenu({
   onTogglePin,
   onToggleUnread,
   onRenameSession,
-  onForkSession,
-  onMoveToSection,
-  onMoveUnderProject,
-  onToggleArchiveSession,
+  onStopSession,
   onDeleteSession,
   onNewProjectStream,
   onOpenProjectSettings,
@@ -44,10 +41,7 @@ export function SidebarContextMenu({
   onTogglePin: (id: string) => void
   onToggleUnread: (id: string) => void
   onRenameSession: (session: Conversation) => void
-  onForkSession: (session: Conversation) => void
-  onMoveToSection: (session: Conversation, mode: "coding" | "personal") => void
-  onMoveUnderProject: (session: Conversation, projectId: string | null) => void
-  onToggleArchiveSession: (id: string) => void
+  onStopSession: (session: Conversation) => void
   onDeleteSession: (session: Conversation) => void
   onNewProjectStream: (project: Project) => void
   onOpenProjectSettings: (project: Project) => void
@@ -92,7 +86,7 @@ export function SidebarContextMenu({
       const key = e.key.toLowerCase()
       const sess = target.session
       const projectPath = projects.find(p => p.id === sess.projectId)?.repository ?? sess.workspace?.path ?? null
-      if (submenu === "open-in") {
+      if (submenu === "split") {
         if (key === "1") { e.preventDefault(); onOpenSplitView(sess); onClose() }
         else if (key === "2") { e.preventDefault(); onOpenNewWindow(sess); onClose() }
         else if (key === "3") { e.preventDefault(); onOpenExternalApp("cursor", projectPath); onClose() }
@@ -105,9 +99,8 @@ export function SidebarContextMenu({
       if (key === "p") { e.preventDefault(); onTogglePin(sess.id); onClose() }
       else if (key === "u") { e.preventDefault(); onToggleUnread(sess.id); onClose() }
       else if (key === "r") { e.preventDefault(); onRenameSession(sess); onClose() }
-      else if (key === "f") { e.preventDefault(); onForkSession(sess); onClose() }
-      else if (key === "a" && sess.id !== "coding" && sess.id !== "personal") { e.preventDefault(); onToggleArchiveSession(sess.id); onClose() }
-      else if (key === "d") { e.preventDefault(); onDeleteSession(sess); onClose() }
+      else if (key === "s" && sess.status === "working") { e.preventDefault(); onStopSession(sess); onClose() }
+      else if (key === "d" && sess.id !== "coding" && sess.id !== "personal") { e.preventDefault(); onDeleteSession(sess); onClose() }
     }
     window.addEventListener("mousedown", onMouseDown)
     window.addEventListener("keydown", onKeyDown)
@@ -117,8 +110,8 @@ export function SidebarContextMenu({
     }
   }, [
     target, submenu, projects, onClose, onOpenSplitView, onOpenNewWindow, onOpenExternalApp,
-    onContinueInCloud, onTogglePin, onToggleUnread, onRenameSession, onForkSession,
-    onToggleArchiveSession, onDeleteSession,
+    onContinueInCloud, onTogglePin, onToggleUnread, onRenameSession, onStopSession,
+    onDeleteSession,
   ])
 
   if (!target) return null
@@ -151,7 +144,6 @@ export function SidebarContextMenu({
           projects={projects}
           pinned={isPinned(target.session.id)}
           unread={isUnread(target.session.id)}
-          archived={isArchived(target.session.id)}
           submenu={submenu}
           flipSub={pos.flipSub}
           onSetSubmenu={setSubmenu}
@@ -163,10 +155,7 @@ export function SidebarContextMenu({
           onTogglePin={onTogglePin}
           onToggleUnread={onToggleUnread}
           onRenameSession={onRenameSession}
-          onForkSession={onForkSession}
-          onMoveToSection={onMoveToSection}
-          onMoveUnderProject={onMoveUnderProject}
-          onToggleArchiveSession={onToggleArchiveSession}
+          onStopSession={onStopSession}
           onDeleteSession={onDeleteSession}
         />
       )}

@@ -1,10 +1,19 @@
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useRef, useState, type FormEvent } from "react"
 import {
   ArrowUp,
+  Check,
+  ChevronDown,
+  Cpu,
+  FolderGit2,
   FolderOpen,
   FolderPlus,
+  GitBranch,
+  Layers,
   Link2,
+  MessageSquare,
+  Search,
   Server,
+  Settings2,
   Sparkles,
   X,
 } from "lucide-react"
@@ -17,6 +26,7 @@ import { LinearIssuePicker, type LinearIssue } from "./LinearIssuePicker"
 import { runTargetDescriptions, targetLabel, targetUnavailable, useRunTargets, type RunTarget, type TargetSettings } from "../run-targets"
 
 type EngineId = "pi" | "claude-code" | "codex"
+type OpenMenu = null | "project" | "workspace" | "runOn" | "attempts"
 
 type OpenIssueOption = {
   repository: string
@@ -27,11 +37,18 @@ type OpenIssueOption = {
   url: string
 }
 
+const WORKSPACE_OPTIONS: { id: TaskStart["kind"]; label: string; desc: string }[] = [
+  { id: "worktree", label: "New branch", desc: "Isolated Git worktree so your main checkout stays clean" },
+  { id: "checkout", label: "Direct checkout", desc: "Edit files directly in the project's existing checkout" },
+  { id: "none", label: "Chat only", desc: "Conversation without attaching a codebase" },
+]
+
 export function NewSessionView({
   projects,
   selectedProjectId,
   onSelectProject,
   onAddProject,
+  onConfigureProject,
   onOpenEnvironmentPalette,
   environmentName,
   modelCatalog,
@@ -52,6 +69,7 @@ export function NewSessionView({
   selectedProjectId: string | null
   onSelectProject: (id: string | null) => void
   onAddProject?: () => void
+  onConfigureProject?: (projectId: string) => void
   onOpenEnvironmentPalette?: () => void
   environmentName: string
   modelCatalog: ProviderCatalogEntry[]
@@ -79,10 +97,14 @@ export function NewSessionView({
   }) => Promise<void>
   onLookupIssue?: (projectId: string, url: string) => Promise<GitHubIssue>
 }) {
-  const activeProject = projects.find(p => p.id === selectedProjectId) ?? null
+  const unarchivedProjects = projects.filter(p => !p.archivedAt)
+  const activeProject = unarchivedProjects.find(p => p.id === selectedProjectId) ?? null
+  const [sessionTitle, setSessionTitle] = useState("")
   const [kind, setKind] = useState<TaskStart["kind"]>(activeProject?.repository ? "worktree" : "checkout")
   const [repository, setRepository] = useState(activeProject?.repository ?? "")
   const [prompt, setPrompt] = useState("")
+  const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
+  const [projectQuery, setProjectQuery] = useState("")
   const [issueOpen, setIssueOpen] = useState(false)
   const [issueUrl, setIssueUrl] = useState("")
   const [openIssues, setOpenIssues] = useState<OpenIssueOption[]>([])
@@ -92,10 +114,13 @@ export function NewSessionView({
   const [lookingUp, setLookingUp] = useState(false)
   const [startChoice, setStartChoice] = useState<StartChoice>({ mode: "new" })
   const [linearIssue, setLinearIssue] = useState<LinearIssue | null>(null)
-  // Where the session's commands run. Starts from the project's default.
   const [runOn, setRunOn] = useState<RunTarget | null>(null)
   const [projectRunOn, setProjectRunOn] = useState<({ projectId: string } & TargetSettings) | null>(null)
+  const [attemptCount, setAttemptCount] = useState(1)
+
+  const pillBarRef = useRef<HTMLDivElement>(null)
   const runTargets = useRunTargets()
+
   useEffect(() => {
     if (!selectedProjectId) return
     let cancelled = false
@@ -104,24 +129,41 @@ export function NewSessionView({
       .catch(() => undefined)
     return () => { cancelled = true }
   }, [selectedProjectId])
+
+  useEffect(() => {
+    if (!openMenu) return
+    const onPointerDown = (e: MouseEvent) => {
+      if (pillBarRef.current && !pillBarRef.current.contains(e.target as Node)) {
+        setOpenMenu(null)
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpenMenu(null)
+    }
+    document.addEventListener("mousedown", onPointerDown)
+    document.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown)
+      document.removeEventListener("keydown", onKeyDown)
+    }
+  }, [openMenu])
+
   const defaultRunOn = projectRunOn && projectRunOn.projectId === selectedProjectId ? projectRunOn.target : "local"
   const effectiveRunOn = runOn ?? defaultRunOn
-  // Best of N: run the same task several times, each in its own worktree.
-  const [attemptCount, setAttemptCount] = useState(1)
-
   const effectiveRepo = activeProject?.repository || repository
 
-  const handleProjectChange = (nextId: string) => {
-    const id = nextId === "__none__" ? null : nextId
-    onSelectProject(id)
+  const handleProjectChange = (nextId: string | null) => {
+    onSelectProject(nextId)
     setStartChoice({ mode: "new" })
     setRunOn(null)
-    const proj = projects.find(p => p.id === id)
+    const proj = projects.find(p => p.id === nextId)
     setRepository(proj?.repository ?? "")
     setKind(proj?.repository ? "worktree" : "checkout")
     setLinkedIssue(null)
     setOpenIssues([])
     setIssueOpen(false)
+    setOpenMenu(null)
+    setProjectQuery("")
   }
 
   const activeProjectId = activeProject?.id ?? null
@@ -158,7 +200,6 @@ export function NewSessionView({
       })
       if (res.path) setRepository(res.path)
     } catch (err) {
-      // Native OS folder picker is optional on headless/Linux hosts; log for diagnostics.
       console.warn("[ADE] Native folder picker unavailable:", err instanceof Error ? err.message : String(err))
     }
   }
@@ -179,7 +220,6 @@ export function NewSessionView({
     }
   }
 
-  // Starting from existing work: the prompt is optional, the session is named after the branch or PR.
   const canStartFrom = kind === "worktree" && Boolean(activeProject?.repository)
   const startFrom: StartFrom | undefined = !canStartFrom ? undefined
     : startChoice.mode === "branch" && startChoice.branch ? { branch: startChoice.branch }
@@ -190,95 +230,331 @@ export function NewSessionView({
     : startChoice.mode === "pr" && startChoice.number ? `PR #${startChoice.number}${startChoice.title ? `: ${startChoice.title}` : ""}` : undefined
   const canAttempt = kind === "worktree" && startChoice.mode === "new"
   const canSubmit = !starting && !startFromIncomplete && (Boolean(prompt.trim()) || Boolean(startFrom)) && (kind === "none" || Boolean(effectiveRepo.trim()))
+  const needsManualRepo = kind !== "none" && !activeProject?.repository
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
     if (!canSubmit) return
+    const customTitle = sessionTitle.trim()
+    const resolvedTitle = customTitle
+      || startTitle
+      || (linearIssue ? `${linearIssue.identifier}: ${linearIssue.title}` : undefined)
     void onStart({
       projectId: selectedProjectId,
       kind,
       repository: kind === "none" ? "" : effectiveRepo.trim(),
       prompt: prompt.trim(),
       githubIssue: linkedIssue ?? undefined,
-      // The main agent is always the ADE agent (Pi Durable); subagents can use other harnesses.
       engine: "pi",
-      ...(startFrom ? { startFrom, title: startTitle } : linearIssue ? { title: `${linearIssue.identifier}: ${linearIssue.title}` } : {}),
+      ...(startFrom ? { startFrom } : {}),
+      ...(resolvedTitle ? { title: resolvedTitle } : {}),
       ...(kind !== "none" ? { runOn: effectiveRunOn } : {}),
       ...(canAttempt && attemptCount > 1 ? { attempts: Array.from({ length: attemptCount }, () => "pi" as const) } : {}),
     })
   }
 
-  const needsManualRepo = kind !== "none" && !activeProject?.repository
+  const filteredProjects = unarchivedProjects.filter(p => {
+    const q = projectQuery.trim().toLowerCase()
+    if (!q) return true
+    return p.name.toLowerCase().includes(q) || (p.repository ?? "").toLowerCase().includes(q)
+  })
+
+  const workspaceLabel = WORKSPACE_OPTIONS.find(o => o.id === kind)?.label ?? "New branch"
+  const runOnAvailable = runTargets?.available ?? ["local", "docker"]
 
   return (
     <div className="flex flex-1 items-center justify-center overflow-y-auto p-6">
       <div className="w-full max-w-2xl flex flex-col gap-5">
-        {/* Clean Heading */}
+        {/* Quiet, centered header with inline editable session name */}
         <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl grid place-items-center bg-[rgb(var(--primary)/0.14)] text-[rgb(var(--primary))] border border-[rgb(var(--primary)/0.3)] shrink-0">
-              <Sparkles className="size-5" />
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className="w-9 h-9 rounded-xl grid place-items-center bg-[rgb(var(--surface))] text-[rgb(var(--foreground))] border border-[rgb(var(--border))] shrink-0">
+              <Sparkles className="size-4 opacity-80" />
             </div>
-            <div>
-              <h1 className="text-lg font-semibold tracking-tight">New session</h1>
-              <p className="text-xs opacity-65 mt-0.5">
-                An agent works on the task in its own workspace. You review its changes and ship them as a pull request.
+            <div className="flex-1 min-w-0">
+              <input
+                type="text"
+                className="w-full bg-transparent border-0 outline-none text-[17px] font-semibold tracking-tight text-[rgb(var(--foreground))] placeholder:text-[rgb(var(--foreground)/0.9)] focus:placeholder:opacity-45 p-0"
+                placeholder="New session"
+                aria-label="Session name"
+                maxLength={120}
+                value={sessionTitle}
+                onChange={e => setSessionTitle(e.target.value)}
+              />
+              <p className="text-[12.5px] opacity-60 mt-0.5 mb-0">
+                Click the title above to name this session, or describe what you want built.
               </p>
             </div>
           </div>
           {onOpenEnvironmentPalette ? (
-            <button type="button" className="sf-btn-secondary shrink-0" onClick={onOpenEnvironmentPalette} title="Switch environment (Cmd+E)">
-              <Server className="size-3.5 opacity-75" /> {environmentName}
+            <button
+              type="button"
+              className="ade-ns-pill shrink-0"
+              onClick={onOpenEnvironmentPalette}
+              title="Switch environment (Cmd+E)"
+            >
+              <Server className="size-3.5 opacity-70" />
+              <span>{environmentName}</span>
             </button>
           ) : null}
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          {/* Clean Top Context Row: Project + Execution Mode */}
-          <div className="flex flex-col gap-3">
-            <div className="sf-label">
-              <span>Project</span>
-              <div className="flex gap-1.5">
-                <select
-                  className="sf-field flex-1"
-                  value={selectedProjectId ?? "__none__"}
-                  onChange={e => handleProjectChange(e.target.value)}
-                >
-                  <option value="__none__">No project</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-                {onAddProject ? (
-                  <button type="button" className="sf-btn-secondary shrink-0" onClick={onAddProject} title="Add new project">
-                    <FolderPlus className="size-3.5" />
-                  </button>
-                ) : null}
-              </div>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          {/* Compact Inline Context Pill Bar */}
+          <div className="ade-ns-pills" ref={pillBarRef}>
+            {/* Project Picker Pill */}
+            <div className="ade-ns-menu-anchor">
+              <button
+                type="button"
+                className={`ade-ns-pill ${openMenu === "project" ? "is-open" : ""}`}
+                aria-haspopup="listbox"
+                aria-expanded={openMenu === "project"}
+                onClick={() => setOpenMenu(m => (m === "project" ? null : "project"))}
+              >
+                <FolderGit2 className="size-3.5 opacity-70" />
+                <span className="truncate max-w-[180px]">{activeProject ? activeProject.name : "No project"}</span>
+                <ChevronDown className="size-3 opacity-55" />
+              </button>
+
+              {openMenu === "project" ? (
+                <div className="ade-ns-popover" role="dialog" aria-label="Choose project">
+                  {projects.length > 4 ? (
+                    <div className="ade-ns-popover-search">
+                      <Search className="size-3.5 opacity-55 shrink-0" />
+                      <input
+                        type="text"
+                        placeholder="Filter projects…"
+                        value={projectQuery}
+                        onChange={e => setProjectQuery(e.target.value)}
+                        autoFocus
+                      />
+                    </div>
+                  ) : null}
+                  <div className="ade-ns-popover-list">
+                    <button
+                      type="button"
+                      className={`ade-ns-popover-item ${selectedProjectId === null ? "is-selected" : ""}`}
+                      onClick={() => handleProjectChange(null)}
+                    >
+                      <span className="flex-1 truncate">No project</span>
+                      {selectedProjectId === null ? <Check className="size-3.5 text-[rgb(var(--primary))]" /> : null}
+                    </button>
+                    {filteredProjects.map(p => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className={`ade-ns-popover-item ${selectedProjectId === p.id ? "is-selected" : ""}`}
+                        onClick={() => handleProjectChange(p.id)}
+                      >
+                        <span className="flex-1 min-w-0">
+                          <span className="block truncate">{p.name}</span>
+                          {!p.repository ? (
+                            <span className="block text-[10.5px] opacity-55 truncate">Empty project</span>
+                          ) : null}
+                        </span>
+                        {selectedProjectId === p.id ? <Check className="size-3.5 text-[rgb(var(--primary))] shrink-0" /> : null}
+                      </button>
+                    ))}
+                  </div>
+                  {onAddProject ? (
+                    <div className="ade-ns-popover-footer">
+                      <button
+                        type="button"
+                        className="ade-ns-popover-item"
+                        onClick={() => { setOpenMenu(null); onAddProject() }}
+                      >
+                        <FolderPlus className="size-3.5 opacity-75" />
+                        <span>New project…</span>
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
-            <div className="sf-label">
-              <span>Workspace</span>
-              <div className="sf-segmented h-9 w-full justify-between">
-                {(
-                  [
-                    { id: "worktree", label: "Own branch" },
-                    { id: "checkout", label: "Project folder" },
-                    { id: "none", label: "Chat only" },
-                  ] as const
-                ).map(opt => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    className={`sf-seg-btn flex-1 justify-center ${kind === opt.id ? "is-active" : ""}`}
-                    onClick={() => setKind(opt.id)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
+            {/* Workspace Mode Pill */}
+            <div className="ade-ns-menu-anchor">
+              <button
+                type="button"
+                className={`ade-ns-pill ${openMenu === "workspace" ? "is-open" : ""}`}
+                aria-haspopup="listbox"
+                aria-expanded={openMenu === "workspace"}
+                onClick={() => setOpenMenu(m => (m === "workspace" ? null : "workspace"))}
+              >
+                {kind === "worktree" ? <GitBranch className="size-3.5 opacity-70" />
+                  : kind === "checkout" ? <FolderOpen className="size-3.5 opacity-70" />
+                    : <MessageSquare className="size-3.5 opacity-70" />}
+                <span>{workspaceLabel}</span>
+                <ChevronDown className="size-3 opacity-55" />
+              </button>
+
+              {openMenu === "workspace" ? (
+                <div className="ade-ns-popover" role="dialog" aria-label="Workspace mode">
+                  <div className="ade-ns-popover-list">
+                    {WORKSPACE_OPTIONS.map(opt => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        className={`ade-ns-popover-item ${kind === opt.id ? "is-selected" : ""}`}
+                        onClick={() => { setKind(opt.id); setOpenMenu(null) }}
+                      >
+                        <span className="flex-1 min-w-0">
+                          <span className="block font-medium">{opt.label}</span>
+                          <span className="block text-[11px] opacity-60">{opt.desc}</span>
+                        </span>
+                        {kind === opt.id ? <Check className="size-3.5 text-[rgb(var(--primary))] shrink-0" /> : null}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
+
+            {/* Run On Pill */}
+            {kind !== "none" ? (
+              <div className="ade-ns-menu-anchor">
+                <button
+                  type="button"
+                  className={`ade-ns-pill ${openMenu === "runOn" ? "is-open" : ""}`}
+                  aria-haspopup="listbox"
+                  aria-expanded={openMenu === "runOn"}
+                  onClick={() => setOpenMenu(m => (m === "runOn" ? null : "runOn"))}
+                >
+                  <Cpu className="size-3.5 opacity-70" />
+                  <span>{targetLabel(effectiveRunOn)}</span>
+                  <ChevronDown className="size-3 opacity-55" />
+                </button>
+
+                {openMenu === "runOn" ? (
+                  <div className="ade-ns-popover !w-[280px]" role="dialog" aria-label="Run on target">
+                    <div className="ade-ns-popover-list">
+                      {runOnAvailable.map(target => {
+                        const blocked = targetUnavailable(
+                          target,
+                          runTargets,
+                          projectRunOn && projectRunOn.projectId === selectedProjectId ? projectRunOn : { sshHost: "" },
+                        )
+                        const detail =
+                          target === "docker"
+                            ? `${runTargetDescriptions.docker} Image: ${projectRunOn?.image ?? "node:22-bookworm"}.`
+                            : target === "ssh" && projectRunOn?.sshHost
+                              ? `Host: ${projectRunOn.sshHost}`
+                              : runTargetDescriptions[target]
+                        return (
+                          <button
+                            key={target}
+                            type="button"
+                            disabled={Boolean(blocked)}
+                            title={blocked || detail}
+                            className={`ade-ns-popover-item ${effectiveRunOn === target ? "is-selected" : ""}`}
+                            onClick={() => { setRunOn(target); setOpenMenu(null) }}
+                          >
+                            <span className="flex-1 min-w-0">
+                              <span className="block font-medium">{targetLabel(target)}</span>
+                              <span className="block text-[11px] opacity-60 leading-snug">{blocked || detail}</span>
+                            </span>
+                            {effectiveRunOn === target ? <Check className="size-3.5 text-[rgb(var(--primary))] shrink-0" /> : null}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {/* Attempts Pill (Best of N) */}
+            {canAttempt ? (
+              <div className="ade-ns-menu-anchor">
+                <button
+                  type="button"
+                  className={`ade-ns-pill ${openMenu === "attempts" ? "is-open" : ""}`}
+                  aria-haspopup="listbox"
+                  aria-expanded={openMenu === "attempts"}
+                  onClick={() => setOpenMenu(m => (m === "attempts" ? null : "attempts"))}
+                >
+                  <Layers className="size-3.5 opacity-70" />
+                  <span>{attemptCount === 1 ? "1 attempt" : `${attemptCount} attempts`}</span>
+                  <ChevronDown className="size-3 opacity-55" />
+                </button>
+
+                {openMenu === "attempts" ? (
+                  <div className="ade-ns-popover !w-[240px]" role="dialog" aria-label="Attempts">
+                    <div className="ade-ns-popover-list">
+                      {[1, 2, 3].map(count => (
+                        <button
+                          key={count}
+                          type="button"
+                          className={`ade-ns-popover-item ${attemptCount === count ? "is-selected" : ""}`}
+                          onClick={() => { setAttemptCount(count); setOpenMenu(null) }}
+                        >
+                          <span className="flex-1 min-w-0">
+                            <span className="block font-medium">{count === 1 ? "1 attempt" : `${count} parallel attempts`}</span>
+                            <span className="block text-[11px] opacity-60">
+                              {count === 1 ? "Single agent on one branch" : `${count} agents on separate branches`}
+                            </span>
+                          </span>
+                          {attemptCount === count ? <Check className="size-3.5 text-[rgb(var(--primary))] shrink-0" /> : null}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {/* Quick Add Project button */}
+            {onAddProject ? (
+              <button
+                type="button"
+                className="ade-ns-pill ade-ns-pill-quiet"
+                onClick={onAddProject}
+                title="Create a new project"
+              >
+                <FolderPlus className="size-3.5 opacity-70" />
+                <span>New project</span>
+              </button>
+            ) : null}
+
+            {/* GitHub Issue trigger */}
+            {activeProject?.githubUrl && !linkedIssue ? (
+              <button
+                type="button"
+                className="ade-ns-pill ade-ns-pill-quiet"
+                onClick={() => setIssueOpen(v => !v)}
+              >
+                <Link2 className="size-3.5 opacity-70" />
+                <span>Link issue</span>
+              </button>
+            ) : null}
           </div>
+
+          {/* Quiet inline folder attachment bar when the project/session has no folder yet */}
+          {needsManualRepo ? (
+            <div className="ade-ns-folder-bar">
+              <FolderOpen className="size-4 opacity-60 shrink-0" />
+              <input
+                type="text"
+                className="ade-ns-folder-input"
+                placeholder={activeProject ? `Attach a folder to ${activeProject.name}…` : "Choose a local folder path…"}
+                value={repository}
+                onChange={e => setRepository(e.target.value)}
+              />
+              <button type="button" className="sf-btn-secondary !h-7 !text-[12px] shrink-0" onClick={() => void pickFolder()}>
+                Browse…
+              </button>
+              {activeProject && onConfigureProject ? (
+                <button
+                  type="button"
+                  className="sf-btn-ghost !h-7 !text-[12px] shrink-0"
+                  onClick={() => onConfigureProject(activeProject.id)}
+                  title="Open project settings on the right side"
+                >
+                  <Settings2 className="size-3.5" /> Configure
+                </button>
+              ) : null}
+            </div>
+          ) : null}
 
           {canStartFrom && activeProject ? (
             <StartFromPicker
@@ -290,128 +566,58 @@ export function NewSessionView({
             />
           ) : null}
 
-          {kind !== "none" ? (
-            <div className="sf-label">
-              <span>Run on</span>
-              <div className="sf-segmented h-9 w-full justify-between" role="radiogroup" aria-label="Run on">
-                {(runTargets?.available ?? ["local", "docker"]).map(target => {
-                  const blocked = targetUnavailable(target, runTargets, projectRunOn && projectRunOn.projectId === selectedProjectId ? projectRunOn : { sshHost: "" })
-                  return (
-                    <button key={target} type="button" role="radio" aria-checked={effectiveRunOn === target} disabled={Boolean(blocked)}
-                      title={blocked || runTargetDescriptions[target]}
-                      className={`sf-seg-btn flex-1 justify-center ${effectiveRunOn === target ? "is-active" : ""}`} onClick={() => setRunOn(target)}>
-                      {targetLabel(target)}
-                    </button>
-                  )
-                })}
-              </div>
-              <small className="opacity-65">
-                {effectiveRunOn === "docker" ? `${runTargetDescriptions.docker} Image: ${projectRunOn?.image ?? "node:22-bookworm"}.`
-                  : effectiveRunOn === "ssh" ? `${runTargetDescriptions.ssh} Host: ${projectRunOn?.sshHost}.`
-                    : runTargetDescriptions[effectiveRunOn]}
-              </small>
+          {/* Linked GitHub Issue / Picker */}
+          {linkedIssue ? (
+            <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[rgb(var(--primary)/0.45)] bg-[rgb(var(--primary)/0.1)] text-xs">
+              <span className="truncate">
+                <strong className="font-mono">#{linkedIssue.number}</strong> {linkedIssue.title}
+              </span>
+              <button type="button" className="sf-btn-ghost !h-6 !px-1.5" onClick={() => setLinkedIssue(null)}>
+                <X className="size-3.5" />
+              </button>
             </div>
-          ) : null}
-
-          {canAttempt ? (
-            <div className="sf-label">
-              <span>Attempts</span>
-              <div className="ade-attempts-row">
-                <div className="sf-segmented h-9" role="radiogroup" aria-label="Attempts">
-                  {[1, 2, 3].map(count => (
-                    <button key={count} type="button" role="radio" aria-checked={attemptCount === count}
-                      className={`sf-seg-btn justify-center ${attemptCount === count ? "is-active" : ""}`} style={{ minWidth: 44 }}
-                      onClick={() => setAttemptCount(count)}>
-                      {count}
+          ) : issueOpen && activeProject?.githubUrl ? (
+            <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3 flex flex-col gap-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold">Import GitHub Issue</span>
+                <button type="button" className="sf-btn-ghost !h-6 !px-1.5" onClick={() => setIssueOpen(false)}>
+                  <X className="size-3.5" />
+                </button>
+              </div>
+              {loadingIssues ? (
+                <div className="opacity-65 py-2">Loading open issues…</div>
+              ) : openIssues.length > 0 ? (
+                <div className="max-h-36 overflow-y-auto divide-y divide-[rgb(var(--border)/0.5)] rounded-lg border border-[rgb(var(--border)/0.7)] bg-[rgb(var(--background))]">
+                  {openIssues.map(iss => (
+                    <button
+                      key={iss.number}
+                      type="button"
+                      className="w-full px-3 py-2 text-left hover:bg-[rgb(var(--surface-raised))] flex items-center gap-2"
+                      onClick={() => {
+                        setLinkedIssue({ ...iss, truncated: false })
+                        if (!prompt.trim()) setPrompt(`Implement #${iss.number}: ${iss.title}\n\n${iss.body}`)
+                        setIssueOpen(false)
+                      }}
+                    >
+                      <span className="font-mono opacity-60">#{iss.number}</span>
+                      <span className="truncate">{iss.title}</span>
                     </button>
                   ))}
                 </div>
-                <small className="opacity-65">{attemptCount === 1 ? "One agent on one branch." : `${attemptCount} agents work on the same task, each on its own branch. Compare the results and keep the best.`}</small>
-              </div>
-            </div>
-          ) : null}
-
-          {/* Only ask for a manual local path if the project doesn't have one yet */}
-          {needsManualRepo ? (
-            <div className="sf-label">
-              <span>Local Git Repository Path</span>
+              ) : null}
               <div className="flex gap-2">
                 <input
                   type="text"
-                  className="sf-field flex-1"
-                  placeholder="/Users/you/Code/my-project"
-                  value={repository}
-                  onChange={e => setRepository(e.target.value)}
+                  className="sf-field !h-8 flex-1"
+                  placeholder="Or paste issue URL (https://github.com/owner/repo/issues/123)"
+                  value={issueUrl}
+                  onChange={e => setIssueUrl(e.target.value)}
                 />
-                <button type="button" className="sf-btn-secondary" onClick={() => void pickFolder()}>
-                  <FolderOpen className="size-3.5" /> Browse…
+                <button type="button" className="sf-btn-secondary !h-8" disabled={lookingUp || !issueUrl.trim()} onClick={() => void handleLookupIssue()}>
+                  {lookingUp ? "Loading…" : "Load"}
                 </button>
               </div>
-            </div>
-          ) : null}
-
-          {/* Optional GitHub Issue Picker (loads real open issues from project!) */}
-          {activeProject?.githubUrl ? (
-            <div className="flex flex-col gap-2">
-              {linkedIssue ? (
-                <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[rgb(var(--primary)/0.45)] bg-[rgb(var(--primary)/0.1)] text-xs">
-                  <span className="truncate">
-                    <strong className="font-mono">#{linkedIssue.number}</strong> {linkedIssue.title}
-                  </span>
-                  <button type="button" className="sf-btn-ghost !h-6 !px-1.5" onClick={() => setLinkedIssue(null)}>
-                    <X className="size-3.5" />
-                  </button>
-                </div>
-              ) : !issueOpen ? (
-                <div>
-                  <button type="button" className="sf-btn-secondary" onClick={() => setIssueOpen(true)}>
-                    <Link2 className="size-3.5" /> Import GitHub issue from {activeProject.githubUrl.replace(/^https:\/\/github\.com\//i, "")}
-                  </button>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3 flex flex-col gap-2 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold">Import GitHub Issue</span>
-                    <button type="button" className="sf-btn-ghost !h-6 !px-1.5" onClick={() => setIssueOpen(false)}>
-                      <X className="size-3.5" />
-                    </button>
-                  </div>
-                  {loadingIssues ? (
-                    <div className="opacity-65 py-2">Loading open issues…</div>
-                  ) : openIssues.length > 0 ? (
-                    <div className="max-h-36 overflow-y-auto divide-y divide-[rgb(var(--border)/0.5)] rounded-lg border border-[rgb(var(--border)/0.7)] bg-[rgb(var(--background))]">
-                      {openIssues.map(iss => (
-                        <button
-                          key={iss.number}
-                          type="button"
-                          className="w-full px-3 py-2 text-left hover:bg-[rgb(var(--surface-raised))] flex items-center gap-2"
-                          onClick={() => {
-                            setLinkedIssue({ ...iss, truncated: false })
-                            if (!prompt.trim()) setPrompt(`Implement #${iss.number}: ${iss.title}\n\n${iss.body}`)
-                            setIssueOpen(false)
-                          }}
-                        >
-                          <span className="font-mono opacity-60">#{iss.number}</span>
-                          <span className="truncate">{iss.title}</span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      className="sf-field !h-8 flex-1"
-                      placeholder="Or paste issue URL (https://github.com/owner/repo/issues/123)"
-                      value={issueUrl}
-                      onChange={e => setIssueUrl(e.target.value)}
-                    />
-                    <button type="button" className="sf-btn-secondary !h-8" disabled={lookingUp || !issueUrl.trim()} onClick={() => void handleLookupIssue()}>
-                      {lookingUp ? "Loading…" : "Load"}
-                    </button>
-                  </div>
-                  {issueError ? <div className="text-rose-400">{issueError}</div> : null}
-                </div>
-              )}
+              {issueError ? <div className="text-rose-400">{issueError}</div> : null}
             </div>
           ) : null}
 
@@ -425,10 +631,10 @@ export function NewSessionView({
           />
 
           {/* Main Task Prompt Composer */}
-          <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] focus-within:border-[rgb(var(--primary))] transition-colors overflow-hidden">
+          <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] focus-within:border-[rgb(var(--primary)/0.75)] transition-colors overflow-hidden">
             <textarea
               className="w-full bg-transparent border-0 outline-none resize-none px-4 pt-3.5 pb-2 text-[13.5px] leading-relaxed text-[rgb(var(--foreground))]"
-              rows={4}
+              rows={5}
               placeholder={startFrom ? "Optional: what should the agent do on this branch? Leave empty to just open it." : "Describe the task. Enter to start, Shift+Enter for a new line."}
               value={prompt}
               onChange={e => setPrompt(e.target.value)}
@@ -439,7 +645,7 @@ export function NewSessionView({
                 }
               }}
             />
-            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 border-t border-[rgb(var(--border)/0.65)] bg-[rgb(var(--surface-raised)/0.5)]">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 border-t border-[rgb(var(--border)/0.65)] bg-[rgb(var(--surface-raised)/0.45)]">
               <div className="flex items-center gap-2">
                 <ModelPicker
                   catalog={modelCatalog}

@@ -2,7 +2,7 @@ import { ChevronRight } from "lucide-react"
 import type { Conversation } from "../../app-types"
 import type { Project } from "../../ProjectsView"
 
-export type SubmenuKind = "open-in" | "section" | "under" | null
+export type SubmenuKind = "open-in" | "copy" | "split" | null
 
 const EXTERNAL_APPS = [
   ["cursor", "Cursor", "3"],
@@ -10,6 +10,22 @@ const EXTERNAL_APPS = [
   ["windsurf", "Windsurf", "5"],
   ["finder", "Finder", "6"],
 ] as const
+
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    // Fallback when Clipboard API is restricted.
+    const el = document.createElement("textarea")
+    el.value = text
+    el.style.position = "fixed"
+    el.style.opacity = "0"
+    document.body.appendChild(el)
+    el.select()
+    document.execCommand("copy")
+    el.remove()
+  }
+}
 
 export function ProjectContextMenuItems({
   project,
@@ -90,7 +106,6 @@ export function SessionContextMenuItems({
   projects,
   pinned,
   unread,
-  archived,
   submenu,
   flipSub,
   onSetSubmenu,
@@ -102,17 +117,13 @@ export function SessionContextMenuItems({
   onTogglePin,
   onToggleUnread,
   onRenameSession,
-  onForkSession,
-  onMoveToSection,
-  onMoveUnderProject,
-  onToggleArchiveSession,
+  onStopSession,
   onDeleteSession,
 }: {
   sess: Conversation
   projects: Project[]
   pinned: boolean
   unread: boolean
-  archived: boolean
   submenu: SubmenuKind
   flipSub: boolean
   onSetSubmenu: (next: SubmenuKind | ((prev: SubmenuKind) => SubmenuKind)) => void
@@ -124,28 +135,97 @@ export function SessionContextMenuItems({
   onTogglePin: (id: string) => void
   onToggleUnread: (id: string) => void
   onRenameSession: (session: Conversation) => void
-  onForkSession: (session: Conversation) => void
-  onMoveToSection: (session: Conversation, mode: "coding" | "personal") => void
-  onMoveUnderProject: (session: Conversation, projectId: string | null) => void
-  onToggleArchiveSession: (id: string) => void
+  onStopSession: (session: Conversation) => void
   onDeleteSession: (session: Conversation) => void
 }) {
   const canDelete = sess.id !== "coding" && sess.id !== "personal"
   const canRename = sess.id !== "coding" && sess.id !== "personal"
+  const isWorking = sess.status === "working"
   const workspacePath = projects.find(p => p.id === sess.projectId)?.repository ?? sess.workspace?.path ?? null
+  const branchName = sess.workspace?.branch ?? null
+  const sessionUrl = `${window.location.origin}${window.location.pathname}?session=${encodeURIComponent(sess.id)}`
 
   return (
     <>
+      <button
+        type="button"
+        className="ade-ctx-item"
+        role="menuitem"
+        disabled={!canRename}
+        style={!canRename ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
+        onMouseEnter={() => onSetSubmenu(null)}
+        onClick={() => { if (canRename) { onRenameSession(sess); onClose() } }}
+      >
+        <span>Rename</span>
+      </button>
+
+      <button
+        type="button"
+        className="ade-ctx-item"
+        role="menuitem"
+        onMouseEnter={() => onSetSubmenu(null)}
+        onClick={() => { onTogglePin(sess.id); onClose() }}
+      >
+        <span>{pinned ? "Unpin" : "Pin"}</span>
+        <span className="ade-ctx-shortcut">⌥⌘P</span>
+      </button>
+
+      <button
+        type="button"
+        className="ade-ctx-item"
+        role="menuitem"
+        onMouseEnter={() => onSetSubmenu(null)}
+        onClick={() => { onToggleUnread(sess.id); onClose() }}
+      >
+        <span>{unread ? "Mark Read" : "Mark Unread"}</span>
+      </button>
+
+      <div className="ade-ctx-divider" />
+
       <div
-        className={`ade-ctx-item ${submenu === "open-in" ? "is-open" : ""}`}
+        className={`ade-ctx-item ${submenu === "copy" ? "is-open" : ""}`}
         role="menuitem"
         tabIndex={0}
-        onMouseEnter={() => onSetSubmenu("open-in")}
-        onClick={() => onSetSubmenu(s => (s === "open-in" ? null : "open-in"))}
+        onMouseEnter={() => onSetSubmenu("copy")}
+        onClick={() => onSetSubmenu(s => (s === "copy" ? null : "copy"))}
       >
-        <span>Open in</span>
+        <span>Copy</span>
         <ChevronRight className="size-3.5 opacity-60" />
-        {submenu === "open-in" ? (
+        {submenu === "copy" ? (
+          <div className={`ade-ctx-submenu ${flipSub ? "align-left" : ""}`} onClick={e => e.stopPropagation()}>
+            <button type="button" className="ade-ctx-item" onClick={() => { void copyToClipboard(sess.label); onClose() }}>
+              <span>Session name</span>
+            </button>
+            <button type="button" className="ade-ctx-item" onClick={() => { void copyToClipboard(sess.id); onClose() }}>
+              <span>Session ID</span>
+            </button>
+            {branchName ? (
+              <button type="button" className="ade-ctx-item" onClick={() => { void copyToClipboard(branchName); onClose() }}>
+                <span>Branch name</span>
+              </button>
+            ) : null}
+            {workspacePath ? (
+              <button type="button" className="ade-ctx-item" onClick={() => { void copyToClipboard(workspacePath); onClose() }}>
+                <span>Folder path</span>
+              </button>
+            ) : null}
+            <button type="button" className="ade-ctx-item" onClick={() => { void copyToClipboard(sessionUrl); onClose() }}>
+              <span>Session link</span>
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      <div
+        className={`ade-ctx-item ${submenu === "split" ? "is-open" : ""}`}
+        role="menuitem"
+        tabIndex={0}
+        onMouseEnter={() => onSetSubmenu("split")}
+        onClick={() => onSetSubmenu(s => (s === "split" ? null : "split"))}
+      >
+        <span>Split</span>
+        <ChevronRight className="size-3.5 opacity-60" />
+        {submenu === "split" ? (
           <div className={`ade-ctx-submenu ${flipSub ? "align-left" : ""}`} onClick={e => e.stopPropagation()}>
             <button type="button" className="ade-ctx-item" onClick={() => { onOpenSplitView(sess); onClose() }}>
               <span>Split view</span>
@@ -164,10 +244,9 @@ export function SessionContextMenuItems({
               </button>
             ))}
             <div className="ade-ctx-divider" />
-            <div className="ade-ctx-section-label">Continue in</div>
             <button type="button" className="ade-ctx-item" onClick={() => { onContinueInCloud(sess); onClose() }}>
               <div>
-                <div>Cloud</div>
+                <div>Continue in Cloud</div>
                 <span className="ade-ctx-item-sub">Runs without your computer</span>
               </div>
               <span className="ade-ctx-shortcut">7</span>
@@ -178,101 +257,17 @@ export function SessionContextMenuItems({
 
       <div className="ade-ctx-divider" />
 
-      <button type="button" className="ade-ctx-item" role="menuitem" onMouseEnter={() => onSetSubmenu(null)} onClick={() => { onTogglePin(sess.id); onClose() }}>
-        <span>{pinned ? "Unpin" : "Pin"}</span>
-        <span className="ade-ctx-shortcut">P</span>
-      </button>
-
-      <button type="button" className="ade-ctx-item" role="menuitem" onMouseEnter={() => onSetSubmenu(null)} onClick={() => { onToggleUnread(sess.id); onClose() }}>
-        <span>{unread ? "Mark as read" : "Mark as unread"}</span>
-        <span className="ade-ctx-shortcut">U</span>
-      </button>
-
       <button
         type="button"
         className="ade-ctx-item"
         role="menuitem"
-        disabled={!canRename}
-        style={!canRename ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
+        disabled={!isWorking}
+        style={!isWorking ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
         onMouseEnter={() => onSetSubmenu(null)}
-        onClick={() => { if (canRename) { onRenameSession(sess); onClose() } }}
+        onClick={() => { if (isWorking) { onStopSession(sess); onClose() } }}
       >
-        <span>Rename</span>
-        <span className="ade-ctx-shortcut">R</span>
+        <span>Stop</span>
       </button>
-
-      <button type="button" className="ade-ctx-item" role="menuitem" onMouseEnter={() => onSetSubmenu(null)} onClick={() => { onForkSession(sess); onClose() }}>
-        <span>Fork</span>
-        <span className="ade-ctx-shortcut">F</span>
-      </button>
-
-      <div className="ade-ctx-divider" />
-
-      <div
-        className={`ade-ctx-item ${submenu === "section" ? "is-open" : ""}`}
-        role="menuitem"
-        tabIndex={0}
-        onMouseEnter={() => onSetSubmenu("section")}
-        onClick={() => onSetSubmenu(s => (s === "section" ? null : "section"))}
-      >
-        <span>Move to section</span>
-        <ChevronRight className="size-3.5 opacity-60" />
-        {submenu === "section" ? (
-          <div className={`ade-ctx-submenu ${flipSub ? "align-left" : ""}`} onClick={e => e.stopPropagation()}>
-            <button type="button" className="ade-ctx-item" onClick={() => { onMoveToSection(sess, "coding"); onClose() }}>
-              <span>Coding chats</span>
-              {sess.mode === "coding" ? <span className="ade-ctx-shortcut">✓</span> : null}
-            </button>
-            <button type="button" className="ade-ctx-item" onClick={() => { onMoveToSection(sess, "personal"); onClose() }}>
-              <span>Personal chats</span>
-              {sess.mode === "personal" ? <span className="ade-ctx-shortcut">✓</span> : null}
-            </button>
-          </div>
-        ) : null}
-      </div>
-
-      <div
-        className={`ade-ctx-item ${submenu === "under" ? "is-open" : ""}`}
-        role="menuitem"
-        tabIndex={0}
-        onMouseEnter={() => onSetSubmenu("under")}
-        onClick={() => onSetSubmenu(s => (s === "under" ? null : "under"))}
-      >
-        <span>Move under</span>
-        <ChevronRight className="size-3.5 opacity-60" />
-        {submenu === "under" ? (
-          <div className={`ade-ctx-submenu ${flipSub ? "align-left" : ""}`} onClick={e => e.stopPropagation()}>
-            <div className="ade-ctx-section-label">Projects</div>
-            {projects.length === 0 ? (
-              <div className="px-2.5 py-1.5 text-[11.5px] opacity-60">No projects yet</div>
-            ) : (
-              projects.map(p => (
-                <button key={p.id} type="button" className="ade-ctx-item" onClick={() => { onMoveUnderProject(sess, p.id); onClose() }}>
-                  <span className="ade-truncate">{p.name}</span>
-                  {sess.projectId === p.id ? <span className="ade-ctx-shortcut">✓</span> : null}
-                </button>
-              ))
-            )}
-            {sess.projectId ? (
-              <>
-                <div className="ade-ctx-divider" />
-                <button type="button" className="ade-ctx-item" onClick={() => { onMoveUnderProject(sess, null); onClose() }}>
-                  <span>Ungrouped</span>
-                </button>
-              </>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-
-      <div className="ade-ctx-divider" />
-
-      {canDelete ? (
-        <button type="button" className="ade-ctx-item" role="menuitem" onMouseEnter={() => onSetSubmenu(null)} onClick={() => { onToggleArchiveSession(sess.id); onClose() }}>
-          <span>{archived ? "Restore" : "Archive"}</span>
-          <span className="ade-ctx-shortcut">A</span>
-        </button>
-      ) : null}
 
       <button
         type="button"
@@ -284,7 +279,6 @@ export function SessionContextMenuItems({
         onClick={() => { if (canDelete) { onDeleteSession(sess); onClose() } }}
       >
         <span>Delete</span>
-        <span className="ade-ctx-shortcut">D</span>
       </button>
     </>
   )

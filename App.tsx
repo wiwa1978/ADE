@@ -58,7 +58,7 @@ function AppInner() {
   const [expandedProjects, setExpandedProjects] = useState<string[]>(() =>
     Array.isArray(lastView.expandedProjects) ? lastView.expandedProjects.filter(id => typeof id === "string") : [],
   )
-  const [projectSettingsOpen, setProjectSettingsOpen] = useState(false)
+  const [projectRightPane, setProjectRightPane] = useState<"files" | "settings" | null>("files")
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>("general")
   const [settingsAutoOpenAddEnv, setSettingsAutoOpenAddEnv] = useState(false)
   const [envPaletteOpen, setEnvPaletteOpen] = useState(false)
@@ -187,12 +187,15 @@ function AppInner() {
     }
   }, [settings.restoreLastView, screen, activeSessionId, selectedProjectId, expandedProjects])
 
-  // Keyboard shortcuts: Cmd+K (Command Center), Alt+L (focus composer).
+  // Keyboard shortcuts: Cmd+K (Command Center), Option+Cmd+P (Pin active session), Alt+L (focus composer).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "k") {
         e.preventDefault()
         setCommandOpen(v => !v)
+      } else if ((e.metaKey || e.ctrlKey) && e.altKey && e.key.toLowerCase() === "p") {
+        e.preventDefault()
+        if (sess.activeSession?.id) sess.togglePin(sess.activeSession.id)
       } else if (e.altKey && e.key.toLowerCase() === "l") {
         e.preventDefault()
         composerRef.current?.focus()
@@ -200,7 +203,7 @@ function AppInner() {
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [])
+  }, [sess])
 
   const openSettingsSection = useCallback((category: SettingsCategory, autoOpenAdd = false) => {
     previousScreen.current = screen
@@ -213,7 +216,7 @@ function AppInner() {
     proj.setProjectsError("")
     setSelectedProjectId(projectId)
     expandProject(projectId)
-    setProjectSettingsOpen(openSettings)
+    setProjectRightPane(openSettings ? "settings" : "files")
     setScreen("project")
   }, [proj, expandProject])
 
@@ -322,7 +325,7 @@ function AppInner() {
         projectDrafts={proj.projectDrafts}
         projectActivity={proj.projectActivity}
         projectActivityError={proj.projectActivityError}
-        projectSettingsOpen={projectSettingsOpen}
+        projectRightPane={projectRightPane}
         factoryRuns={proj.factoryRuns}
         openStreamIdsByProject={proj.openStreamIdsByProject}
         focusedStreamId={proj.focusedStreamId}
@@ -351,8 +354,10 @@ function AppInner() {
         onProjectSaved={proj.upsertProject}
         onSaveProject={proj.saveProject}
         onSetProjectDraft={(projectId, draftInput) => proj.setProjectDrafts(prev => ({ ...prev, [projectId]: draftInput }))}
-        onToggleProjectSettings={() => setProjectSettingsOpen(v => !v)}
-        onCloseProjectSettings={() => setProjectSettingsOpen(false)}
+        onSetProjectRightPane={setProjectRightPane}
+        onToggleProjectSettings={() => setProjectRightPane(v => (v === "settings" ? null : "settings"))}
+        onToggleProjectFiles={() => setProjectRightPane(v => (v === "files" ? null : "files"))}
+        onCloseProjectSettings={() => setProjectRightPane(null)}
         onFocusStream={proj.setFocusedStreamId}
         onCloseStreamPane={proj.closeStreamPane}
         onOpenStreamPane={proj.openStreamPane}
@@ -387,6 +392,7 @@ function AppInner() {
         onBackFromAttempts={() => setScreen("inbox")}
         onReloadSessions={sess.loadSessions}
         onArchiveAttempt={id => sess.toggleArchive(id, false)}
+        onSessionContextMenu={(session, x, y) => setContextMenu({ kind: "session", session, x, y })}
       />
 
       <AppOverlays
@@ -409,14 +415,14 @@ function AppInner() {
         onCloseAddProject={() => setAddProjectOpen(false)}
         onCloseEnvPalette={() => setEnvPaletteOpen(false)}
         onCloseContextMenu={() => setContextMenu(null)}
-        onSelectProjectFromCommand={id => { setSelectedProjectId(id); setProjectSettingsOpen(true); setScreen("project") }}
+        onSelectProjectFromCommand={id => { setSelectedProjectId(id); setProjectRightPane("settings"); setScreen("project") }}
         onSelectSession={openSessionInWork}
         onNewSession={projectId => { if (projectId) setSelectedProjectId(projectId); setNewSessionOpen(true); setScreen("work") }}
         onOpenPanel={tab => { setNewSessionOpen(false); setScreen("work"); setExternalOpenRequest(tab) }}
         onOpenExternalBrowser={url => void stream.openExternalBrowser(url)}
         onOpenSettings={() => { previousScreen.current = screen; setScreen("settings") }}
         onOpenSettingsSection={openSettingsSection}
-        onProjectCreated={saved => { proj.upsertProject(saved); openProject(saved.id, false) }}
+        onProjectCreated={(saved, opts) => { proj.upsertProject(saved); openProject(saved.id, Boolean(opts?.openSettings)) }}
         onSelectEnvironment={env.selectEnvironment}
         onOpenSplitView={s => {
           sess.clearUnread(s.id)
@@ -432,10 +438,7 @@ function AppInner() {
         onTogglePin={sess.togglePin}
         onToggleUnread={sess.toggleUnread}
         onRenameSession={s => { setRenamingId(s.id); setRenameText(s.label) }}
-        onForkSession={s => void sess.forkSession(s)}
-        onMoveToSection={(s, mode) => void sess.moveSession(s, { mode })}
-        onMoveUnderProject={(s, projectId) => void sess.moveSession(s, { projectId })}
-        onToggleArchiveSession={id => void sess.toggleArchive(id)}
+        onStopSession={s => void sess.abortSession(s.id)}
         onDeleteSession={s => void sess.deleteSession(s)}
         onOpenProjectSettings={project => openProject(project.id, true)}
         onToggleArchiveProject={project => void sess.toggleArchive(`project:${project.id}`)}

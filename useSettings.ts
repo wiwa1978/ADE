@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { isColorPalette, isTheme, paletteVariables, type ColorPalette, type Theme } from "./appearance-palettes"
+import { ensureGoogleFontLoaded } from "./src/appearance/fonts"
 
 export type Settings = {
   theme: Theme
@@ -128,6 +129,8 @@ export function useSettings() {
     const codeFont = settings.codeFont.trim()
       ? settings.codeFont
       : '"SFMono-Regular",Menlo,Monaco,Consolas,"Liberation Mono",monospace'
+    ensureGoogleFontLoaded(interfaceFont)
+    ensureGoogleFontLoaded(codeFont)
     // Interface size scales the whole app (most of the UI uses fixed pixel sizes), like zooming
     // in an editor. Chat and code sizes are then divided by the zoom, so they land on exactly the
     // pixel size chosen.

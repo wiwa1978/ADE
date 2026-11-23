@@ -18,6 +18,7 @@ export function AddProjectSourceFields({
   gitUrl,
   localPath,
   detectedGh,
+  showInitGit = false,
   initGitIfMissing,
   showBrowser,
   dirState,
@@ -50,6 +51,7 @@ export function AddProjectSourceFields({
   gitUrl: string
   localPath: string
   detectedGh: string | null
+  showInitGit?: boolean
   initGitIfMissing: boolean
   showBrowser: boolean
   dirState: DirBrowserState | null
@@ -143,21 +145,46 @@ export function AddProjectSourceFields({
       {source === "local" ? (
         <>
           <div className="sf-label">
-            <span>Local Folder or Repository</span>
-            <div className="flex gap-2">
-              <input
-                className="sf-field flex-1"
-                placeholder="/Users/you/Code/my-project"
-                value={localPath}
-                onChange={e => onLocalPathChange(e.target.value)}
-                onBlur={() => { if (localPath.trim()) onDetectRemote(localPath.trim()) }}
-                autoFocus
-              />
-              <button type="button" className="sf-btn-secondary" onClick={() => onPickFolderNative("local")}>
-                <FolderOpen className="size-3.5" /> Browse…
-              </button>
-              <button type="button" className="sf-btn-ghost" onClick={onToggleBrowser}>Tree</button>
-            </div>
+            <span>Select Folder</span>
+            {!localPath ? (
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  className="ade-wizard-add-folder-btn"
+                  disabled={busy}
+                  onClick={() => onPickFolderNative("local")}
+                >
+                  <FolderOpen className="size-4 opacity-80" />
+                  <span>+ Add Folder</span>
+                </button>
+                <div className="flex items-center gap-2">
+                  <input
+                    className="sf-field flex-1"
+                    placeholder="Or paste a path, e.g. /Users/you/Code/my-project"
+                    value={localPath}
+                    onChange={e => onLocalPathChange(e.target.value)}
+                    onBlur={() => { if (localPath.trim()) onDetectRemote(localPath.trim()) }}
+                  />
+                  <button type="button" className="sf-btn-ghost shrink-0" onClick={onToggleBrowser}>
+                    Browse tree
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  className="sf-field flex-1"
+                  placeholder="/Users/you/Code/my-project"
+                  value={localPath}
+                  onChange={e => onLocalPathChange(e.target.value)}
+                  onBlur={() => { if (localPath.trim()) onDetectRemote(localPath.trim()) }}
+                />
+                <button type="button" className="sf-btn-secondary" onClick={() => onPickFolderNative("local")}>
+                  <FolderOpen className="size-3.5" /> Change…
+                </button>
+                <button type="button" className="sf-btn-ghost" onClick={onToggleBrowser}>Tree</button>
+              </div>
+            )}
             {detectedGh ? (
               <span className="text-[11px] text-emerald-400">
                 Detected GitHub remote: <code>{detectedGh}</code>
@@ -197,10 +224,12 @@ export function AddProjectSourceFields({
             </div>
           ) : null}
 
-          <label className="flex items-center gap-2 text-xs cursor-pointer">
-            <input type="checkbox" checked={initGitIfMissing} onChange={e => onInitGitChange(e.target.checked)} />
-            <span>Run <code>git init</code> automatically if this folder is not a Git repository yet</span>
-          </label>
+          {showInitGit ? (
+            <label className="flex items-center gap-2 text-xs cursor-pointer">
+              <input type="checkbox" checked={initGitIfMissing} onChange={e => onInitGitChange(e.target.checked)} />
+              <span>Run <code>git init</code> automatically if this folder is not a Git repository yet</span>
+            </label>
+          ) : null}
         </>
       ) : null}
 

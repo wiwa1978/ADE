@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Inbox, PanelLeft, Plus, Search, Settings2 } from "lucide-react"
+import { FolderPlus, Inbox, PanelLeft, Search, Settings2 } from "lucide-react"
 import type { Conversation, RuntimeHealth } from "../../app-types"
 import type { Project } from "../../ProjectsView"
 import type { FactoryRunDetail } from "../factory/types"
@@ -83,8 +83,8 @@ export function AppSidebar(props: AppSidebarProps) {
         <button type="button" className="ade-icon-btn" onClick={props.onOpenCommandCenter} title="Search (⌘K)" aria-label="Search">
           <Search className="size-4" />
         </button>
-        <button type="button" className="ade-icon-btn" onClick={() => props.onOpenNewSession()} title="New session" aria-label="New session">
-          <Plus className="size-4" />
+        <button type="button" className="ade-icon-btn" onClick={props.onOpenAddProject} title="Add project" aria-label="Add project">
+          <FolderPlus className="size-4" />
         </button>
         <button type="button" className="ade-icon-btn relative" onClick={props.onOpenInbox} title="Inbox" aria-label={`Inbox, ${props.inboxCount} need you`}>
           <Inbox className="size-4" />

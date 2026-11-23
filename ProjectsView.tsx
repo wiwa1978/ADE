@@ -1,5 +1,5 @@
 import { useEffect, useId, useState, type FormEvent, type KeyboardEvent } from "react"
-import { ArrowLeft, ArrowUpRight, FolderGit2, GitBranch, PanelRight, Plus } from "lucide-react"
+import { ArrowLeft, ArrowUpRight, FolderGit2, FolderOpen, GitBranch, PanelRight, Plus } from "lucide-react"
 import { request } from "./api"
 import type { FeatureAgent } from "./FeatureAgents"
 import { BUILTIN_BLUEPRINTS } from "./packages/blueprints/index.ts"
@@ -360,9 +360,40 @@ export function ProjectSettings({ project, open, initialDraft, githubConnection,
     } finally { setSaving(false) }
   }
 
+  async function pickLocalFolder() {
+    try {
+      const res = await request<{ path: string | null }>("/api/system/pick-folder", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      })
+      if (!res.path) return
+      setRepository(res.path)
+      if (!githubUrl.trim()) {
+        try {
+          const detected = await request<{ githubRepo: string | null }>("/api/projects/detect-git", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ path: res.path }),
+          })
+          if (detected.githubRepo) setGithubUrl(detected.githubRepo)
+        } catch {
+          // Non-git folder or no remote; keep folder path as-is.
+        }
+      }
+    } catch {
+      // Native picker unavailable on headless hosts.
+    }
+  }
+
   return <aside id="project-settings" className="inspector project-settings" aria-labelledby="project-settings-title" hidden={!open}>
     <div className="panel-title"><h2 id="project-settings-title">Project settings</h2><button className="icon-button" aria-label="Close project settings" onClick={onClose}><PanelRight size={16} /></button></div>
     <form className="project-form" onSubmit={save}>
+      {!project.repository && !project.githubUrl ? (
+        <div className="rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2 text-[12px] leading-relaxed opacity-85">
+          Empty project — pick a local folder or link a GitHub repository below to finish setup.
+        </div>
+      ) : null}
       <div className="project-environment-label"><span>Environment</span><strong>{environmentName ?? "This computer"}</strong><small>New sessions inherit this project’s environment.</small></div>
       <label>Project name<input value={name} onChange={event => setName(event.target.value)} maxLength={100} required disabled={saving} /></label>
       <div className="project-field">
@@ -377,7 +408,13 @@ export function ProjectSettings({ project, open, initialDraft, githubConnection,
         {project.githubUrl && <a className="text-button project-link" href={project.githubUrl} target="_blank" rel="noreferrer">Open on GitHub <ArrowUpRight size={13} /></a>}
       </div>
       <div className="project-field">
-        <label>Default local checkout <small>Optional</small><input value={repository} onChange={event => setRepository(event.target.value)} placeholder="/Users/you/Code/your-repository" aria-describedby="project-checkout-hint" disabled={saving} /></label>
+        <label htmlFor="project-local-checkout">Default local checkout <small>Optional</small></label>
+        <div className="flex items-center gap-1.5" style={{ marginTop: 6 }}>
+          <input id="project-local-checkout" className="flex-1 min-w-0" value={repository} onChange={event => setRepository(event.target.value)} placeholder="/Users/you/Code/your-repository" aria-describedby="project-checkout-hint" disabled={saving} />
+          <button type="button" className="sf-btn-secondary !h-8 shrink-0" disabled={saving} onClick={() => void pickLocalFolder()} title="Browse for a local folder">
+            <FolderOpen className="size-3.5" /> Browse
+          </button>
+        </div>
         <p id="project-checkout-hint" className="hint">Applies to new sessions and Factory runs.</p>
       </div>
       <div className="project-field">

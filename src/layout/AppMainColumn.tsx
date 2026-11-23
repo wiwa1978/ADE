@@ -1,7 +1,8 @@
 import type { RefObject } from "react"
 import { InboxView } from "../inbox/InboxView"
 import { sessionStateInfo, type InboxEntry } from "../session-state"
-import { Sparkles } from "lucide-react"
+import { FolderTree, PanelRight, Settings2, Sparkles } from "lucide-react"
+import { FilesPanel } from "../panels/FilesPanel"
 import { request } from "../../api"
 import type { Conversation, EnvironmentDirectory, GitHubIssue, StartFrom, ProviderCatalogEntry, RuntimeHealth, Screen, SessionArtifact, WorkspaceTab } from "../../app-types"
 import { ProjectSettings, ProjectsView, type Project, type ProjectActivity, type ProjectInput } from "../../ProjectsView"
@@ -45,7 +46,7 @@ type AppMainColumnProps = {
   projectDrafts: Record<string, ProjectInput>
   projectActivity: ProjectActivity | null
   projectActivityError: string
-  projectSettingsOpen: boolean
+  projectRightPane: "files" | "settings" | null
   factoryRuns: FactoryRunDetail[]
   openStreamIdsByProject: Record<string, string[]>
   focusedStreamId: string | null
@@ -74,6 +75,8 @@ type AppMainColumnProps = {
   onProjectSaved: (saved: Project) => void
   onSaveProject: (input: ProjectInput, existingId?: string) => Promise<Project>
   onSetProjectDraft: (projectId: string, draftInput: ProjectInput) => void
+  onSetProjectRightPane: (pane: "files" | "settings" | null) => void
+  onToggleProjectFiles: () => void
   onToggleProjectSettings: () => void
   onCloseProjectSettings: () => void
   onFocusStream: (streamId: string | null) => void
@@ -113,6 +116,7 @@ type AppMainColumnProps = {
   onBackFromAttempts: () => void
   onReloadSessions: () => Promise<void>
   onArchiveAttempt: (sessionId: string) => Promise<void>
+  onSessionContextMenu?: (session: Conversation, x: number, y: number) => void
 }
 
 export function AppMainColumn(props: AppMainColumnProps) {
@@ -142,7 +146,7 @@ export function AppMainColumn(props: AppMainColumnProps) {
     projectDrafts,
     projectActivity,
     projectActivityError,
-    projectSettingsOpen,
+    projectRightPane,
     factoryRuns,
     openStreamIdsByProject,
     focusedStreamId,
@@ -257,7 +261,9 @@ export function AppMainColumn(props: AppMainColumnProps) {
             focusedStreamId={focusedStreamId}
             activity={projectActivity}
             activityError={projectActivityError}
-            settingsOpen={projectSettingsOpen}
+            filesOpen={projectRightPane === "files"}
+            settingsOpen={projectRightPane === "settings"}
+            onToggleFiles={props.onToggleProjectFiles}
             onToggleSettings={props.onToggleProjectSettings}
             onFocusStream={props.onFocusStream}
             onCloseStreamPane={streamId => props.onCloseStreamPane(selectedProject.id, streamId)}
@@ -277,6 +283,7 @@ export function AppMainColumn(props: AppMainColumnProps) {
             onFactoryRunAction={props.onFactoryRunAction}
             onUnarchiveSession={props.onUnarchiveSession}
             inboxEntries={props.inboxEntries}
+            onSessionContextMenu={props.onSessionContextMenu}
             onOpenExternal={url => void stream.openExternalBrowser(url)}
             onStartSessionFromIssue={async issue => {
               const kind = selectedProject.repository ? settings.defaultWorkspaceKind : "none"
@@ -294,12 +301,55 @@ export function AppMainColumn(props: AppMainColumnProps) {
               props.onOpenExternalRequest({ id: `subagent:${agent.id}`, kind: "subagent", title: agent.name, subagentId: agent.id })
             }}
           />
+          <aside
+            id="project-files-panel"
+            className="inspector ade-project-files-inspector"
+            aria-label="Project files"
+            hidden={projectRightPane !== "files"}
+          >
+            <div className="ade-project-right-head">
+              <div className="ade-project-right-tabs" role="tablist" aria-label="Right panel view">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={true}
+                  className="ade-project-right-tab is-active"
+                >
+                  <FolderTree className="size-3.5" /> Files
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={false}
+                  className="ade-project-right-tab"
+                  onClick={() => props.onSetProjectRightPane("settings")}
+                >
+                  <Settings2 className="size-3.5" /> Settings
+                </button>
+              </div>
+              <button
+                type="button"
+                className="ade-icon-btn"
+                aria-label="Close project files"
+                title="Close panel"
+                onClick={props.onCloseProjectSettings}
+              >
+                <PanelRight className="size-4" />
+              </button>
+            </div>
+            <FilesPanel
+              key={selectedProject.id}
+              projectId={selectedProject.id}
+              workspacePath={selectedProject.repository ?? null}
+              onOpenSettings={() => props.onSetProjectRightPane("settings")}
+            />
+          </aside>
           <ProjectSettings
             key={selectedProject.id}
             project={selectedProject}
             environmentName={activeEnvironmentName}
             initialDraft={projectDrafts[selectedProject.id]}
-            open={projectSettingsOpen}
+            open={projectRightPane === "settings"}
             githubConnection={connections.githubConnection}
             githubStatusError={connections.githubStatusError}
             onOpenSettings={draftInput => {
@@ -331,10 +381,11 @@ export function AppMainColumn(props: AppMainColumnProps) {
         </div>
       ) : newSessionOpen ? (
         <NewSessionView
-          projects={projects}
+          projects={visibleProjects}
           selectedProjectId={selectedProjectId}
           onSelectProject={props.onSelectProject}
           onAddProject={props.onOpenAddProject}
+          onConfigureProject={projectId => props.onOpenProject(projectId, true)}
           onOpenEnvironmentPalette={props.onOpenEnvironmentPalette}
           environmentName={activeEnvironmentName}
           modelCatalog={effectiveCatalog}

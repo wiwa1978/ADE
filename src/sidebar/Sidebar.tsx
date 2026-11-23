@@ -1,4 +1,4 @@
-import { Archive, ChevronDown, ChevronRight, Folder, FolderGit2, GitBranch, Inbox, MessageCircle, MessageSquare, PanelLeft, Pin, Plus, Search, Server, Settings2, Workflow } from "lucide-react"
+import { Archive, ChevronDown, ChevronRight, Folder, FolderGit2, FolderPlus, GitBranch, Inbox, MessageCircle, MessageSquare, PanelLeft, Pin, Plus, Search, Server, Settings2, Workflow } from "lucide-react"
 import type { Conversation } from "../../app-types"
 import type { FactoryRunDetail } from "../factory/types"
 import type { Project } from "../../ProjectsView"
@@ -126,15 +126,28 @@ export function Sidebar(props: SidebarProps) {
 
       <div className="ade-sidebar-scroll">
         <div className="ade-nav-list ade-nav-primary">
-          <button type="button" className="ade-nav-row" onClick={props.onSearch} title="Search sessions, projects, and commands">
-            <Search className="size-3.5 shrink-0 opacity-75" />
-            <span className="flex-1">Search</span>
-            <kbd className="ade-nav-kbd">⌘K</kbd>
-          </button>
-          <button type="button" className={`ade-nav-row ${selection.kind === "new-session" ? "is-selected" : ""}`} onClick={() => props.onNewSession()}>
-            <Plus className="size-3.5 shrink-0 opacity-75" />
-            <span className="flex-1">New session</span>
-          </button>
+          <div className="ade-sidebar-search-row">
+            <button
+              type="button"
+              className="ade-sidebar-search-box"
+              onClick={props.onSearch}
+              title="Search projects, sessions, and commands (⌘K)"
+              aria-label="Search"
+            >
+              <Search className="size-3.5 shrink-0 opacity-65" />
+              <span className="flex-1 text-left truncate opacity-70">Search…</span>
+              <kbd className="ade-nav-kbd">⌘K</kbd>
+            </button>
+            <button
+              type="button"
+              className="ade-sidebar-add-btn"
+              onClick={props.onAddProject}
+              title="Add project"
+              aria-label="Add project"
+            >
+              <FolderPlus className="size-4" />
+            </button>
+          </div>
           <button type="button" className={`ade-nav-row ${selection.kind === "inbox" ? "is-selected" : ""}`} onClick={props.onOpenInbox}>
             <Inbox className="size-3.5 shrink-0 opacity-75" />
             <span className="flex-1">Inbox</span>

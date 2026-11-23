@@ -1,3 +1,4 @@
+import { notFound } from "../http-error.ts";
 import type { Router } from "../router.ts";
 import { discoverSkillsAndRules } from "../skills.ts";
 import {
@@ -43,13 +44,24 @@ export function registerWorkspaceRoutes(router: Router, { host, worktreeManager 
 		{ originError: "Use ADE to create a worktree." },
 	);
 
+	const resolveTreeRoot = (ctx: Parameters<Parameters<Router["get"]>[1]>[0]): string => {
+		const projectId = ctx.url.searchParams.get("projectId") ?? "";
+		if (projectId) {
+			const project = host.projects().find((p) => p.id === projectId);
+			if (!project) throw notFound("Project not found.");
+			if (!project.repository) throw notFound("This project has no local folder configured.");
+			return project.repository;
+		}
+		return ctx.requireWorkspace(ctx.url.searchParams.get("sessionId") ?? "");
+	};
+
 	router.get("/api/workspace/tree", (ctx) => {
-		const workspace = ctx.requireWorkspace(ctx.url.searchParams.get("sessionId") ?? "");
+		const workspace = resolveTreeRoot(ctx);
 		ctx.json(200, { entries: listWorkspaceDirectory(workspace, ctx.url.searchParams.get("path") ?? ".") });
 	});
 
 	router.get("/api/workspace/file", (ctx) => {
-		const workspace = ctx.requireWorkspace(ctx.url.searchParams.get("sessionId") ?? "");
+		const workspace = resolveTreeRoot(ctx);
 		ctx.json(200, readWorkspaceFile(workspace, ctx.url.searchParams.get("path") ?? ""));
 	});
 

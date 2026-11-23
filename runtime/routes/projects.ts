@@ -50,9 +50,13 @@ export function registerProjectRoutes(router: Router, { host, githubRepositories
 		"/api/projects/detect-git",
 		async (ctx) => {
 			const input = validateProjectDetectGit(await ctx.readBody());
-			const resolved = await resolveCheckout(input.path);
-			const githubRepo = await detectGitHubRemoteFromCheckout(resolved);
-			ctx.json(200, { repository: resolved, githubRepo });
+			try {
+				const resolved = await resolveCheckout(input.path);
+				const githubRepo = await detectGitHubRemoteFromCheckout(resolved);
+				ctx.json(200, { isGitRepo: true, repository: resolved, githubRepo });
+			} catch {
+				ctx.json(200, { isGitRepo: false, repository: input.path, githubRepo: null });
+			}
 		},
 		{ originError: "Use ADE to detect Git metadata." },
 	);

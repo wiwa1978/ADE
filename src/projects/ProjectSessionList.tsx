@@ -13,6 +13,7 @@ export function ProjectSessionList({
   onOpenSession,
   onOpenFactoryRun,
   onQuickStart,
+  onSessionContextMenu,
 }: {
   projectName: string
   sessions: Conversation[]
@@ -21,6 +22,7 @@ export function ProjectSessionList({
   onOpenSession: (sessionId: string) => void
   onOpenFactoryRun: (runId: string) => void
   onQuickStart: (prompt: string) => Promise<void>
+  onSessionContextMenu?: (session: Conversation, x: number, y: number) => void
 }) {
   const [prompt, setPrompt] = useState("")
   const [starting, setStarting] = useState(false)
@@ -69,7 +71,15 @@ export function ProjectSessionList({
             const info = sessionStateInfo[state]
             return (
               <li key={session.id}>
-                <button type="button" onClick={() => onOpenSession(session.id)}>
+                <button
+                  type="button"
+                  onClick={() => onOpenSession(session.id)}
+                  onContextMenu={event => {
+                    if (!onSessionContextMenu) return
+                    event.preventDefault()
+                    onSessionContextMenu(session, event.clientX, event.clientY)
+                  }}
+                >
                   <span className={`ade-state-dot is-${info.tone}`} aria-hidden="true" />
                   <span className="ade-inbox-main">
                     <strong className="ade-truncate">{session.label}</strong>
