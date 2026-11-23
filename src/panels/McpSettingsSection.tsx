@@ -10,6 +10,7 @@ export function McpAndSecuritySettings({
   onRefreshMcp,
   onChangeApprovalPolicy,
   onDeleteApprovalRule,
+  onAddApprovalRule,
 }: {
   mcpServers: McpServerStatus[]
   approvalPolicy: ApprovalPolicy
@@ -17,7 +18,11 @@ export function McpAndSecuritySettings({
   onRefreshMcp: () => void
   onChangeApprovalPolicy: (policy: ApprovalPolicy) => Promise<void>
   onDeleteApprovalRule: (id: string) => Promise<void>
+  onAddApprovalRule?: (prefix: string, effect: "allow" | "deny") => Promise<void>
 }) {
+  const [rulePrefix, setRulePrefix] = useState("")
+  const [ruleEffect, setRuleEffect] = useState<"allow" | "deny">("deny")
+  const [ruleError, setRuleError] = useState("")
   const [name, setName] = useState("")
   const [transport, setTransport] = useState<"stdio" | "http">("stdio")
   const [command, setCommand] = useState("")
@@ -105,13 +110,36 @@ export function McpAndSecuritySettings({
           ))}
         </div>
 
+        <p className="ade-muted ade-xs">Rules apply to the ADE agent. <strong>Always allow</strong> skips the approval prompt; <strong>Always block</strong> stops the command under every policy, including Full auto. A rule matches commands that start with it.</p>
+        {onAddApprovalRule ? (
+          <form
+            className="ade-rule-form"
+            onSubmit={event => {
+              event.preventDefault()
+              const prefix = rulePrefix.trim()
+              if (!prefix) return
+              setRuleError("")
+              void onAddApprovalRule(prefix, ruleEffect).then(() => setRulePrefix("")).catch((err: unknown) => setRuleError(err instanceof Error ? err.message : "Could not add the rule."))
+            }}
+          >
+            <select aria-label="Rule effect" value={ruleEffect} onChange={event => setRuleEffect(event.target.value as "allow" | "deny")}>
+              <option value="deny">Always block</option>
+              <option value="allow">Always allow</option>
+            </select>
+            <input aria-label="Command prefix" placeholder="git push" value={rulePrefix} onChange={event => setRulePrefix(event.target.value)} spellCheck={false} />
+            <button type="submit" className="ade-chip-btn" disabled={!rulePrefix.trim()}>Add rule</button>
+          </form>
+        ) : null}
+        {ruleError ? <p className="ade-muted ade-xs" role="alert">{ruleError}</p> : null}
+
         {approvalRules.length > 0 ? (
           <div className="ade-rules-list">
             {approvalRules.map(rule => (
               <div key={rule.id} className="ade-rule-row">
                 <div>
-                  <span className="ade-pill">{rule.toolName}</span>{" "}
+                  <span className={`ade-pill ${rule.effect === "deny" ? "is-deny" : ""}`}>{rule.effect === "deny" ? "Block" : "Allow"}</span>{" "}
                   <code>{rule.prefix}</code>
+                  {rule.toolName !== "run_command" ? <span className="ade-muted ade-xs"> · {rule.toolName}</span> : null}
                 </div>
                 <button type="button" className="ade-icon-btn" onClick={() => void onDeleteApprovalRule(rule.id)} title="Remove rule">
                   <Trash2 className="size-3.5" />
@@ -120,7 +148,7 @@ export function McpAndSecuritySettings({
             ))}
           </div>
         ) : (
-          <p className="ade-muted ade-xs">No saved always-allow prefix rules yet.</p>
+          <p className="ade-muted ade-xs">No rules yet. Approving a command with “Always allow” also adds one here.</p>
         )}
       </section>
 

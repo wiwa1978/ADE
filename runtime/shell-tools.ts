@@ -8,6 +8,7 @@ import type { ManagedProcessSummary } from "../packages/protocol/index.ts";
 import type { RuntimeEventBus } from "./events.ts";
 import { isErrorCode, logger } from "./log.ts";
 import { conflict, notFound } from "./http-error.ts";
+import { redact, secretEnv } from "./project-secrets.ts";
 
 export type { ManagedProcessSummary };
 
@@ -115,7 +116,7 @@ export class ProcessManager {
 		const invocation = buildShellInvocation(opts.command, opts.cwd, Boolean(opts.sandbox));
 		const child = spawn(invocation.file, invocation.args, {
 			cwd: opts.cwd,
-			env: { ...process.env, TERM: "dumb", CI: "1" },
+			env: { ...process.env, ...secretEnv(opts.cwd), TERM: "dumb", CI: "1" },
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		const proc: ManagedProcess = {
@@ -136,8 +137,10 @@ export class ProcessManager {
 		this.#emitUpdate(opts.sessionId);
 
 		let lastEmit = 0;
+		// Project secrets are in the environment; keep their values out of the transcript.
+		const secrets = secretEnv(opts.cwd);
 		const append = (buf: Buffer) => {
-			const text = buf.toString("utf8");
+			const text = redact(buf.toString("utf8"), secrets);
 			proc.output = trimOutput(proc.output + text);
 			proc.outputTail = proc.output.slice(-4000);
 			opts.onChunk?.(text);
@@ -161,6 +164,7 @@ export class ProcessManager {
 				resolve({ exitCode: -1, output: proc.output });
 			});
 			child.once("close", (code) => {
+				proc.output = redact(proc.output, secrets);
 				if (proc.status === "running") proc.status = "exited";
 				proc.exitCode = code;
 				proc.endedAt = Date.now();

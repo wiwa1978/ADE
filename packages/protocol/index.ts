@@ -594,6 +594,8 @@ export type ApprovalRule = {
   toolName: string;
   prefix: string;
   createdAt: number;
+  /** "allow" skips the approval prompt; "deny" always blocks. */
+  effect?: "allow" | "deny";
 };
 
 export type ManagedProcessSummary = {

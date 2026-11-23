@@ -257,6 +257,8 @@ export function BesidePane({
             onOpenExternal={url => void onOpenExternalBrowser(url)}
             onOpenProjectSettings={onOpenProjectSettings}
             onStatusChange={onRunStatusChange}
+            onAskAgent={onAskAgent}
+            agentBusy={agentBusy}
           />
         ) : null}
 

@@ -12,6 +12,7 @@ import type {
 } from "./packages/protocol/index.ts"
 import { ProjectScriptsSettings } from "./src/projects/ProjectScriptsSettings"
 import { ProjectInstructionsSettings } from "./src/projects/ProjectInstructionsSettings"
+import { ProjectSecretsSettings } from "./src/projects/ProjectSecretsSettings"
 
 export type { GitHubConnection, GitHubRepository, GitHubRepositoryPage, Project, ProjectInput }
 type Feature = { id: string; label: string; status: string; workspace?: { kind: string; branch: string | null; status: string } }
@@ -405,6 +406,7 @@ export function ProjectSettings({ project, open, initialDraft, githubConnection,
       <div className="form-actions"><button className="action-button" disabled={saving || !dirty || !name.trim()}>{saving ? "Saving…" : "Save changes"}</button>{saved && !dirty && <span className="hint" role="status">Saved</span>}</div>
     </form>
     <ProjectScriptsSettings projectId={project.id} />
+    <ProjectSecretsSettings projectId={project.id} />
     {project.repository ? <ProjectInstructionsSettings projectId={project.id} /> : null}
   </aside>
 }

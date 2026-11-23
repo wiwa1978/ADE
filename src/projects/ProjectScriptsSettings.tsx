@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { request } from "../../api"
 
-type Scripts = { setup: string; run: string; copy: string[] }
+type Scripts = { setup: string; run: string; copy: string[]; check: string; checkAutoFix: boolean }
 type ScriptsResponse = { saved: Scripts; repository: Scripts | null; effective: Scripts & { source: Record<string, string> } }
 
 /** Project settings section for the setup and run scripts used by every session in the project. */
@@ -10,6 +10,8 @@ export function ProjectScriptsSettings({ projectId }: { projectId: string }) {
   const [setup, setSetup] = useState("")
   const [run, setRun] = useState("")
   const [copy, setCopy] = useState("")
+  const [check, setCheck] = useState("")
+  const [checkAutoFix, setCheckAutoFix] = useState(false)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
 
@@ -21,11 +23,13 @@ export function ProjectScriptsSettings({ projectId }: { projectId: string }) {
       setSetup(result.saved.setup)
       setRun(result.saved.run)
       setCopy(result.saved.copy.join("\n"))
+      setCheck(result.saved.check ?? "")
+      setCheckAutoFix(Boolean(result.saved.checkAutoFix))
     }).catch(() => setMessage("Could not load the project's scripts."))
     return () => { active = false }
   }, [projectId])
 
-  const dirty = data ? setup !== data.saved.setup || run !== data.saved.run || copy.trim() !== data.saved.copy.join("\n") : false
+  const dirty = data ? setup !== data.saved.setup || run !== data.saved.run || copy.trim() !== data.saved.copy.join("\n") || check !== (data.saved.check ?? "") || checkAutoFix !== Boolean(data.saved.checkAutoFix) : false
 
   const save = async () => {
     setSaving(true)
@@ -34,7 +38,7 @@ export function ProjectScriptsSettings({ projectId }: { projectId: string }) {
       const result = await request<ScriptsResponse>(`/api/projects/${encodeURIComponent(projectId)}/scripts`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ setup, run, copy: copy.split("\n").map(line => line.trim()).filter(Boolean) }),
+        body: JSON.stringify({ setup, run, copy: copy.split("\n").map(line => line.trim()).filter(Boolean), check, checkAutoFix }),
       })
       setData(result)
       setMessage("Saved. New sessions use these scripts.")
@@ -60,6 +64,14 @@ export function ProjectScriptsSettings({ projectId }: { projectId: string }) {
       <label>Run — starts the app from a session’s Run button
         <textarea rows={2} value={run} onChange={event => setRun(event.target.value)} placeholder={repo?.run || "npm run dev -- --port $PORT"} spellCheck={false} disabled={!data || saving} />
         <small className="hint">Each session gets its own free port in <code>$PORT</code>; the first URL the script prints opens in the session’s browser.</small>
+      </label>
+      <label>Check — runs after every agent turn
+        <textarea rows={2} value={check} onChange={event => setCheck(event.target.value)} placeholder={repo?.check || "npm run lint && npm test"} spellCheck={false} disabled={!data || saving} />
+        <small className="hint">A hook for lint, typecheck or tests. The result shows in the session header and its Run panel.</small>
+      </label>
+      <label className="project-scripts-check">
+        <input type="checkbox" checked={checkAutoFix} onChange={event => setCheckAutoFix(event.target.checked)} disabled={!data || saving} />
+        Send failures back to the agent automatically (at most twice in a row)
       </label>
       {repo ? <p className="hint">This repository has an <code>.ade/project.json</code>; empty fields here use its values (shown as placeholders).</p>
         : <p className="hint">Tip: commit these as <code>.ade/project.json</code> to share them with your team.</p>}

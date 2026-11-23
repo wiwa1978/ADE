@@ -379,6 +379,15 @@ export function useRuntimeStream(opts: {
     setApprovalRules(res.rules ?? [])
   }, [])
 
+  const addApprovalRule = useCallback(async (prefix: string, effect: "allow" | "deny") => {
+    const res = await request<{ rules: ApprovalRule[] }>("/api/approvals/rules", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ toolName: "run_command", prefix, effect }),
+    })
+    setApprovalRules(res.rules ?? [])
+  }, [])
+
   const killProcess = useCallback(async (id: string) => {
     await request(`/api/processes/${encodeURIComponent(id)}/kill`, {
       method: "POST",
@@ -455,6 +464,7 @@ export function useRuntimeStream(opts: {
     resolveApproval,
     setApprovalPolicy,
     deleteApprovalRule,
+    addApprovalRule,
     killProcess,
     messageSubagent,
     stopSubagent,

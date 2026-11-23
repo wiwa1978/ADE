@@ -25,6 +25,9 @@ export type RouteDeps = {
 	githubRepositories: ReturnType<typeof createGitHubRepositories>;
 	sessionGit: ReturnType<typeof createSessionGit>;
 	usage: import("../usage.ts").UsageTracker;
+	secrets: import("../project-secrets.ts").ProjectSecrets;
+	sendToAgent: ReturnType<typeof import("../agent-workflow.ts").createAgentWorkflow>["sendToAgent"];
+	runCheck: (sessionId: string) => void;
 	cleanUpArchivedWorkspace: (
 		session: { id: string; workspace: string | null; repository: string | null; kind: string | null },
 		removeWorktreeRequested: boolean,

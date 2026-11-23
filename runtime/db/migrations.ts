@@ -193,6 +193,14 @@ export const HOST_MIGRATIONS: readonly SchemaMigration[] = [
 			ensureColumn(db, "coding_tasks", "existingBranch", "INTEGER NOT NULL DEFAULT 0");
 		},
 	},
+	{
+		version: 3,
+		name: "approval_rules_effect",
+		up(db) {
+			// Rules can now block commands outright ("deny"), not only skip the approval prompt ("allow").
+			ensureColumn(db, "approval_rules", "effect", "TEXT NOT NULL DEFAULT 'allow'");
+		},
+	},
 ];
 
 export const LATEST_HOST_SCHEMA_VERSION = HOST_MIGRATIONS[HOST_MIGRATIONS.length - 1].version;

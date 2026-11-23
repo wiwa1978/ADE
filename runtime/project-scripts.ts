@@ -11,9 +11,18 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync
 import { createServer } from "node:net";
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import type { RuntimeEventBus } from "./events.ts";
+import { redact, secretEnv } from "./project-secrets.ts";
 
-export type ProjectScripts = { setup: string; run: string; copy: string[] };
-export type ScriptKind = "setup" | "run";
+export type ProjectScripts = {
+	setup: string;
+	run: string;
+	copy: string[];
+	/** Hook: runs in the workspace after every agent turn that changed files (lint, typecheck, tests). */
+	check: string;
+	/** Send a failing check's output back to the agent automatically (at most twice in a row). */
+	checkAutoFix: boolean;
+};
+export type ScriptKind = "setup" | "run" | "check";
 export type ScriptStatus = "idle" | "running" | "succeeded" | "failed" | "stopped";
 export type ScriptState = {
 	kind: ScriptKind;
@@ -31,14 +40,14 @@ const MAX_OUTPUT = 200_000;
 const URL_PATTERN = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/[^\s"'<>]*)?/i;
 
 function emptyScripts(): ProjectScripts {
-	return { setup: "", run: "", copy: [] };
+	return { setup: "", run: "", copy: [], check: "", checkAutoFix: false };
 }
 
 function sanitize(input: unknown): ProjectScripts {
 	const value = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
 	const text = (field: unknown) => typeof field === "string" ? field.slice(0, 4000) : "";
 	const copy = Array.isArray(value.copy) ? value.copy.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map(item => item.trim()).slice(0, 50) : [];
-	return { setup: text(value.setup), run: text(value.run), copy };
+	return { setup: text(value.setup), run: text(value.run), copy, check: text(value.check), checkAutoFix: value.checkAutoFix === true };
 }
 
 /** Free TCP port on loopback, so each session's dev server gets its own. */
@@ -109,14 +118,17 @@ export class ProjectScriptStore {
 	}
 
 	/** Effective scripts: each field from ADE's settings, else from the repository file. */
-	effective(projectId: string, repository: string | null): ProjectScripts & { source: { setup: string; run: string; copy: string } } {
+	effective(projectId: string, repository: string | null): ProjectScripts & { source: { setup: string; run: string; copy: string; check: string } } {
 		const saved = this.saved(projectId);
 		const repo = this.fromRepository(repository) ?? emptyScripts();
 		return {
 			setup: saved.setup || repo.setup,
 			run: saved.run || repo.run,
 			copy: saved.copy.length ? saved.copy : repo.copy,
+			check: saved.check || repo.check,
+			checkAutoFix: saved.check ? saved.checkAutoFix : repo.checkAutoFix,
 			source: {
+				check: saved.check ? "ade" : repo.check ? "repository" : "none",
 				setup: saved.setup ? "ade" : repo.setup ? "repository" : "none",
 				run: saved.run ? "ade" : repo.run ? "repository" : "none",
 				copy: saved.copy.length ? "ade" : repo.copy.length ? "repository" : "none",
@@ -145,10 +157,10 @@ export class ScriptRunner {
 	}
 
 	#emit(sessionId: string) {
-		this.#events?.emit("processes.update", { sessionId, scripts: { setup: this.state(sessionId, "setup").status, run: this.state(sessionId, "run").status } }, sessionId);
+		this.#events?.emit("processes.update", { sessionId, scripts: { setup: this.state(sessionId, "setup").status, run: this.state(sessionId, "run").status, check: this.state(sessionId, "check").status } }, sessionId);
 	}
 
-	async start(sessionId: string, kind: ScriptKind, command: string, cwd: string, extraEnv: Record<string, string> = {}): Promise<ScriptState> {
+	async start(sessionId: string, kind: ScriptKind, command: string, cwd: string, extraEnv: Record<string, string> = {}, onFinish?: (state: ScriptState) => void): Promise<ScriptState> {
 		if (!command.trim()) throw Object.assign(new Error(`No ${kind} script is configured for this project. Add one in the project's settings.`), { statusCode: 400 });
 		const key = this.#key(sessionId, kind);
 		if (this.#children.has(key)) throw Object.assign(new Error(`The ${kind} script is already running.`), { statusCode: 409 });
@@ -157,16 +169,17 @@ export class ScriptRunner {
 		this.#states.set(key, state);
 		const shell = process.platform === "win32" ? this.#environment.COMSPEC || "cmd.exe" : this.#environment.SHELL || "/bin/sh";
 		const args = process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-lc", command];
+		const secrets = secretEnv(cwd);
 		const child = spawn(shell, args, {
 			cwd,
-			env: { ...this.#environment, ...extraEnv, ...(port ? { PORT: String(port) } : {}), FORCE_COLOR: "0", CI: kind === "setup" ? "1" : this.#environment.CI ?? "" },
+			env: { ...this.#environment, ...secrets, ...extraEnv, ...(port ? { PORT: String(port) } : {}), FORCE_COLOR: "0", CI: kind === "setup" ? "1" : this.#environment.CI ?? "" },
 			stdio: ["ignore", "pipe", "pipe"],
 			detached: process.platform !== "win32",
 			windowsHide: true,
 		});
 		this.#children.set(key, child);
 		const append = (chunk: Buffer) => {
-			state.output = (state.output + chunk.toString("utf8")).slice(-MAX_OUTPUT);
+			state.output = redact(state.output + chunk.toString("utf8"), secrets).slice(-MAX_OUTPUT);
 			if (kind === "run" && !state.url) {
 				const match = URL_PATTERN.exec(state.output);
 				if (match) {
@@ -186,6 +199,7 @@ export class ScriptRunner {
 			state.endedAt = Date.now();
 			if (state.status === "running") state.status = code === 0 ? "succeeded" : "failed";
 			this.#emit(sessionId);
+			onFinish?.(state);
 		});
 		if (kind === "run" && port) {
 			// Fall back to the assigned port when the server doesn't print a URL.

@@ -107,15 +107,29 @@ export class ApprovalManager {
 		}
 	}
 
-	listRules(): { id: string; toolName: string; prefix: string; createdAt: number }[] {
-		return this.#db.prepare("SELECT id, toolName, prefix, createdAt FROM approval_rules ORDER BY createdAt DESC").all() as unknown as { id: string; toolName: string; prefix: string; createdAt: number }[];
+	listRules(): { id: string; toolName: string; prefix: string; createdAt: number; effect: "allow" | "deny" }[] {
+		return this.#db.prepare("SELECT id, toolName, prefix, createdAt, effect FROM approval_rules ORDER BY effect DESC, createdAt DESC").all() as unknown as { id: string; toolName: string; prefix: string; createdAt: number; effect: "allow" | "deny" }[];
 	}
 
-	addRule(toolName: string, prefix: string): void {
+	addRule(toolName: string, prefix: string, effect: "allow" | "deny" = "allow"): void {
 		const clean = prefix.trim();
 		if (!clean) return;
-		this.#db.prepare("INSERT OR IGNORE INTO approval_rules (id, toolName, prefix, createdAt) VALUES (?, ?, ?, ?)")
-			.run(randomUUID(), toolName, clean, Date.now());
+		this.#db.prepare("INSERT OR IGNORE INTO approval_rules (id, toolName, prefix, createdAt, effect) VALUES (?, ?, ?, ?, ?)")
+			.run(randomUUID(), toolName, clean, Date.now(), effect);
+	}
+
+	/** The deny rule that blocks this call, if any. Deny rules apply under every policy, even Full auto. */
+	deniedBy(toolName: string, args: Record<string, unknown>): string | null {
+		const rules = this.#db.prepare("SELECT prefix FROM approval_rules WHERE toolName=? AND effect='deny'").all(toolName) as { prefix: string }[];
+		if (!rules.length) return null;
+		const command = toolName === "run_command" && typeof args?.command === "string" ? args.command.trim() : "";
+		// Check each part of a compound command (a && b; c | d), so "git push" can't hide behind "true &&".
+		const parts = command ? command.split(/&&|\|\||;|\||\n/).map(part => part.trim()).filter(Boolean) : [""];
+		for (const rule of rules) {
+			if (rule.prefix === "*") return rule.prefix;
+			if (parts.some(part => part === rule.prefix || part.startsWith(`${rule.prefix} `))) return rule.prefix;
+		}
+		return null;
 	}
 
 	removeRule(id: string): void {
@@ -123,7 +137,7 @@ export class ApprovalManager {
 	}
 
 	hasAllowRule(toolName: string, command?: string): boolean {
-		const rules = this.#db.prepare("SELECT prefix FROM approval_rules WHERE toolName=?").all(toolName) as { prefix: string }[];
+		const rules = this.#db.prepare("SELECT prefix FROM approval_rules WHERE toolName=? AND effect='allow'").all(toolName) as { prefix: string }[];
 		if (!rules.length) return false;
 		if (!command) return rules.some(r => r.prefix === "*");
 		const trimmed = command.trim();
@@ -158,6 +172,8 @@ export class ApprovalManager {
 				hook(ToolTask, {
 					beforeTool: async (call, api, ctx) => {
 						const args = (call.arguments && typeof call.arguments === "object" ? call.arguments : {}) as Record<string, unknown>;
+						const denied = this.deniedBy(call.name, args);
+						if (denied) return { block: `Blocked by a rule in Settings → Agents & permissions ("${denied}"). Don't try to work around it; ask the user if you need it.` };
 						if (!this.shouldRequireApproval(sessionId, call.name, args)) {
 							return undefined;
 						}

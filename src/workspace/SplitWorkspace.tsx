@@ -282,8 +282,8 @@ export function SplitWorkspace({
     let active = true
     const poll = async () => {
       try {
-        const result = await request<{ setup: { status: RunStatus["setup"] }; run: { status: RunStatus["run"]; url: string | null } }>(`/api/sessions/${encodeURIComponent(session.id)}/scripts`)
-        if (active) setRunStatus({ setup: result.setup.status, run: result.run.status, url: result.run.url })
+        const result = await request<{ setup: { status: RunStatus["setup"] }; run: { status: RunStatus["run"]; url: string | null }; check?: { status: RunStatus["run"] } }>(`/api/sessions/${encodeURIComponent(session.id)}/scripts`)
+        if (active) setRunStatus({ setup: result.setup.status, run: result.run.status, check: result.check?.status, url: result.run.url })
       } catch {
         if (active) setRunStatus(null)
       }

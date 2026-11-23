@@ -8,6 +8,7 @@ import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from
 import { join, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { RuntimeEventBus } from "./events.ts";
+import { redact, secretEnv } from "./project-secrets.ts";
 
 export type EngineId = "claude-code" | "codex";
 export type ApprovalPolicy = "ask" | "auto-safe" | "auto-all";
@@ -238,9 +239,10 @@ export class EngineManager {
 		state.lastStatus = null;
 		this.#save(sessionId, state);
 		const command = engineInfo[state.engine].command;
+		const secrets = secretEnv(cwd);
 		const child = spawn(command, engineArgs(state.engine, content, state.externalId, policy, model, gitWritableDirs(cwd)), {
 			cwd,
-			env: { ...this.#environment, NO_COLOR: "1" },
+			env: { ...this.#environment, ...secrets, NO_COLOR: "1" },
 			stdio: ["ignore", "pipe", "pipe"],
 			windowsHide: true,
 		});
@@ -263,7 +265,8 @@ export class EngineManager {
 				buffer = buffer.slice(newline + 1);
 				if (!line.startsWith("{")) continue;
 				try {
-					applyEvent(state.engine, state, { assistant }, JSON.parse(line));
+					// Keep project secrets out of the stored transcript.
+					applyEvent(state.engine, state, { assistant }, JSON.parse(redact(line, secrets)));
 				} catch {
 					// Ignore lines that aren't events.
 				}

@@ -105,6 +105,7 @@ type SettingsViewProps = {
   onRefreshMcp?: () => void
   onChangeApprovalPolicy?: (policy: ApprovalPolicy) => Promise<void>
   onDeleteApprovalRule?: (id: string) => Promise<void>
+  onAddApprovalRule?: (prefix: string, effect: "allow" | "deny") => Promise<void>
   initialCategory?: SettingsCategory
   autoOpenAddEnvironment?: boolean
 }
@@ -147,7 +148,7 @@ export function SettingsView({
   settings, resolved, error, runtimeError, runtime, providerName, selectedModel, selectedProvider, modelCatalog,
   sending, credentialChangesBlocked, connections, activeEnvironmentName, update, onBack, onWorktreeDiagnostics,
   onEnvironmentChanged, onModelsChanged, mcpServers = [], approvalPolicy = "auto-safe", approvalRules = [], browserState,
-  skillsCatalog, onRefreshMcp, onChangeApprovalPolicy, onDeleteApprovalRule, initialCategory, autoOpenAddEnvironment = false,
+  skillsCatalog, onRefreshMcp, onChangeApprovalPolicy, onDeleteApprovalRule, onAddApprovalRule, initialCategory, autoOpenAddEnvironment = false,
   projects, sessionLabels = {},
 }: SettingsViewProps) {
   const [selectedCategory, setSelectedCategory] = useState<SettingsCategory>(initialCategory ?? "general")
@@ -371,7 +372,7 @@ export function SettingsView({
     {onChangeApprovalPolicy && onDeleteApprovalRule && onRefreshMcp ? (
       <Section title="Approvals and MCP servers" plain>
         <div className="st-embedded">
-          <McpAndSecuritySettings mcpServers={mcpServers} approvalPolicy={approvalPolicy} approvalRules={approvalRules} onRefreshMcp={onRefreshMcp} onChangeApprovalPolicy={onChangeApprovalPolicy} onDeleteApprovalRule={onDeleteApprovalRule} />
+          <McpAndSecuritySettings mcpServers={mcpServers} approvalPolicy={approvalPolicy} approvalRules={approvalRules} onRefreshMcp={onRefreshMcp} onChangeApprovalPolicy={onChangeApprovalPolicy} onDeleteApprovalRule={onDeleteApprovalRule} onAddApprovalRule={onAddApprovalRule} />
         </div>
       </Section>
     ) : null}

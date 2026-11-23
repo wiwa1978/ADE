@@ -19,7 +19,7 @@ import type { RouteDeps } from "./context.ts";
 
 export function registerSessionRoutes(
 	router: Router,
-	{ host, worktreeManager, sessionGit, cleanUpArchivedWorkspace, engines, checkpoints, inbox, viewSessions, prepareWorktree }: RouteDeps,
+	{ host, worktreeManager, sessionGit, cleanUpArchivedWorkspace, engines, inbox, viewSessions, prepareWorktree, sendToAgent }: RouteDeps,
 ): void {
 	router.get("/api/sessions", (ctx) => {
 		ctx.json(200, { sessions: viewSessions() });
@@ -225,18 +225,9 @@ export function registerSessionRoutes(
 		"/api/coding-tasks/:id([0-9a-f-]+)/messages",
 		async (ctx) => {
 			const input = validateSendMessage(await ctx.readBody());
-			const sessionId = ctx.params.id;
-			// Snapshot the workspace before the agent acts on this message, so it can be rewound later.
-			const workspace = host.getWorkspacePath(sessionId);
-			if (workspace) await checkpoints.create(sessionId, workspace, input.content).catch(() => null);
-			inbox.invalidate(sessionId);
-			if (engines.get(sessionId)) {
-				if (!workspace) throw notFound("Session has no ready workspace.");
-				engines.send(sessionId, workspace, input.content, host.approvals.policy(sessionId), null);
-				ctx.json(200, { session: viewSessions().find(item => item.id === sessionId) });
-				return;
-			}
-			ctx.json(200, { session: await host.send("coding", input, sessionId) });
+			ctx.json(200, { session: await sendToAgent(ctx.params.id, input.content, {
+				id: input.id ?? undefined, provider: input.provider ?? undefined, model: input.model ?? undefined, reasoning: input.reasoning ?? undefined,
+			}) });
 		},
 		{ originError: "Use ADE to send a coding task message." },
 	);

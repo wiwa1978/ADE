@@ -74,7 +74,7 @@ export function WorkspaceHeaderBar({
   onOpenArtifact: () => void
   onOpenProcesses: () => void
   onOpenRun: () => void
-  runStatus: { setup: string; run: string; url: string | null } | null
+  runStatus: { setup: string; run: string; check?: string; url: string | null } | null
   /** Breadcrumb back to the session's project. */
   projectName?: string
   onOpenProject?: () => void
@@ -96,6 +96,9 @@ export function WorkspaceHeaderBar({
             : approvals.length > 0 ? <span className="ade-row-tag is-waiting">Needs approval</span> : null}
         {runStatus?.setup === "running" ? <button type="button" className="ade-row-tag is-running" onClick={onOpenRun} title="The project's setup script is running in this worktree">Setting up…</button>
           : runStatus?.setup === "failed" ? <button type="button" className="ade-row-tag is-failed" onClick={onOpenRun} title="The setup script failed; open Run to see its output">Setup failed</button> : null}
+        {runStatus?.check === "running" ? <button type="button" className="ade-row-tag is-running" onClick={onOpenRun} title="The project's check runs after each agent turn">Checking…</button>
+          : runStatus?.check === "failed" ? <button type="button" className="ade-row-tag is-failed" onClick={onOpenRun} title="The project's check failed after the last turn; open Run to see why">Check failed</button>
+            : runStatus?.check === "succeeded" ? <button type="button" className="ade-row-tag is-ok" onClick={onOpenRun} title="The project's check passed after the last turn">Check passed</button> : null}
         {session.workspace?.branch ? (
           <span className="ade-pill ade-mono"><GitBranch className="size-3" /> {session.workspace.branch}</span>
         ) : null}

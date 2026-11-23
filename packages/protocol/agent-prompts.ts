@@ -62,6 +62,16 @@ export function fixCiPrompt(runs: PromptFailedRun[], failingChecks: string[] = [
 	return fit([intro, ...parts, ...others]);
 }
 
+/** Ask the agent to fix what the project's check command (lint, typecheck, tests) reported. */
+export function checkFailedPrompt(command: string, output: string) {
+	const lines = output.trim().split("\n");
+	const tail = lines.slice(-120).join("\n");
+	return fit([
+		`The project's check \`${command}\` failed after your last change. Fix the problems, then run it again to confirm it passes.`,
+		`\`\`\`\n${clip(tail, 5000)}\n\`\`\``,
+	]);
+}
+
 /** Ask the agent to finish a merge of the base branch that stopped on conflicts. */
 export function resolveConflictsPrompt(baseRef: string, files: string[]) {
 	const list = files.slice(0, 60).map(file => `- ${file}`).join("\n");

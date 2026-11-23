@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { basename, isAbsolute, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { httpError } from "./http-error.ts";
+import { secretEnv } from "./project-secrets.ts";
 
 const MAX_INPUT_BYTES = 8_192;
 const MAX_OUTPUT_CHARACTERS = 500_000;
@@ -74,7 +75,7 @@ export class TerminalManager {
 		try {
 			pty = this.#spawn(shell, [], {
 				name: "xterm-256color", cols, rows, cwd,
-				env: { ...this.#environment, TERM: "xterm-256color", COLORTERM: "truecolor" } as Record<string, string>,
+				env: { ...this.#environment, ...secretEnv(cwd), TERM: "xterm-256color", COLORTERM: "truecolor" } as Record<string, string>,
 			});
 		} catch {
 			throw inputError("Could not start the system shell for this workspace.", 503);

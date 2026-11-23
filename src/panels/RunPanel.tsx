@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ExternalLink, Globe, Play, RefreshCw, Settings2, Square } from "lucide-react"
 import { request } from "../../api"
+import { checkFailedPrompt } from "../../packages/protocol/agent-prompts.ts"
 
 type ScriptState = {
-  kind: "setup" | "run"
+  kind: "setup" | "run" | "check"
   status: "idle" | "running" | "succeeded" | "failed" | "stopped"
   command: string
   output: string
@@ -11,7 +12,7 @@ type ScriptState = {
   port: number | null
   url: string | null
 }
-type ScriptsResponse = { configured: { setup: string; run: string; copy: string[] } | null; setup: ScriptState; run: ScriptState }
+type ScriptsResponse = { configured: { setup: string; run: string; copy: string[]; check: string; checkAutoFix: boolean } | null; setup: ScriptState; run: ScriptState; check: ScriptState }
 
 const statusText: Record<ScriptState["status"], string> = {
   idle: "Not started",
@@ -21,7 +22,7 @@ const statusText: Record<ScriptState["status"], string> = {
   stopped: "Stopped",
 }
 
-export type RunStatus = { setup: ScriptState["status"]; run: ScriptState["status"]; url: string | null }
+export type RunStatus = { setup: ScriptState["status"]; run: ScriptState["status"]; check?: ScriptState["status"]; url: string | null }
 
 /** Session panel for the project's setup and run scripts: start the app, see its output, open it. */
 export function RunPanel({
@@ -30,12 +31,16 @@ export function RunPanel({
   onOpenExternal,
   onOpenProjectSettings,
   onStatusChange,
+  onAskAgent,
+  agentBusy = false,
 }: {
   sessionId: string
   onOpenUrl: (url: string) => void
   onOpenExternal: (url: string) => void
   onOpenProjectSettings?: () => void
   onStatusChange?: (status: RunStatus) => void
+  onAskAgent?: (text: string) => Promise<void>
+  agentBusy?: boolean
 }) {
   const [data, setData] = useState<ScriptsResponse | null>(null)
   const [busy, setBusy] = useState(false)
@@ -45,7 +50,7 @@ export function RunPanel({
 
   const apply = useCallback((result: ScriptsResponse) => {
     setData(result)
-    onStatusChange?.({ setup: result.setup.status, run: result.run.status, url: result.run.url })
+    onStatusChange?.({ setup: result.setup.status, run: result.run.status, check: result.check.status, url: result.run.url })
     // Open the app in the browser panel the first time its URL appears.
     if (result.run.status === "running" && result.run.url && openedUrl.current !== result.run.url) {
       openedUrl.current = result.run.url
@@ -70,7 +75,7 @@ export function RunPanel({
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
   }, [data?.run.output, data?.setup.output])
 
-  const act = async (kind: "setup" | "run", action: "start" | "stop") => {
+  const act = async (kind: "setup" | "run" | "check", action: "start" | "stop") => {
     setBusy(true)
     setError("")
     if (kind === "run" && action === "start") openedUrl.current = null
@@ -87,7 +92,7 @@ export function RunPanel({
   if (!data) return <div className="ade-pane-empty"><p>Loading scripts…</p></div>
 
   const configured = data.configured
-  const nothingConfigured = !configured?.setup && !configured?.run
+  const nothingConfigured = !configured?.setup && !configured?.run && !configured?.check
   return (
     <div className="ade-pane-body ade-run-panel">
       <div className="ade-pane-toolbar">
@@ -124,6 +129,24 @@ export function RunPanel({
           ) : null}
           {configured?.run ? <p className="ade-muted ade-xs">Run: <code>{configured.run}</code></p> : <p className="ade-muted ade-xs">No run script configured.</p>}
           {data.run.output ? <pre className="ade-run-log" ref={logRef} aria-label="App output">{data.run.output}</pre> : null}
+
+          {configured?.check ? (
+            <div className="ade-run-setup" aria-label="Check after each turn">
+              <div className="ade-diff-header-meta">
+                <span className={`ade-state-dot is-${data.check.status === "running" ? "running" : data.check.status === "failed" ? "failed" : data.check.status === "succeeded" ? "ok" : "idle"}`} />
+                <strong className="ade-xs">Check · {data.check.status === "succeeded" ? "Passed" : statusText[data.check.status]}{data.check.exitCode !== null && data.check.status === "failed" ? ` (exit ${data.check.exitCode})` : ""}</strong>
+                <button type="button" className="ade-chip-btn" disabled={busy || data.check.status === "running"} onClick={() => void act("check", "start")}><RefreshCw className="size-3" /> Run check</button>
+                {data.check.status === "failed" && onAskAgent ? (
+                  <button type="button" className="ade-chip-btn" disabled={busy || agentBusy} title={agentBusy ? "The agent is working" : "Send the failing output to the agent"}
+                    onClick={() => { setBusy(true); void onAskAgent(checkFailedPrompt(configured.check, data.check.output)).catch(() => undefined).finally(() => setBusy(false)) }}>
+                    Ask the agent to fix
+                  </button>
+                ) : null}
+              </div>
+              <p className="ade-muted ade-xs">Runs after every agent turn: <code>{configured.check}</code>{configured.checkAutoFix ? " · failures go back to the agent automatically" : ""}</p>
+              {data.check.output ? <pre className="ade-run-log is-setup" aria-label="Check output">{data.check.output}</pre> : null}
+            </div>
+          ) : null}
 
           <div className="ade-run-setup">
             <div className="ade-diff-header-meta">

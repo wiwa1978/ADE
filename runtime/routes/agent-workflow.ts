@@ -8,7 +8,7 @@ import { readInstructions, searchWorkspaceFiles, writeInstructions } from "../ag
 
 export function registerAgentWorkflowRoutes(
 	router: Router,
-	{ host, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, usage }: RouteDeps,
+	{ host, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, usage, secrets }: RouteDeps,
 ): void {
 	// --- Usage: tokens and cost per session, project and day ---
 	router.get("/api/usage", (ctx) => {
@@ -49,6 +49,21 @@ export function registerAgentWorkflowRoutes(
 		ctx.json(200, scriptsResponse(project.id, project.repository));
 	}, { originError: "Use ADE to change project scripts." });
 
+	// --- Secrets per project (names only; values never come back) ---
+	router.get("/api/projects/:id/secrets", (ctx) => {
+		ctx.json(200, { secrets: secrets.list(projectFor(ctx.params.id).id) });
+	});
+
+	router.put("/api/projects/:id/secrets", async (ctx) => {
+		const project = projectFor(ctx.params.id);
+		const body = await ctx.readBody(64_000);
+		ctx.json(200, { secrets: secrets.set(project.id, body.name, body.value) });
+	}, { originError: "Use ADE to change project secrets.", maxBody: 64_000 });
+
+	router.delete("/api/projects/:id/secrets/:name", (ctx) => {
+		ctx.json(200, { secrets: secrets.remove(projectFor(ctx.params.id).id, ctx.params.name) });
+	}, { originError: "Use ADE to change project secrets." });
+
 	// --- Agent context: @-mention file search and instruction files ---
 	router.get("/api/sessions/:id/files/search", async (ctx) => {
 		const workspace = ctx.requireWorkspace(ctx.params.id);
@@ -79,10 +94,11 @@ export function registerAgentWorkflowRoutes(
 			configured: project ? scripts.effective(project.id, project.repository) : null,
 			setup: scriptRunner.state(ctx.params.id, "setup"),
 			run: scriptRunner.state(ctx.params.id, "run"),
+			check: scriptRunner.state(ctx.params.id, "check"),
 		});
 	});
 
-	router.post("/api/sessions/:id/scripts/:kind(setup|run)/:action(start|stop)", async (ctx) => {
+	router.post("/api/sessions/:id/scripts/:kind(setup|run|check)/:action(start|stop)", async (ctx) => {
 		await ctx.readBody();
 		const kind = ctx.params.kind as ScriptKind;
 		if (ctx.params.action === "stop") {

@@ -211,6 +211,7 @@ export function AppMainColumn(props: AppMainColumnProps) {
           onRefreshMcp={() => void stream.refreshMcp()}
           onChangeApprovalPolicy={p => stream.setApprovalPolicy(p)}
           onDeleteApprovalRule={stream.deleteApprovalRule}
+          onAddApprovalRule={stream.addApprovalRule}
         />
       ) : screen === "factory" ? (
         <FactoryView

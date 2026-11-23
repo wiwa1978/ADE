@@ -63,3 +63,16 @@
 .ade-budget-banner > span { flex: 1; }
 .st-input.is-narrow { width: 110px; text-align: right; }
 .ade-usage-chip + .ade-track-pill-right { margin-left: 0; }
+
+/* Project secrets */
+.ade-secret-list { display: grid; gap: 4px; margin: 0 0 8px; padding: 0; list-style: none; }
+.ade-secret-list li { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 7px; background: rgb(var(--background)); }
+.ade-secret-list code { flex: 1; font-size: 12px; }
+.ade-secret-form { display: flex; gap: 6px; }
+.ade-secret-form input { min-width: 0; flex: 1; }
+
+/* Approval rules */
+.ade-rule-form { display: flex; gap: 6px; margin: 8px 0; }
+.ade-rule-form input { flex: 1; min-width: 0; }
+.ade-pill.is-deny { color: rgb(207 98 91); border-color: rgb(207 98 91 / 0.5); }
+.project-scripts-check { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; font-size: 12.5px; }
