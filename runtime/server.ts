@@ -134,6 +134,8 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 	`http://localhost:${process.env.ADE_UI_PORT ?? 1420}`,
 	"http://tauri.localhost",
 	"https://tauri.localhost",
+	// A runtime on a server may be used from other app addresses (comma-separated).
+	...(process.env.ADE_EXTRA_ORIGINS ?? "").split(",").map(origin => origin.trim()).filter(origin => /^https?:\/\/[^\s/]+$/.test(origin)),
 ] }: {
 	host: LocalAgentHost;
 	worktreeManager: WorktreeManager;
@@ -299,6 +301,8 @@ export async function startRuntime({ stateDirectory = process.env.ADE_STATE_DIR 
 		worktreeManager = new WorktreeManager(directory);
 		host.setWorktreeManager?.(worktreeManager);
 		environments = new EnvironmentManager(directory);
+		// Reconnect to the server chosen last time (for "ADE runs on my server" setups).
+		void environments.restoreLastActive();
 		terminals = new TerminalManager();
 		const server = createRuntimeServer({ host, worktreeManager, environments, terminals });
 		await new Promise<void>((resolveListen, reject) => {

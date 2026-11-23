@@ -527,7 +527,7 @@ export type EnvironmentSummary = {
   id: string;
   name: string;
   kind: "local" | "ssh";
-  status: "connected" | "disconnected" | "error";
+  status: "connected" | "connecting" | "disconnected" | "error";
   active: boolean;
   sshHost?: string;
   sshPort?: number;

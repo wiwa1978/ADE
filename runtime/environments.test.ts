@@ -165,3 +165,36 @@ test("the local runtime proxies app API requests over the selected SSH tunnel", 
 	assert.equal(seen[0].host, "127.0.0.1:4319");
 	assert.equal(seen[0].origin, "http://127.0.0.1:1420");
 });
+
+test("the chosen SSH environment is remembered, restored on start, and reconnected when the tunnel drops", { timeout: 15_000 }, async () => {
+	const directory = temporaryDirectory();
+	const first = fakeSsh();
+	const manager = new EnvironmentManager(directory, { spawn: first.spawn, connectTimeoutMs: 500 });
+	const environment = manager.add({ name: "Home server", sshHost: "home-server", sshPort: 22, remotePort: 4319 });
+	await manager.connect(environment.id);
+	manager.close();
+
+	// Next start: ADE reconnects to the server it was using.
+	const ssh = fakeSsh();
+	const restarted = new EnvironmentManager(directory, { spawn: ssh.spawn, connectTimeoutMs: 500 });
+	const restored = await restarted.restoreLastActive();
+	assert.equal(restored.activeId, environment.id);
+	assert.equal(restored.environments.find(item => item.id === environment.id)?.status, "connected");
+
+	// The tunnel drops (laptop slept, server restarted): it comes back by itself.
+	ssh.calls[0].child.exitCode = 255;
+	ssh.calls[0].child.emit("exit", 255);
+	assert.equal(restarted.list().environments.find(item => item.id === environment.id)?.status, "error");
+	const deadline = Date.now() + 6000;
+	while (ssh.calls.length < 2 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
+	assert.equal(ssh.calls.length, 2, "a new tunnel was opened");
+	while (restarted.list().environments.find(item => item.id === environment.id)?.status !== "connected" && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50));
+	assert.equal(restarted.list().activeId, environment.id);
+
+	// Choosing This computer is remembered too.
+	await restarted.activate("local");
+	restarted.close();
+	const third = new EnvironmentManager(directory, { spawn: fakeSsh().spawn, connectTimeoutMs: 500 });
+	assert.equal((await third.restoreLastActive()).activeId, "local");
+	third.close();
+});

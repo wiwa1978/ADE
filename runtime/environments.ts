@@ -116,11 +116,16 @@ export class EnvironmentManager {
 	#file: string;
 	#environments: SavedSshEnvironment[];
 	#activeId = "local";
+	/** The environment the user chose last; ADE reconnects to it on start and after the tunnel drops. */
+	#lastActiveId = "local";
+	#reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	#reconnectDelay = 2000;
+	#closed = false;
 	#tunnel: ActiveTunnel | undefined;
 	#sshPath: string;
 	#spawn: typeof spawnProcess;
 	#connectTimeoutMs: number;
-	#statuses = new Map<string, "connected" | "disconnected" | "error">();
+	#statuses = new Map<string, "connected" | "connecting" | "disconnected" | "error">();
 
 	constructor(directory: string, { sshPath = "ssh", spawn = spawnProcess, connectTimeoutMs = 8_000 }: {
 		sshPath?: string;
@@ -147,6 +152,8 @@ export class EnvironmentManager {
 			throw new Error(`Saved environments at ${this.#file} have an unsupported format.`);
 		}
 		const environments = data.environments.map(validateEnvironment);
+		const last = (data as { lastActiveId?: unknown }).lastActiveId;
+		if (typeof last === "string" && environments.some(environment => environment.id === last)) this.#lastActiveId = last;
 		const ids = new Set<string>();
 		const names = new Set<string>();
 		for (const environment of environments) {
@@ -161,7 +168,7 @@ export class EnvironmentManager {
 
 	#save() {
 		const temporary = `${this.#file}.${randomUUID()}.tmp`;
-		writeFileSync(temporary, JSON.stringify({ version: 1, environments: this.#environments }, null, 2), { mode: 0o600 });
+		writeFileSync(temporary, JSON.stringify({ version: 1, environments: this.#environments, lastActiveId: this.#lastActiveId }, null, 2), { mode: 0o600 });
 		renameSync(temporary, this.#file);
 	}
 
@@ -228,7 +235,11 @@ export class EnvironmentManager {
 		});
 		child.once("exit", () => {
 			tunnel.exited = true;
-			if (this.#activeId === environment.id && this.#tunnel === tunnel) this.#statuses.set(environment.id, "error");
+			if (this.#activeId === environment.id && this.#tunnel === tunnel) {
+				this.#statuses.set(environment.id, "error");
+				// The laptop slept, the network changed or the server restarted: try again.
+				this.#scheduleReconnect(environment.id);
+			}
 		});
 		const deadline = Date.now() + this.#connectTimeoutMs;
 		try {
@@ -266,6 +277,11 @@ export class EnvironmentManager {
 		this.#tunnel = candidate;
 		this.#activeId = id;
 		this.#statuses.set(id, "connected");
+		this.#reconnectDelay = 2000;
+		if (this.#lastActiveId !== id) {
+			this.#lastActiveId = id;
+			this.#save();
+		}
 		if (previousId !== "local" && previousId !== id) this.#statuses.set(previousId, "disconnected");
 		if (previous && previous !== candidate) previous.child.kill();
 		return this.list();
@@ -279,6 +295,12 @@ export class EnvironmentManager {
 			}
 			return this.list();
 		}
+		if (this.#lastActiveId !== "local") {
+			this.#lastActiveId = "local";
+			this.#save();
+		}
+		if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
+		this.#reconnectTimer = null;
 		if (id === this.#activeId) return this.list();
 		const previous = this.#tunnel;
 		const previousId = this.#activeId;
@@ -310,7 +332,37 @@ export class EnvironmentManager {
 		return { localPort: this.#tunnel.localPort, remotePort: environment.remotePort };
 	}
 
+	/** Reconnect to the environment chosen last time (on start). Quietly stays local if it fails. */
+	async restoreLastActive() {
+		if (this.#lastActiveId === "local" || this.#closed) return this.list();
+		const id = this.#lastActiveId;
+		// Show it as the chosen environment while connecting, so the app doesn't flash local data.
+		this.#activeId = id;
+		this.#statuses.set(id, "connecting");
+		try {
+			return await this.connect(id);
+		} catch {
+			this.#statuses.set(id, "error");
+			this.#scheduleReconnect(id);
+			return this.list();
+		}
+	}
+
+	#scheduleReconnect(id: string) {
+		if (this.#closed || this.#reconnectTimer) return;
+		const delay = this.#reconnectDelay;
+		this.#reconnectDelay = Math.min(this.#reconnectDelay * 2, 60_000);
+		this.#reconnectTimer = setTimeout(() => {
+			this.#reconnectTimer = null;
+			if (this.#closed || this.#activeId !== id) return;
+			void this.connect(id).catch(() => this.#scheduleReconnect(id));
+		}, delay);
+		this.#reconnectTimer.unref?.();
+	}
+
 	close() {
+		this.#closed = true;
+		if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
 		if (this.#tunnel) this.#tunnel.child.kill();
 		this.#tunnel = undefined;
 		this.#activeId = "local";

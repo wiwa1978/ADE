@@ -97,6 +97,20 @@ branch and conversation. Worktrees with uncommitted changes are never removed.
 Archived items appear under **Archived** in the sidebar; **Restore** recreates the
 worktree from its branch. Archive state is stored on the host.
 
+## ADE on your own server
+
+Run ADE's runtime on an always-on Linux machine (a home server or a VPS) so agents keep working when your laptop is closed; the desktop app is then only a window onto it.
+
+```bash
+node scripts/ade-server.ts install home-server     # copy ADE, install, start a user service
+node scripts/ade-server.ts status home-server
+node scripts/ade-server.ts update home-server      # after pulling new ADE code
+node scripts/ade-server.ts logs home-server
+node scripts/ade-server.ts uninstall home-server --yes   # removes everything it created
+```
+
+`home-server` is an SSH host or alias from `~/.ssh/config` that logs in with a key (Tailscale works well). The server needs Node.js 24+, git, rsync and build tools (make, g++, python3). Everything lives in `~/.ade-server` plus one systemd user service, with no sudo; ADE listens on `127.0.0.1:4319` only. Then add the same host in Settings → Environments → Add host → Remote SSH (runtime port 4319). The app remembers it and reconnects on start and after the connection drops. Use `--allow-origin=http://localhost:1520` on install/update to allow another app address, such as a second dev UI.
+
 ## SSH environments
 
 Open **Settings → Environments** to add an SSH host. Enter a display name, an
