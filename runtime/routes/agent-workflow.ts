@@ -4,11 +4,17 @@ import { badRequest, conflict, notFound } from "../http-error.ts";
 import type { ScriptKind } from "../project-scripts.ts";
 import type { Router } from "../router.ts";
 import type { RouteDeps } from "./context.ts";
+import { readInstructions, searchWorkspaceFiles, writeInstructions } from "../agent-context.ts";
 
 export function registerAgentWorkflowRoutes(
 	router: Router,
-	{ host, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions }: RouteDeps,
+	{ host, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, usage }: RouteDeps,
 ): void {
+	// --- Usage: tokens and cost per session, project and day ---
+	router.get("/api/usage", (ctx) => {
+		ctx.json(200, usage.report());
+	});
+
 	// --- Inbox ---
 	router.get("/api/inbox", async (ctx) => {
 		ctx.json(200, { entries: await inbox.entries() });
@@ -42,6 +48,25 @@ export function registerAgentWorkflowRoutes(
 		scripts.save(project.id, await ctx.readBody());
 		ctx.json(200, scriptsResponse(project.id, project.repository));
 	}, { originError: "Use ADE to change project scripts." });
+
+	// --- Agent context: @-mention file search and instruction files ---
+	router.get("/api/sessions/:id/files/search", async (ctx) => {
+		const workspace = ctx.requireWorkspace(ctx.params.id);
+		ctx.json(200, { files: await searchWorkspaceFiles(workspace, (ctx.url.searchParams.get("q") ?? "").slice(0, 200)) });
+	});
+
+	router.get("/api/projects/:id/instructions", (ctx) => {
+		const project = projectFor(ctx.params.id);
+		if (!project.repository) throw badRequest("This project has no local checkout.");
+		ctx.json(200, { files: readInstructions(project.repository) });
+	});
+
+	router.put("/api/projects/:id/instructions", async (ctx) => {
+		const project = projectFor(ctx.params.id);
+		if (!project.repository) throw badRequest("This project has no local checkout.");
+		const body = await ctx.readBody(400_000);
+		ctx.json(200, { files: writeInstructions(project.repository, body.name, body.content) });
+	}, { originError: "Use ADE to edit agent instructions.", maxBody: 400_000 });
 
 	const sessionProject = (sessionId: string) => {
 		const session = host.sessions().find(item => item.id === sessionId);

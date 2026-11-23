@@ -43,3 +43,23 @@
 .ade-start-from-meta { flex: none; color: rgb(var(--muted)); font-size: 11.5px; }
 .ade-start-from-note { margin: 0; padding: 4px 2px; color: rgb(var(--muted)); font-size: 12px; }
 .ade-start-from-list button:disabled { opacity: 0.5; cursor: default; background: transparent; }
+
+/* Usage */
+.ade-usage-big { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ade-usage-big.is-warn { color: rgb(213 163 91); }
+.ade-usage-big.is-error { color: rgb(207 98 91); }
+.ade-usage-of { color: rgb(var(--muted)); font-size: 12.5px; }
+.ade-usage-meter { height: 6px; margin: 0 18px 12px; border-radius: 99px; background: rgb(var(--foreground) / 0.08); overflow: hidden; }
+.ade-usage-meter span { display: block; height: 100%; border-radius: inherit; background: rgb(var(--primary)); }
+.ade-usage-meter span.is-warn { background: rgb(213 163 91); }
+.ade-usage-meter span.is-error { background: rgb(207 98 91); }
+.ade-usage-days { display: flex; align-items: flex-end; gap: 3px; height: 56px; padding: 6px 18px 14px; border-bottom: 1px solid rgb(var(--border) / 0.6); }
+.ade-usage-days span { flex: 1; border-radius: 2px; background: rgb(var(--primary) / 0.7); }
+.ade-usage-days span.is-empty { background: rgb(var(--foreground) / 0.08); }
+.ade-usage-value { color: rgb(var(--muted)); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.ade-usage-chip { color: rgb(var(--muted)); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ade-budget-banner { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 9px; border: 1px solid rgb(213 163 91 / 0.5); background: rgb(213 163 91 / 0.08); font-size: 12.5px; }
+.ade-budget-banner.is-error { border-color: rgb(207 98 91 / 0.55); background: rgb(207 98 91 / 0.08); }
+.ade-budget-banner > span { flex: 1; }
+.st-input.is-narrow { width: 110px; text-align: right; }
+.ade-usage-chip + .ade-track-pill-right { margin-left: 0; }

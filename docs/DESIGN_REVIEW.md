@@ -247,3 +247,17 @@ Features that comparable tools (Conductor, Claude Code, Cursor, Codex, Orca, Pas
 | R15 | **Sharing and debugging** | Export or share a transcript; replay an agent's tool calls to see what went wrong. |
 
 **Suggested order:** R1 → R2 → R3, then R4 alongside the design decisions in 3.2, since the inbox and the single session layout shape each other.
+
+### Progress
+| # | Status | Where to find it |
+| --- | --- | --- |
+| R1 | ✅ Done | Project settings → Scripts; **Run** in a session's header. |
+| R2 | ✅ Done | "Rewind files to here" on each of your messages; Changes → History. |
+| R3 | ✅ Done | New session → Agent (ADE agent, Claude Code, Codex). Codex may stage and commit in worktrees. |
+| R4 | ✅ Done | Inbox in the sidebar; status tags on every session. |
+| R5 | ✅ Done | Pull request panel → Review comments ("Ask the agent to address") and "Ask the agent to fix CI" (GitHub Actions logs); Changes → hover a line to leave a note, then "Send to agent". |
+| R6 | ✅ Done | Pull request panel → "N new commits on origin/main" → Update branch (merge). On conflicts: Ask the agent to resolve, Finish update, Abort update. |
+| R7 | ⚠️ Mostly | `@` in the composer mentions a workspace file; Project settings → Agent instructions edits `AGENTS.md` / `CLAUDE.md`. Not done: a context-fullness meter (agents don't report per-turn context size yet). |
+| R8 | ✅ Done | Tokens (and cost when the agent reports it) above the composer; Settings → Usage with per-project and per-session totals, 30-day chart and a monthly budget that warns in the Inbox. Usage is counted from now on; earlier ADE-agent sessions are not back-filled. |
+| R9 | ✅ Done | New session → Start from → Existing branch / Pull request. Branches checked out elsewhere are shown as in use. |
+| R10–R15 | Not started | |

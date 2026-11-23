@@ -4,6 +4,7 @@ import { createInbox } from "./inbox.ts";
 import { copyIntoWorktree, ProjectScriptStore, ScriptRunner } from "./project-scripts.ts";
 import { createCheckpoints } from "./checkpoints.ts";
 import { EngineManager } from "./engines.ts";
+import { UsageTracker } from "./usage.ts";
 import type { LocalAgentHost } from "./host.ts";
 import type { WorktreeManager } from "./worktrees.ts";
 import type { createSessionGit } from "./session-git.ts";
@@ -52,5 +53,20 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 			.then(state => { if (copied.length) state.output = `Copied from the project: ${copied.join(", ")}\n\n${state.output}`; })
 			.catch(() => undefined);
 	}
-	return { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree };
+	/** Every agent reports its running token/cost totals with each timeline update; keep a ledger of them. */
+	const usage = new UsageTracker(stateDirectory);
+	const projectOf = new Map<string, string | null>();
+	host.events?.subscribe?.(event => {
+		if (event.type !== "timeline.update" || !event.sessionId) return;
+		const payload = event.payload as { conversationId?: unknown; usage?: unknown } | null;
+		if (!payload?.usage) return;
+		if (!projectOf.has(event.sessionId)) projectOf.set(event.sessionId, host.sessions().find(item => item.id === event.sessionId)?.projectId ?? null);
+		usage.record(event.sessionId, String(payload.conversationId ?? "0"), payload.usage, projectOf.get(event.sessionId) ?? null);
+	});
+	// Claude Code / Codex sessions keep their totals on disk; count any that predate the ledger.
+	for (const session of host.sessions?.() ?? []) {
+		const engine = engines.get(session.id);
+		if (engine) usage.record(session.id, "0", engine.usage, session.projectId ?? null);
+	}
+	return { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage };
 }

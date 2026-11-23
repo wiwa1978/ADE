@@ -174,9 +174,12 @@ export function AppMainColumn(props: AppMainColumnProps) {
           onOpenExternal={url => void stream.openExternalBrowser(url)}
           onArchive={props.onArchiveSession}
           onNewSession={() => props.onOpenNewSession()}
+          monthlyBudget={settings.monthlyBudget}
+          onOpenUsage={() => props.onOpenSettingsSection("usage")}
         />
       ) : screen === "settings" ? (
         <SettingsView
+          sessionLabels={Object.fromEntries(props.sessions.map(item => [item.id, item.label]))}
           settings={settings}
           resolved={resolved}
           error={settingsError}

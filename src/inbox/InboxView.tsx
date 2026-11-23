@@ -2,6 +2,7 @@ import { Archive, ExternalLink, GitBranch, Inbox, Plus } from "lucide-react"
 import type { Conversation } from "../../app-types"
 import type { Project } from "../../ProjectsView"
 import { relativeTime, sessionStateInfo, type InboxEntry, type SessionState } from "../session-state"
+import { budgetState, formatCost, useUsage } from "../usage/usage-data"
 
 const urgency: SessionState[] = ["needs-approval", "failed", "checks-failing", "replied", "ready-to-review", "pr-open", "working", "merged", "idle"]
 
@@ -17,6 +18,8 @@ export function InboxView({
   onOpenExternal,
   onArchive,
   onNewSession,
+  monthlyBudget = 0,
+  onOpenUsage,
 }: {
   sessions: Conversation[]
   projects: Project[]
@@ -25,7 +28,11 @@ export function InboxView({
   onOpenExternal: (url: string) => void
   onArchive: (sessionId: string) => void
   onNewSession: () => void
+  monthlyBudget?: number
+  onOpenUsage?: () => void
 }) {
+  const { report } = useUsage()
+  const budget = budgetState(report, monthlyBudget)
   const rows = sessions
     .filter(session => !session.archivedAt && session.id !== "coding" && session.id !== "personal")
     .map(session => ({ session, entry: entries[session.id] }))
@@ -98,6 +105,16 @@ export function InboxView({
           <button type="button" className="sf-btn-primary" onClick={onNewSession}><Plus className="size-3.5" /> New session</button>
         </div>
       </header>
+      {budget ? (
+        <div className={`ade-budget-banner ${budget.reached ? "is-error" : ""}`} role="status">
+          <span>
+            {budget.reached
+              ? `This month's agent spend (${formatCost(budget.spent)}) has reached your ${formatCost(budget.budget)} budget.`
+              : `This month's agent spend is at ${Math.round(budget.ratio * 100)}% of your ${formatCost(budget.budget)} budget (${formatCost(budget.spent)}).`}
+          </span>
+          {onOpenUsage ? <button type="button" className="ade-chip-btn" onClick={onOpenUsage}>See usage</button> : null}
+        </div>
+      ) : null}
       {rows.length === 0 ? (
         <div className="ade-inbox-zero">
           <Inbox className="size-8 opacity-40" />

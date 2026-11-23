@@ -25,6 +25,7 @@ import type {
   SubagentInfo,
   WorkspaceGitSummary,
 } from "../../app-types"
+import { formatUsage } from "../usage/usage-data"
 
 export function AmbientTracksBar({
   subagents,
@@ -41,6 +42,7 @@ export function AmbientTracksBar({
   onOpenArtifact,
   onOpenProcesses,
   onChangeApprovalPolicy,
+  usage,
 }: {
   subagents: SubagentInfo[]
   gitSummary: WorkspaceGitSummary
@@ -56,6 +58,8 @@ export function AmbientTracksBar({
   onOpenArtifact: (id?: string) => void
   onOpenProcesses: () => void
   onChangeApprovalPolicy: (policy: ApprovalPolicy) => void
+  /** This session's tokens and cost so far. */
+  usage?: { inputTokens: number; outputTokens: number; totalCost?: number } | null
 }) {
   const [expandedTrack, setExpandedTrack] = useState<"subagents" | "tasks" | null>(null)
 
@@ -221,6 +225,12 @@ export function AmbientTracksBar({
         {approvals.length > 0 ? (
           <span className="ade-track-pill is-warn">
             <Shield className="size-3.5" /> {approvals.length} approval{approvals.length === 1 ? "" : "s"} waiting
+          </span>
+        ) : null}
+
+        {usage && (usage.inputTokens || usage.outputTokens) ? (
+          <span className="ade-usage-chip ade-track-pill-right" title={`This session: ${usage.inputTokens.toLocaleString()} input and ${usage.outputTokens.toLocaleString()} output tokens. See Settings → Usage for totals.`}>
+            {formatUsage({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cost: usage.totalCost ?? 0 })}
           </span>
         ) : null}
 

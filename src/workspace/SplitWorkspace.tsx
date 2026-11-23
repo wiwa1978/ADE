@@ -416,6 +416,7 @@ export function SplitWorkspace({
               onOpenArtifact={openArtifact}
               onOpenProcesses={openProcesses}
               onChangeApprovalPolicy={onChangeApprovalPolicy}
+              usage={timeline?.usage}
             />
 
             <ComposerDock
@@ -449,6 +450,7 @@ export function SplitWorkspace({
               }}
               textareaRef={textareaRef}
               engineLabel={session.engine === "claude-code" ? "Claude Code" : session.engine === "codex" ? "Codex" : undefined}
+              sessionId={session.id}
             />
           </div>
         </section>

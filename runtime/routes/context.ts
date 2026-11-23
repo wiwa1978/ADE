@@ -24,6 +24,7 @@ export type RouteDeps = {
 	terminals?: TerminalManager;
 	githubRepositories: ReturnType<typeof createGitHubRepositories>;
 	sessionGit: ReturnType<typeof createSessionGit>;
+	usage: import("../usage.ts").UsageTracker;
 	cleanUpArchivedWorkspace: (
 		session: { id: string; workspace: string | null; repository: string | null; kind: string | null },
 		removeWorktreeRequested: boolean,

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react"
 import {
-  ArrowLeft, Bell, Bot, GitPullRequest, Palette, Search, Server, Settings2, Sparkles, Terminal, X, type LucideIcon,
+  ArrowLeft, Bell, Bot, Gauge, GitPullRequest, Palette, Search, Server, Settings2, Sparkles, Terminal, X, type LucideIcon,
 } from "lucide-react"
 import { EnvironmentSettings } from "./EnvironmentSettings"
 import { colorPalettes, paletteVariables, type Theme } from "./appearance-palettes"
@@ -10,10 +10,11 @@ import type { Settings } from "./useSettings"
 import { modelCredentialProviders, type useConnections } from "./useConnections"
 import { McpAndSecuritySettings } from "./src/panels/McpSettingsSection"
 import { request } from "./api"
+import { UsageSettings } from "./src/usage/UsageSettings"
 
 /** Settings categories. Every category here changes something real; nothing is a placeholder. */
 export type SettingsCategory =
-  | "general" | "appearance" | "models" | "agents" | "github" | "terminal" | "notifications" | "environments"
+  | "general" | "appearance" | "models" | "agents" | "usage" | "github" | "terminal" | "notifications" | "environments"
 
 type SettingsItem = { id: SettingsCategory; label: string; icon: LucideIcon; description: string; keywords: string }
 
@@ -31,6 +32,7 @@ const groups: { label: string; items: SettingsItem[] }[] = [
     items: [
       { id: "models", label: "Models", icon: Sparkles, description: "Model providers, API keys, and the default model for new messages.", keywords: "openai anthropic claude copilot radius ollama compatible api key provider reasoning" },
       { id: "agents", label: "Agents & permissions", icon: Bot, description: "Command approvals, MCP servers, and skills available to agents.", keywords: "approval policy mcp skills rules permissions browser chrome" },
+      { id: "usage", label: "Usage", icon: Gauge, description: "Tokens and cost per project and session, and a monthly budget.", keywords: "cost spend tokens budget billing price money" },
     ],
   },
   {
@@ -86,6 +88,8 @@ type SettingsViewProps = {
   credentialChangesBlocked: boolean
   connections: ReturnType<typeof useConnections>
   projects: Project[]
+  /** Session names for the usage breakdown. */
+  sessionLabels?: Record<string, string>
   activeEnvironmentName: string
   update: (patch: Partial<Settings>) => void
   onBack: () => void
@@ -144,6 +148,7 @@ export function SettingsView({
   sending, credentialChangesBlocked, connections, activeEnvironmentName, update, onBack, onWorktreeDiagnostics,
   onEnvironmentChanged, onModelsChanged, mcpServers = [], approvalPolicy = "auto-safe", approvalRules = [], browserState,
   skillsCatalog, onRefreshMcp, onChangeApprovalPolicy, onDeleteApprovalRule, initialCategory, autoOpenAddEnvironment = false,
+  projects, sessionLabels = {},
 }: SettingsViewProps) {
   const [selectedCategory, setSelectedCategory] = useState<SettingsCategory>(initialCategory ?? "general")
   const [query, setQuery] = useState("")
@@ -433,7 +438,8 @@ export function SettingsView({
     </Section>
   </>
 
-  const content = { general, appearance, models, agents, github, terminal, notifications, environments }[selectedCategory]
+  const usage = <UsageSettings budget={settings.monthlyBudget} onBudgetChange={value => update({ monthlyBudget: value })} projects={projects} sessionLabels={sessionLabels} />
+  const content = { general, appearance, models, agents, usage, github, terminal, notifications, environments }[selectedCategory]
 
   return <main className="st-layout">
     <aside className="st-nav" aria-label="Settings navigation">

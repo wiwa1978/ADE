@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from "react"
 import {
   ArrowUp,
+  AtSign,
   CornerDownLeft,
   FileDiff,
   FolderOpen,
@@ -17,6 +18,7 @@ import {
 } from "lucide-react"
 import type { ApprovalPolicy, ProviderCatalogEntry, SkillsAndRulesCatalog } from "../../app-types"
 import { ModelPicker } from "./ModelPicker"
+import { insertMention, mentionAt, useFileMentions } from "./file-mentions"
 
 export function ComposerDock({
   draft,
@@ -45,6 +47,7 @@ export function ComposerDock({
   onQuickOpenPanel,
   textareaRef,
   engineLabel,
+  sessionId,
 }: {
   draft: string
   onDraftChange: (value: string) => void
@@ -73,6 +76,8 @@ export function ComposerDock({
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>
   /** Set for Claude Code / Codex sessions: they pick their own model, so no model picker is shown. */
   engineLabel?: string
+  /** Enables @-mentions of files in the session's workspace. */
+  sessionId?: string
 }) {
   const internalRef = useRef<HTMLTextAreaElement>(null)
   const ref = textareaRef ?? internalRef
@@ -85,6 +90,24 @@ export function ComposerDock({
     ? skillsCatalog.commands.filter(c => c.name.toLowerCase().includes(slashMatch[1].toLowerCase()))
     : []
   const showSlashMenu = filteredCommands.length > 0
+
+  // @-mentions: point the agent at a file in the workspace.
+  const [caret, setCaret] = useState(0)
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const [mentionDismissed, setMentionDismissed] = useState<number | null>(null)
+  const mention = hasWorkspace && sessionId && !showSlashMenu ? mentionAt(draft, Math.min(caret, draft.length)) : null
+  const mentionActive = mention && mention.start !== mentionDismissed ? mention : null
+  const mentionFiles = useFileMentions(hasWorkspace ? sessionId : undefined, mentionActive ? mentionActive.query : null)
+  const showMentionMenu = Boolean(mentionActive) && mentionFiles.length > 0
+  const applyMention = (path: string) => {
+    const next = insertMention(draft, Math.min(caret, draft.length), path)
+    onDraftChange(next.text)
+    setCaret(next.caret)
+    window.requestAnimationFrame(() => {
+      ref.current?.focus()
+      ref.current?.setSelectionRange(next.caret, next.caret)
+    })
+  }
 
   const applySlashCommand = (cmdName: string) => {
     const cmd = skillsCatalog.commands.find(c => c.name === cmdName)
@@ -150,6 +173,29 @@ export function ComposerDock({
         </div>
       ) : null}
 
+      {showMentionMenu ? (
+        <div className="ade-slash-menu" role="listbox" aria-label="Files">
+          {mentionFiles.map((file, idx) => {
+            const slash = file.lastIndexOf("/")
+            return (
+              <button
+                key={file}
+                type="button"
+                role="option"
+                aria-selected={idx === mentionIndex}
+                className={`ade-slash-item ${idx === mentionIndex ? "is-selected" : ""}`}
+                onMouseEnter={() => setMentionIndex(idx)}
+                onMouseDown={event => event.preventDefault()}
+                onClick={() => applyMention(file)}
+              >
+                <span className="ade-slash-name"><AtSign className="size-3" />{file.slice(slash + 1)}</span>
+                <span className="ade-slash-desc">{slash > 0 ? file.slice(0, slash) : ""}</span>
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
+
       <form className={`ade-composer-dock ${busy ? "is-busy" : ""}`} onSubmit={handleFormSubmit}>
         {attachments.length > 0 ? (
           <div className="ade-attachment-row">
@@ -173,12 +219,37 @@ export function ComposerDock({
           rows={2}
           value={draft}
           disabled={disabled}
-          placeholder={busy ? "Type to steer the running agent (Enter) or queue follow-up (Alt+Enter)…" : (placeholder || "Message ADE… type / for slash commands (plan, subagent, review, browser, compact)")}
+          placeholder={busy ? "Type to steer the running agent (Enter) or queue follow-up (Alt+Enter)…" : (placeholder || (hasWorkspace && sessionId ? "Message ADE… @ to mention a file, / for commands" : "Message ADE… type / for slash commands (plan, subagent, review, browser, compact)"))}
           onChange={e => {
             onDraftChange(e.target.value)
+            setCaret(e.target.selectionStart ?? e.target.value.length)
             setSlashIndex(0)
+            setMentionIndex(0)
           }}
+          onSelect={e => setCaret(e.currentTarget.selectionStart ?? 0)}
           onKeyDown={e => {
+            if (showMentionMenu && mentionActive) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault()
+                setMentionIndex(i => (i + 1) % mentionFiles.length)
+                return
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault()
+                setMentionIndex(i => (i - 1 + mentionFiles.length) % mentionFiles.length)
+                return
+              }
+              if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                e.preventDefault()
+                applyMention(mentionFiles[mentionIndex] ?? mentionFiles[0])
+                return
+              }
+              if (e.key === "Escape") {
+                e.preventDefault()
+                setMentionDismissed(mentionActive.start)
+                return
+              }
+            }
             if (showSlashMenu) {
               if (e.key === "ArrowDown") {
                 e.preventDefault()

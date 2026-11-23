@@ -31,6 +31,8 @@ export type Settings = {
   notifyOnApproval: boolean
   /** Reopen the last project or session after a reload. */
   restoreLastView: boolean
+  /** Monthly spend (USD) to warn at; 0 = no budget. */
+  monthlyBudget: number
 }
 
 const storageKey = "ade-settings-v1"
@@ -58,6 +60,7 @@ const defaults: Settings = {
   notifyOnFinish: false,
   notifyOnApproval: false,
   restoreLastView: true,
+  monthlyBudget: 0,
 }
 
 function readSettings(): { settings: Settings; error: string } {
@@ -92,6 +95,7 @@ function readSettings(): { settings: Settings; error: string } {
         notifyOnFinish: typeof value.notifyOnFinish === "boolean" ? value.notifyOnFinish : defaults.notifyOnFinish,
         notifyOnApproval: typeof value.notifyOnApproval === "boolean" ? value.notifyOnApproval : defaults.notifyOnApproval,
         restoreLastView: typeof value.restoreLastView === "boolean" ? value.restoreLastView : defaults.restoreLastView,
+        monthlyBudget: typeof value.monthlyBudget === "number" && Number.isFinite(value.monthlyBudget) && value.monthlyBudget >= 0 && value.monthlyBudget <= 1_000_000 ? value.monthlyBudget : defaults.monthlyBudget,
       },
       error: "",
     }
