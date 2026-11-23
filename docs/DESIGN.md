@@ -2,7 +2,8 @@
 
 > **Status:** Draft v2 (Tightened Post-Roast — Phase 0 Complete)  
 > **Codename Note:** `ADE` is an internal repo codename (Warp has marketed "Agentic Development Environment" since mid-2025; rename before public launch).  
-> **Scope:** Tightened MVP-first Software Factory, honest EU Residency vs. CLOUD-Act-Free EU Sovereignty, two deployment flavors, and the 4 implemented modular seams.
+> **Scope:** Tightened MVP-first Software Factory, honest EU Residency vs. CLOUD-Act-Free EU Sovereignty, two deployment flavors, and the 4 implemented modular seams.  
+> **Update (Nov 2026):** Blueprints run *inside* sessions, and **Vibe coding** is one of the blueprints (§3.5). There is one product, not a separate Factory next to sessions.
 
 ---
 
@@ -20,7 +21,7 @@ Merge-Ready PR ◀── Spec-Linked Review ◀── Independent Verification �
 
 ### Core Product Principles
 1. **GitHub Issue In, Merge-Ready PR Out:** Every task starts from clear intent (a GitHub issue or prompted work item) and ends with a verified, reviewable, merge-ready Pull Request—complete with test/E2E evidence and spec traceability.
-2. **Modular Rigor (Anti-Waterfall):** The developer decides how structured each task should be. A 1-line bugfix uses a lightweight `Quick Fix` recipe; an auth or schema migration uses `Spec-First` with human checkpoints and full E2E verification.
+2. **Modular Rigor (Anti-Waterfall):** The developer decides how structured each task should be. A 1-line bugfix uses a lightweight `Quick Fix` recipe; an auth or schema migration uses `Spec-First` with human checkpoints and full E2E verification. At the free end, **Vibe coding** has no stages at all. Each project picks its default and each session can choose differently (§3.5).
 3. **Single Captain UX (Zero Tab Fatigue, With Escape Hatch):** The developer communicates with **one Captain agent** per issue/project. Subagents run in isolated sandboxes and escalate questions to the Captain, which resolves what it can from the spec/repo and batches true human decisions into one thread. Subagent logs, diffs, and terminals remain inspectable in a glass box—with an explicit **Pause / Take Over** button whenever a human needs to step in directly.
 4. **Modular by Design, Minimal on Day 1:** Every boundary a customer might care about (Workflow, Captain Host, Worker Sandbox, Model Provider) sits behind a clean interface seam from Day 1—while only the 1–2 highest-leverage adapters are implemented at launch.
 5. **No Permanent Lock-In & EU-Ready:** Model providers are switchable per stage and per agent (`pi-ai`). The Captain runtime is portable between local Node, Cloudflare Durable Objects, and EU-sovereign clusters (`celld` or EU containers).
@@ -81,10 +82,11 @@ Never underprice dedicated EU sovereignty at \$149/mo, and never single-source c
 ### 3.3 Pluggable Factory Blueprints & Per-Stage / Per-Agent Model Routing
 Developers shouldn't be locked into one rigid methodology—different repositories (greenfield vs. brownfield vs. regulated enterprise) demand different Spec-Driven Development (SDD) workflows.
 
-In ADE, each project selects a **Factory Blueprint** (declarative manifest + prompt templates + Git artifact layout + deterministic hooks/gates), and can override/toggle stages per issue:
+In ADE, each project selects a **Factory Blueprint** (declarative manifest + prompt templates + Git artifact layout + deterministic hooks/gates) as its default. Each session can choose a different one (§3.5):
 
 | Built-In Blueprint | Philosophy | Best For | Stage Flow & Git Artifacts |
 | :--- | :--- | :--- | :--- |
+| **Vibe coding** *(No stages)* | Free-form: you and the Captain decide the work as you go | Exploring, prototypes, quick experiments, anything that doesn't fit a recipe | No stages or gates. The session works as it does today: chat, subagents, checks, diff, PR when you choose |
 | **Automated Factory** *(Lite)* | Hook-driven autonomous pipeline (inspired by automated Claude Code factories) | Fast bugs, small/medium features, high-velocity repos | `triage → plan → implement → deterministic hooks (lint/test/review) → publish_pr` |
 | **OpenSpec** *(Delta-Spec)* | Lightweight, change-centric deltas against a single living source-of-truth spec | **Brownfield / existing apps** needing speed without waterfall | `triage → propose delta (openspec/changes/) → implement → verify → review → archive into master spec + PR` |
 | **Spec Kit** *(Phase-Gated)* | Structured, linear phase-gated pipeline (`specify` conventions) | **Greenfield (0→1)** features & teams wanting predictable guardrails | `constitution (.specify/) → specify [gate] → plan [gate] → tasks → implement → verify → review → PR` |
@@ -111,6 +113,61 @@ In ADE, each project selects a **Factory Blueprint** (declarative manifest + pro
 - **Flavor 2 Handover:** Instant & automatic—desktop, web, and phone all connect via WebSocket to the same Cloudflare Durable Object Captain.
 - **Flavor 1 Handover:** While the Mac is awake, the local Captain maintains an outbound encrypted WebSocket connection to a lightweight relay (no port forwarding, works over 5G). When the Mac sleeps, the phone displays offline state with last-known status and a clear path to Flavor 2 for 24/7 operation.
 - **Mobile-First Captain Screens:** (1) Issue Inbox (`Needs Decision`, `Running`, `PR Ready`), (2) Captain Chat with voice dictation & 1-tap decision buttons, (3) Spec/PR Review Card, (4) Quick New Issue trigger.
+
+### 3.5 Blueprints Run Inside Sessions (One Product)
+
+A **session** is where every piece of work happens: its own worktree and branch, one Captain (the ADE agent on Pi Durable), subagents, a run target (this computer, Docker, SSH, WSL2, Boat.dev), checks, diff, and PR. The **blueprint** decides how structured that session is. Vibe coding is the blueprint with no stages. There is no separate Factory pipeline next to sessions.
+
+**Where the blueprint is chosen**
+
+| Level | What it does | Why |
+| :--- | :--- | :--- |
+| **Project default** | Every new session in the project starts with this blueprint. Stored with the project; a repo can also commit it as `.ade/blueprint.json` (custom blueprints live there anyway). | The way of working belongs to the repository. Spec Kit, OpenSpec and Squad keep their files in the repo (`.specify/`, `openspec/`, `.squad/`), and a regulated or brownfield repo should get its process without anyone remembering to pick it. |
+| **Session override** | The New session screen shows "Way of working", filled in from the project default; you can pick another before starting. | Within one project a one-line fix and a schema migration need different rigor, and sometimes you just want to try something (Vibe) in a project that is normally Spec-First. |
+| **Project lock** *(optional, off by default)* | New sessions must use the project's blueprint; Vibe and the others are hidden. | For team or regulated repos, so nobody skips the spec and review gates. |
+
+Same pattern as "Run on": a project default, a per-session choice, and the session remembers what it started with. Changing the project default doesn't change running sessions.
+
+**What a session on a blueprint looks like**
+- The same session view as today, plus a **Stages view in the bottom drawer** (the drawer that holds the terminal, Cmd+J). The drawer gets two tabs, **Stages** and **Terminal**. In a blueprint session it opens on Stages, so it's clear at a glance where the work is:
+
+  ```text
+  ┌ Stages │ Terminal ─────────────────────────────────────────────────────────────────────────────┐
+  │ Spec Kit                                                                         2 of 7 done │
+  │  ✓ Specify ━━━ ⏸ Plan ─── ○ Tasks ─── ○ Build ─── ○ Verify ─── ○ Review ─── ○ PR           │
+  │    spec.md      waiting for                                                                  │
+  │                 your approval                                                                │
+  │                 [Approve] [Request changes]                                                  │
+  └──────────────────────────────────────────────────────────────────────────────────────────────┘
+  ```
+
+  - Each stage is a card on one line, with its state: done ✓, working (spinner), waiting for you ⏸ (gate), failed ✕, not started ○. The current stage is highlighted, and the connecting line fills up as stages finish.
+  - Under each card is what it produced (spec.md, plan.md, the diff, test results) or what it's doing now. A stage that runs in parallel shows its subagents ("Build · 3 of 5", one row per subagent when expanded).
+  - The gate's **Approve / Request changes** buttons are on the waiting stage itself, so the drawer is enough to move the work on.
+  - Clicking a stage expands it in the drawer (who worked on it, its output, its checks); "Open in Progress" shows the full detail beside the chat.
+  - **When the drawer is closed**, a slim bar stays at the bottom of the session with the current stage ("Spec Kit · Plan · waiting for approval · 2 of 7"), so the stage is never hidden. Clicking it opens the drawer on Stages. (New: today a closed drawer leaves nothing on screen, and only the header's terminal button opens it.)
+  - In a blueprint session the drawer opens by itself when a stage needs you (a gate, or a failed stage). It doesn't open for other stage changes.
+  - On the phone, Stages is a full-screen view with the stages listed top to bottom.
+  - Vibe sessions have no Stages tab; the drawer is the terminal as it is today.
+- The **Progress** panel adds the same stages, with each stage's status, next to the agents and tasks.
+- **Gates** (`approvalGate`) become approval cards in the session, the Inbox, Slack and the phone ("Approve spec", "Approve plan"). Under Autopilot, gates still stop for you; Autopilot only skips command approvals.
+- **Stages** tell the Captain what to do next and which tools, model (§3.3 resolution) and checks apply. `executor: "parallel_subagents"` stages hand work to subagents on any allowed harness, through the same scheduler, limits and usage-limit handling as every session.
+- **Goldfish review** runs as a subagent with no chat history and read-only access to the whole codebase.
+- **Stage artifacts** (spec, plan, delta, decisions) are files in the session's branch at the blueprint's `artifactPathPattern`, so they're reviewed and merged with the code.
+- You can still chat with the Captain at any time. Talking doesn't break the stage flow; the Captain says which stage it's in and what's left.
+- **Switching mid-session:** going from a blueprint to Vibe is always allowed (the stages are dropped and the artifacts stay). Going from Vibe to a blueprint starts at the blueprint's first stage, with the work so far as context.
+
+**Rules**
+- Every feature built for sessions works under every blueprint: run targets, subagent harnesses, permissions and guardrails, limits, the subagent queue, Progress, attempts, automations.
+- An automation or a GitHub issue that starts a session uses the project default, unless the automation names a blueprint.
+- Existing projects default to **Vibe**, so nothing changes until a project picks a blueprint. (Today the stored default is `automated-factory`, which sessions ignore; migrate it to `vibe` unless the user chose it.)
+
+**Migration from the current code**
+1. Add `blueprintId` to sessions (from the project default, overridable at creation) and "Way of working" to New session, Project settings and Automations. Add `vibe` to `packages/blueprints`.
+2. Run the stage engine (`packages/captain-core`) per session instead of per Factory run: the Captain's system prompt gets the current stage, and stage transitions, gates and artifacts are stored with the session.
+3. Show stages in the bottom drawer's Stages tab (with the current stage on the closed drawer's handle) and in Progress, and gates as approval cards.
+4. Retire the separate Factory screen and `runtime/factory-runner.ts` once sessions cover it.
+5. BMAD is described above but not yet in `packages/blueprints`. Add it after the session integration works with the existing ones.
 
 ---
 
@@ -246,3 +303,5 @@ The existing repository (`/Users/wim/Code/Repositories/Personal/ADE`) already gi
 | **`runtime/models.ts` & `copilot-auth.ts`** | Multi-provider selection + Copilot OAuth + DPAPI | **Extend:** Add stage/agent override hierarchy, 1-click Model Profiles, and EU-Only Mode policy guard. |
 | **`runtime/approvals.ts`, `artifacts.ts`, `timeline.ts`, `browser.ts`** | Early feature scaffolding | **Wire into Factory:** Map approvals to workflow gates, artifacts to living specs/verification reports, and browser checks to the `verify` stage. |
 | **`runtime/environments.ts` (SSH tunneling)** | Manual SSH port-forwarding | **Keep as optional power-user host** or supersede with Flavor 2 Hosted Captain + Flavor 1 outbound mobile relay. |
+| **Sessions** (`runtime/host.ts`, `services/`, `agent-workflow.ts`, `src/workspace/`) — *added after this doc* | The product in daily use: worktree per session, Pi Durable Captain, subagents on Pi / Claude Code / Codex, run targets (Docker, SSH, WSL2, Boat.dev), limits, Autopilot with guardrails, Progress | **Keep as the one product.** Blueprints run inside sessions (§3.5). |
+| **Factory** (`packages/captain-core`, `packages/blueprints`, `runtime/factory-runner.ts`, Factory screen) | Blueprint stage engine running separately from sessions; projects store a `blueprintId` that sessions ignore | **Fold into sessions** (§3.5 migration), then retire the separate runner and screen. |
