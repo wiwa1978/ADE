@@ -76,3 +76,25 @@
 .ade-rule-form input { flex: 1; min-width: 0; }
 .ade-pill.is-deny { color: rgb(207 98 91); border-color: rgb(207 98 91 / 0.5); }
 .project-scripts-check { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; font-size: 12.5px; }
+
+/* Best of N */
+.ade-attempts-row { display: flex; align-items: center; gap: 12px; }
+.ade-attempts-agents { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 8px; }
+.ade-attempts-agents label { display: grid; gap: 4px; font-size: 12px; }
+.ade-attempts-agents label > span { opacity: 0.7; }
+.ade-attempts { flex: 1; overflow: auto; padding: 28px 32px; display: grid; gap: 18px; align-content: start; }
+.ade-attempts-head { display: grid; gap: 6px; }
+.ade-attempts-head h1 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 18px; font-weight: 600; }
+.ade-attempts-head p { margin: 0; color: rgb(var(--muted)); font-size: 13px; }
+.ade-attempts-head .ade-link-btn { justify-self: start; display: inline-flex; align-items: center; gap: 4px; }
+.ade-attempts-grid { display: grid; gap: 12px; }
+.ade-attempt-card { display: grid; gap: 10px; align-content: start; padding: 14px; border: 1px solid rgb(var(--border)); border-radius: 12px; background: rgb(var(--surface)); min-width: 0; }
+.ade-attempt-card.is-archived { opacity: 0.55; }
+.ade-attempt-card > header { display: flex; align-items: center; gap: 8px; }
+.ade-attempt-card > header strong { font-size: 14px; }
+.ade-attempt-card > header .ade-row-tag { margin-left: auto; }
+.ade-attempt-facts { display: grid; gap: 4px; font-size: 12.5px; }
+.ade-attempt-files { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; font-size: 11.5px; }
+.ade-attempt-files li { display: flex; gap: 6px; align-items: center; }
+.ade-attempt-files code { flex: 1; min-width: 0; }
+.ade-attempt-actions { display: flex; gap: 6px; flex-wrap: wrap; }

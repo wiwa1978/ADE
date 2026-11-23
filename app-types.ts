@@ -56,7 +56,7 @@ export type {
 } from "./packages/protocol/index.ts"
 import type { GitHubIssue } from "./packages/protocol/index.ts"
 
-export type Screen = "inbox" | "projects" | "project" | "work" | "factory" | "settings" | "worktrees"
+export type Screen = "inbox" | "projects" | "project" | "work" | "factory" | "settings" | "worktrees" | "attempts"
 
 export type TaskStart = {
   id: string
@@ -68,6 +68,8 @@ export type TaskStart = {
   githubIssue?: GitHubIssue
   /** Check out an existing branch or pull request instead of creating a new branch. */
   startFrom?: StartFrom
+  /** Shared by parallel attempts at the same task (best of N). */
+  attemptGroup?: string
   initialMessage?: { id: string; content: string; provider: string; model: string; reasoning: string }
 }
 

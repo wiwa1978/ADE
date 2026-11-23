@@ -170,6 +170,7 @@ export class TurnStore {
 				label,
 				...(chat ? { chatThread: true } : {}),
 				...(task ? { projectId: task.projectId } : {}),
+				...(task?.attemptGroup ? { attemptGroup: task.attemptGroup } : {}),
 				status: busy ? "working" : "idle",
 				archivedAt: (task ?? chat)?.archivedAt ?? null,
 				createdAt: (task ?? chat)?.createdAt ?? null,

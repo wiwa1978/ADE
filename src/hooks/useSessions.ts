@@ -48,6 +48,8 @@ export function useSessions(params: {
   onSessionArchived: (id: string) => void
   onProjectArchived: (projectId: string) => void
   onExpandProject: (projectId: string) => void
+  /** Show the comparison of parallel attempts started together. */
+  onOpenAttempts?: (attemptGroup: string) => void
   onOpenStreamPane: (projectId: string, streamId: string) => void
   onError: (msg: string) => void
 }) {
@@ -68,6 +70,7 @@ export function useSessions(params: {
     onProjectArchived,
     onExpandProject,
     onError,
+    onOpenAttempts,
   } = params
 
   const [sessions, setSessions] = useState<Conversation[]>([])
@@ -344,61 +347,99 @@ export function useSessions(params: {
     startFrom?: StartFrom
     /** Session name when there is no prompt to name it after (e.g. "PR #12: Fix login"). */
     title?: string
+    /** Best of N: one agent per attempt; each gets its own worktree and the same task. */
+    attempts?: Array<"pi" | "claude-code" | "codex">
   }) => {
     setCreatingSession(true)
     setLaunchError("")
-    // Claude Code / Codex sessions get their task after the engine is chosen.
-    const external = Boolean(input.engine && input.engine !== "pi" && input.kind !== "none")
-    const taskId = crypto.randomUUID()
-    const start: TaskStart = {
-      id: taskId,
-      title: (input.title || input.prompt).replace(/\s+/g, " ").trim().slice(0, 80) || "New session",
-      repository: input.repository,
-      kind: input.kind,
-      environmentId: activeEnvironmentId,
-      projectId: input.projectId,
-      githubIssue: input.githubIssue,
-      ...(input.startFrom ? { startFrom: input.startFrom } : {}),
-      ...(!external && modelReady && input.prompt.trim()
-        ? {
-            initialMessage: {
-              id: crypto.randomUUID(),
-              content: input.prompt,
-              provider: effectiveProvider,
-              model: selectedModel,
-              reasoning: settings.reasoning,
-            },
-          }
-        : {}),
-    }
-    storePendingStart(start)
-    try {
-      const res = await request<{ session: Conversation }>("/api/coding-tasks", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(start),
-      })
-      clearPendingStart(taskId)
-      if (external) {
-        await request(`/api/sessions/${encodeURIComponent(taskId)}/engine`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ engine: input.engine }) })
-        if (input.prompt.trim()) {
-          await request(`/api/coding-tasks/${encodeURIComponent(taskId)}/messages`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: input.prompt }) })
-        }
+    const baseTitle = (input.title || input.prompt).replace(/\s+/g, " ").trim().slice(0, 72) || "New session"
+    const attempts = input.attempts && input.attempts.length > 1 && input.kind === "worktree" && !input.startFrom ? input.attempts.slice(0, 4) : null
+    const attemptGroup = attempts ? crypto.randomUUID() : undefined
+
+    /** Create one session, hand it to its agent, and send the task. */
+    const createOne = async (engine: "pi" | "claude-code" | "codex" | undefined, title: string) => {
+      // Claude Code / Codex sessions get their task after the engine is chosen.
+      const external = Boolean(engine && engine !== "pi" && input.kind !== "none")
+      const taskId = crypto.randomUUID()
+      const start: TaskStart = {
+        id: taskId,
+        title,
+        repository: input.repository,
+        kind: input.kind,
+        environmentId: activeEnvironmentId,
+        projectId: input.projectId,
+        githubIssue: input.githubIssue,
+        ...(input.startFrom ? { startFrom: input.startFrom } : {}),
+        ...(attemptGroup ? { attemptGroup } : {}),
+        ...(!external && modelReady && input.prompt.trim()
+          ? {
+              initialMessage: {
+                id: crypto.randomUUID(),
+                content: input.prompt,
+                provider: effectiveProvider,
+                model: selectedModel,
+                reasoning: settings.reasoning,
+              },
+            }
+          : {}),
       }
+      storePendingStart(start)
+      try {
+        const res = await request<{ session: Conversation }>("/api/coding-tasks", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(start),
+        })
+        clearPendingStart(taskId)
+        if (external) {
+          await request(`/api/sessions/${encodeURIComponent(taskId)}/engine`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ engine }) })
+          if (input.prompt.trim()) {
+            // Don't wait for the agent's turn; several attempts run at the same time.
+            void request(`/api/coding-tasks/${encodeURIComponent(taskId)}/messages`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: input.prompt }) })
+              .catch(err => onError(err instanceof Error ? err.message : "Could not send the task to the agent."))
+          }
+        }
+        return { id: res.session.id, waitingForModel: !external && !start.initialMessage && Boolean(input.prompt.trim()) }
+      } catch (err) {
+        clearPendingStart(taskId)
+        throw err
+      }
+    }
+
+    try {
+      if (attempts && attemptGroup) {
+        const letters = "ABCD"
+        // One after another: Git allows one worktree operation per repository at a time. The agents
+        // still work in parallel, because each task is sent without waiting for the agent.
+        const results: PromiseSettledResult<{ id: string; waitingForModel: boolean }>[] = []
+        for (const [index, engine] of attempts.entries()) {
+          results.push(await createOne(engine, `${baseTitle} · ${letters[index]}`).then(
+            value => ({ status: "fulfilled" as const, value }),
+            (reason: unknown) => ({ status: "rejected" as const, reason }),
+          ))
+        }
+        await loadSessions()
+        const failed = results.filter(result => result.status === "rejected")
+        if (failed.length === results.length) throw (failed[0] as PromiseRejectedResult).reason
+        if (failed.length) onError(`${failed.length} of ${results.length} attempts could not start.`)
+        if (input.projectId) onExpandProject(input.projectId)
+        onOpenAttempts?.(attemptGroup)
+        return
+      }
+      const created = await createOne(input.engine, baseTitle)
       await loadSessions()
-      if (!external && !start.initialMessage && input.prompt.trim()) {
+      if (created.waitingForModel) {
         setDraft(input.prompt)
         onError(`${modelSetupMessage} Your message is waiting in the composer.`)
       }
-      onOpenSession(res.session.id)
+      onOpenSession(created.id)
       if (input.projectId) onExpandProject(input.projectId)
     } catch (err) {
-      clearPendingStart(taskId)
       setLaunchError(err instanceof Error ? err.message : "Could not create session.")
     } finally {
       setCreatingSession(false)
     }
-  }, [activeEnvironmentId, modelReady, effectiveProvider, selectedModel, settings.reasoning, loadSessions, modelSetupMessage, onError, onOpenSession, onExpandProject])
+  }, [activeEnvironmentId, modelReady, effectiveProvider, selectedModel, settings.reasoning, loadSessions, modelSetupMessage, onError, onOpenSession, onExpandProject, onOpenAttempts])
 
   const quickStartStream = useCallback(async (project: Project, prompt: string) => {
     const taskId = crypto.randomUUID()

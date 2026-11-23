@@ -503,6 +503,8 @@ export type Conversation = {
   lastTurnStatus?: "pending" | "completed" | "failed" | "blocked" | null;
   /** Set when the session runs on Claude Code or Codex instead of ADE's built-in agent. */
   engine?: "claude-code" | "codex";
+  /** Set on sessions started together as parallel attempts at one task. */
+  attemptGroup?: string;
   workspace?: ConversationWorkspace;
   messages: ConversationMessage[];
 };

@@ -71,6 +71,8 @@ export type CodingTaskRow = {
 	worktreeRemoved: number;
 	/** 1 when the session checks out a branch that already existed (started from a branch or pull request). */
 	existingBranch: number;
+	/** Sessions started together as attempts at the same task (best of N). */
+	attemptGroup: string | null;
 };
 
 export type ChatThreadRow = {

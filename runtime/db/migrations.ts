@@ -201,6 +201,14 @@ export const HOST_MIGRATIONS: readonly SchemaMigration[] = [
 			ensureColumn(db, "approval_rules", "effect", "TEXT NOT NULL DEFAULT 'allow'");
 		},
 	},
+	{
+		version: 4,
+		name: "coding_tasks_attempt_group",
+		up(db) {
+			// Best of N: sessions started together on the same task share a group to compare them.
+			ensureColumn(db, "coding_tasks", "attemptGroup", "TEXT");
+		},
+	},
 ];
 
 export const LATEST_HOST_SCHEMA_VERSION = HOST_MIGRATIONS[HOST_MIGRATIONS.length - 1].version;

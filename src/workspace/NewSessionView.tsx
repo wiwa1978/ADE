@@ -73,6 +73,7 @@ export function NewSessionView({
     engine: EngineId
     startFrom?: StartFrom
     title?: string
+    attempts?: EngineId[]
   }) => Promise<void>
   onLookupIssue?: (projectId: string, url: string) => Promise<GitHubIssue>
 }) {
@@ -90,6 +91,9 @@ export function NewSessionView({
   const [engines, setEngines] = useState<EngineOption[]>([])
   const [engine, setEngine] = useState<EngineId>("pi")
   const [startChoice, setStartChoice] = useState<StartChoice>({ mode: "new" })
+  // Best of N: run the same task several times, each in its own worktree, possibly with different agents.
+  const [attemptCount, setAttemptCount] = useState(1)
+  const [attemptEngines, setAttemptEngines] = useState<Array<EngineId | null>>([null, null, null])
 
   useEffect(() => {
     let active = true
@@ -178,6 +182,8 @@ export function NewSessionView({
   const startFromIncomplete = canStartFrom && startChoice.mode !== "new" && !startFrom
   const startTitle = startChoice.mode === "branch" ? startChoice.branch
     : startChoice.mode === "pr" && startChoice.number ? `PR #${startChoice.number}${startChoice.title ? `: ${startChoice.title}` : ""}` : undefined
+  const canAttempt = kind === "worktree" && startChoice.mode === "new"
+  const availableEngines = engines.filter(option => option.available)
   const canSubmit = !starting && !startFromIncomplete && (Boolean(prompt.trim()) || Boolean(startFrom)) && (kind === "none" || Boolean(effectiveRepo.trim()))
 
   const handleSubmit = (e: FormEvent) => {
@@ -191,6 +197,7 @@ export function NewSessionView({
       githubIssue: linkedIssue ?? undefined,
       engine: engineAllowed(engine) ? engine : "pi",
       ...(startFrom ? { startFrom, title: startTitle } : {}),
+      ...(canAttempt && attemptCount > 1 ? { attempts: attemptEngines.slice(0, attemptCount).map(item => item ?? engine) } : {}),
     })
   }
 
@@ -299,6 +306,37 @@ export function NewSessionView({
                   )
                 })}
               </div>
+            </div>
+          ) : null}
+
+          {canAttempt ? (
+            <div className="sf-label">
+              <span>Attempts</span>
+              <div className="ade-attempts-row">
+                <div className="sf-segmented h-9" role="radiogroup" aria-label="Attempts">
+                  {[1, 2, 3].map(count => (
+                    <button key={count} type="button" role="radio" aria-checked={attemptCount === count}
+                      className={`sf-seg-btn justify-center ${attemptCount === count ? "is-active" : ""}`} style={{ minWidth: 44 }}
+                      onClick={() => setAttemptCount(count)}>
+                      {count}
+                    </button>
+                  ))}
+                </div>
+                <small className="opacity-65">{attemptCount === 1 ? "One agent on one branch." : `${attemptCount} agents work on the same task, each on its own branch. Compare the results and keep the best.`}</small>
+              </div>
+              {attemptCount > 1 && availableEngines.length > 1 ? (
+                <div className="ade-attempts-agents">
+                  {Array.from({ length: attemptCount }, (_, index) => (
+                    <label key={index}>
+                      <span>Attempt {"ABC"[index]}</span>
+                      <select className="sf-field !h-8" value={attemptEngines[index] ?? engine}
+                        onChange={event => setAttemptEngines(current => current.map((item, i) => (i === index ? event.target.value as EngineId : item)))}>
+                        {availableEngines.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -424,7 +462,7 @@ export function NewSessionView({
                 disabled={!canSubmit}
               >
                 <ArrowUp className="size-3.5" />
-                {starting ? "Starting…" : "Start session"}
+                {starting ? "Starting…" : canAttempt && attemptCount > 1 ? `Start ${attemptCount} attempts` : "Start session"}
               </button>
             </div>
           </div>

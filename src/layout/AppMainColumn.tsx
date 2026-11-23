@@ -17,6 +17,7 @@ import { NewSessionView } from "../workspace/NewSessionView"
 import { ProjectStreamsWorkspace } from "../projects/ProjectStreamsWorkspace"
 import { FactoryView } from "../factory/FactoryView"
 import type { FactoryRunDetail } from "../factory/types"
+import { AttemptsView } from "../attempts/AttemptsView"
 
 type AppMainColumnProps = {
   screen: Screen
@@ -106,6 +107,11 @@ type AppMainColumnProps = {
   inboxEntries: Record<string, InboxEntry>
   onOpenSessionConversation: (session: Conversation) => void
   onArchiveSession: (sessionId: string) => void
+  /** Best of N: the attempt group shown on the "attempts" screen. */
+  attemptsGroup: string | null
+  onOpenAttempts: (group: string) => void
+  onBackFromAttempts: () => void
+  onArchiveAttempt: (sessionId: string) => Promise<void>
 }
 
 export function AppMainColumn(props: AppMainColumnProps) {
@@ -227,6 +233,15 @@ export function AppMainColumn(props: AppMainColumnProps) {
           onProjectSaved={props.onProjectSaved}
           onBrowserStateChange={stream.setBrowserState}
           onOpenExternal={stream.openExternalBrowser}
+        />
+      ) : screen === "attempts" && props.attemptsGroup ? (
+        <AttemptsView
+          group={props.attemptsGroup}
+          sessions={sessions}
+          entries={props.inboxEntries}
+          onOpenSession={props.onOpenSessionConversation}
+          onArchive={props.onArchiveAttempt}
+          onBack={props.onBackFromAttempts}
         />
       ) : screen === "worktrees" ? (
         <WorktreeDiagnostics state={worktrees} onBack={props.onBackFromWorktrees} />
@@ -377,6 +392,7 @@ export function AppMainColumn(props: AppMainColumnProps) {
           onRemoveAttachment={props.onRemoveAttachment}
           onSendMessage={props.onSendMessage}
           onAskAgent={props.onAskAgent}
+          onOpenAttempts={props.onOpenAttempts}
           onSteerSession={props.onSteerSession}
           onAbortSession={props.onAbortSession}
           onCompactSession={props.onCompactSession}

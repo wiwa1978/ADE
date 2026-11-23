@@ -18,6 +18,8 @@ export type CreateCodingTaskInput = {
 	githubIssue?: unknown;
 	/** Start from an existing branch or pull request instead of a new branch. */
 	startFrom?: unknown;
+	/** Group id shared by parallel attempts at the same task. */
+	attemptGroup?: unknown;
 	initialMessage?: {
 		id?: unknown;
 		content?: unknown;
@@ -229,6 +231,8 @@ export class TaskStore {
 		}
 		const project = typeof input.projectId === "string" ? this.#projects.get(input.projectId) ?? null : null;
 		const startFrom = parseStartFrom(input.startFrom);
+		if (input.attemptGroup != null && (typeof input.attemptGroup !== "string" || !/^[0-9a-f-]{36}$/i.test(input.attemptGroup))) throw badRequest("Invalid attempt group.");
+		const attemptGroup = typeof input.attemptGroup === "string" ? input.attemptGroup : null;
 		if (startFrom && input.kind !== "worktree") throw badRequest("Starting from a branch or pull request needs its own worktree.");
 		const githubIssue = validateLinkedIssue(input.githubIssue, project);
 		if (input.kind === "none" && input.repository.trim()) {
@@ -282,9 +286,9 @@ export class TaskStore {
 					if (initial && this.#turns.exists(initial.id)) {
 						throw conflict("This initial message ID already belongs to another turn.");
 					}
-					this.#db.prepare("INSERT INTO coding_tasks (id,title,repository,kind,base,branch,status,createdAt,initialTurnId,projectId,initialTitle,issueUrl,issueRepository,issueNumber,issueTitle,issueState,existingBranch) VALUES (?,?,?,?,?,?,'provisioning',?,?,?,?,?,?,?,?,?,?)")
+					this.#db.prepare("INSERT INTO coding_tasks (id,title,repository,kind,base,branch,status,createdAt,initialTurnId,projectId,initialTitle,issueUrl,issueRepository,issueNumber,issueTitle,issueState,existingBranch,attemptGroup) VALUES (?,?,?,?,?,?,'provisioning',?,?,?,?,?,?,?,?,?,?,?)")
 						.run(input.id, input.title.trim(), repository, input.kind, base, branch, now, initial?.id ?? null, normalizedInput.projectId, input.title.trim(),
-							githubIssue?.url ?? null, githubIssue?.repository ?? null, githubIssue?.number ?? null, githubIssue?.title ?? null, githubIssue?.state ?? null, prepared ? 1 : 0);
+							githubIssue?.url ?? null, githubIssue?.repository ?? null, githubIssue?.number ?? null, githubIssue?.title ?? null, githubIssue?.state ?? null, prepared ? 1 : 0, attemptGroup);
 					if (initial) {
 						this.#db.prepare("INSERT INTO turns (id,mode,content,provider,model,reasoning,status,createdAt,updatedAt,taskId) VALUES (?,'coding',?,?,?,?,'pending',?,?,?)")
 							.run(initial.id, initial.content, initial.provider, initial.model, initial.reasoning, now, now, input.id);

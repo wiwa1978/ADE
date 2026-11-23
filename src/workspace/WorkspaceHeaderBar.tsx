@@ -50,6 +50,7 @@ export function WorkspaceHeaderBar({
   projectName,
   onOpenProject,
   stateLabel,
+  onOpenAttempts,
 }: {
   session: Conversation
   isBusy: boolean
@@ -80,6 +81,8 @@ export function WorkspaceHeaderBar({
   onOpenProject?: () => void
   /** Attention state from the inbox (e.g. "Ready to review"). */
   stateLabel?: { label: string; tone: string; hint: string }
+  /** For parallel attempts: open the comparison. */
+  onOpenAttempts?: (group: string) => void
 }) {
   return (
     <header className="ade-workspace-header">
@@ -94,6 +97,11 @@ export function WorkspaceHeaderBar({
         {stateLabel ? <span className={`ade-row-tag is-${stateLabel.tone}`} title={stateLabel.hint}>{stateLabel.label}</span>
           : isBusy ? <span className="ade-row-tag is-running">Working</span>
             : approvals.length > 0 ? <span className="ade-row-tag is-waiting">Needs approval</span> : null}
+        {session.attemptGroup && onOpenAttempts ? (
+          <button type="button" className="ade-row-tag is-review" onClick={() => onOpenAttempts(session.attemptGroup!)} title="This session is one of several attempts at the same task">
+            {session.label.match(/ · ([A-D])$/) ? `Attempt ${session.label.match(/ · ([A-D])$/)![1]} · ` : ""}Compare
+          </button>
+        ) : null}
         {runStatus?.setup === "running" ? <button type="button" className="ade-row-tag is-running" onClick={onOpenRun} title="The project's setup script is running in this worktree">Setting up…</button>
           : runStatus?.setup === "failed" ? <button type="button" className="ade-row-tag is-failed" onClick={onOpenRun} title="The setup script failed; open Run to see its output">Setup failed</button> : null}
         {runStatus?.check === "running" ? <button type="button" className="ade-row-tag is-running" onClick={onOpenRun} title="The project's check runs after each agent turn">Checking…</button>

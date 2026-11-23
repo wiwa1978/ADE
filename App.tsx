@@ -98,6 +98,13 @@ function AppInner() {
     onError: model.setRuntimeError,
   })
 
+  const [attemptsGroup, setAttemptsGroup] = useState<string | null>(null)
+  const openAttempts = useCallback((group: string) => {
+    setAttemptsGroup(group)
+    setNewSessionOpen(false)
+    setScreen("attempts")
+  }, [])
+
   const openSessionInWork = useCallback((id: string) => {
     setActiveSessionId(id)
     setNewSessionOpen(false)
@@ -124,6 +131,7 @@ function AppInner() {
     onSessionArchived: () => setActiveSessionId("coding"),
     onProjectArchived: () => { setSelectedProjectId(null); setScreen("work") },
     onExpandProject: expandProject,
+    onOpenAttempts: openAttempts,
     onOpenStreamPane: proj.openStreamPane,
     onError: model.setRuntimeError,
   })
@@ -374,6 +382,10 @@ function AppInner() {
         inboxEntries={inbox.entries}
         onOpenSessionConversation={openSession}
         onArchiveSession={id => void sess.toggleArchive(id, false)}
+        attemptsGroup={attemptsGroup}
+        onOpenAttempts={openAttempts}
+        onBackFromAttempts={() => setScreen("inbox")}
+        onArchiveAttempt={id => sess.toggleArchive(id, false)}
       />
 
       <AppOverlays

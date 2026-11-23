@@ -54,6 +54,7 @@ export function SplitWorkspace({
   onRemoveAttachment,
   onSendMessage,
   onAskAgent,
+  onOpenAttempts,
   onSteerSession,
   onAbortSession,
   onCompactSession,
@@ -106,6 +107,7 @@ export function SplitWorkspace({
   onRemoveAttachment?: (id: string) => void
   onSendMessage: (text: string) => void
   onAskAgent: (text: string) => Promise<void>
+  onOpenAttempts?: (group: string) => void
   onSteerSession: (text: string, mode: "steer" | "follow-up") => void
   onAbortSession: () => void
   onCompactSession: () => void
@@ -370,6 +372,7 @@ export function SplitWorkspace({
         projectName={projectName}
         onOpenProject={onOpenProject}
         stateLabel={stateLabel}
+        onOpenAttempts={onOpenAttempts}
         onOpenBrowser={() => openBrowser()}
         onOpenArtifact={() => openArtifact()}
         onOpenProcesses={openProcesses}

@@ -64,6 +64,12 @@ test("branch status, branch diff, and push work against the session's base", asy
 		assert.deepEqual(diff.files.map(file => [file.path, file.status, file.additions]).sort(), [["a.txt", "modified", 2], ["b.txt", "added", 1]]);
 		assert.match(await sessionGit.branchDiffFile(f.workspace, f.base, "a.txt"), /\+three/);
 		await assert.rejects(sessionGit.branchDiffFile(f.workspace, f.base, "../outside.txt"), /outside/);
+		// A new file the agent hasn't committed yet counts as an added file.
+		writeFileSync(join(f.workspace, "new.txt"), "hello\nworld\n");
+		const withNew = await sessionGit.branchDiffFiles(f.workspace, f.base);
+		assert.deepEqual(withNew.files.find(file => file.path === "new.txt"), { path: "new.txt", additions: 2, deletions: 0, status: "added" });
+		assert.match(await sessionGit.branchDiffFile(f.workspace, f.base, "new.txt"), /@@ -0,0 \+1,2 @@\n\+hello\n\+world/);
+		rmSync(join(f.workspace, "new.txt"));
 
 		await sessionGit.push(f.workspace);
 		assert.match(git(f.origin, "branch"), /ade\/test-session-1/);

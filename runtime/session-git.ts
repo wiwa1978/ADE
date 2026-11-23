@@ -2,7 +2,8 @@
 // push, and pull requests (create, view, mark ready, merge). GitHub calls go through the user's
 // authenticated GitHub CLI (`gh`), so ADE never handles a GitHub token itself.
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { workspacePath } from "./coding-tools.ts";
 import { badGateway, httpError } from "./http-error.ts";
@@ -213,6 +214,11 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 		return null;
 	}
 
+	async function untrackedFiles(cwd: string) {
+		const out = await tryGit(cwd, "ls-files", "--others", "--exclude-standard");
+		return out ? out.split("\n").filter(Boolean) : [];
+	}
+
 	async function conflictedFiles(cwd: string) {
 		const out = await tryGit(cwd, "diff", "--name-only", "--diff-filter=U");
 		return out ? out.split("\n").filter(Boolean) : [];
@@ -414,6 +420,12 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 				else if (path.includes(" => ")) path = path.split(" => ")[1];
 				return { path, additions: Number(add) || 0, deletions: Number(del) || 0, status: statuses.get(path) ?? "modified" };
 			});
+			// New files the agent hasn't committed yet are part of the branch's changes too.
+			const known = new Set(files.map(file => file.path));
+			for (const path of await untrackedFiles(cwd)) {
+				if (known.has(path)) continue;
+				files.push({ path, additions: countLines(join(cwd, path)), deletions: 0, status: "added" });
+			}
 			return { base, files };
 		},
 
@@ -421,6 +433,7 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 			workspacePath(cwd, file, { mustExist: false });
 			const base = await resolveBase(cwd, recordedBase);
 			if (!base) return "";
+			if ((await untrackedFiles(cwd)).includes(file)) return newFileDiff(cwd, file);
 			return git(cwd, "diff", "-M", base, "--", file);
 		},
 
@@ -498,6 +511,32 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 }
 
 export type SessionGit = ReturnType<typeof createSessionGit>;
+
+function readSmallText(path: string) {
+	try {
+		const info = statSync(path);
+		if (!info.isFile() || info.size > 1_000_000) return null;
+		const text = readFileSync(path, "utf8");
+		return text.includes("\0") ? null : text;
+	} catch {
+		return null;
+	}
+}
+
+function countLines(path: string) {
+	const text = readSmallText(path);
+	if (!text) return 0;
+	return text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+}
+
+/** A unified diff for a file that isn't in Git yet: every line is added. */
+function newFileDiff(cwd: string, file: string) {
+	const text = readSmallText(join(cwd, file));
+	if (text === null) return `diff --git a/${file} b/${file}\nnew file\nBinary or large file not shown\n`;
+	const lines = text.split("\n");
+	if (text.endsWith("\n")) lines.pop();
+	return `diff --git a/${file} b/${file}\nnew file mode 100644\n--- /dev/null\n+++ b/${file}\n@@ -0,0 +1,${lines.length} @@\n${lines.map(line => `+${line}`).join("\n")}\n`;
+}
 
 // ANSI color codes in CI logs (the escape character is intentional here).
 // oxlint-disable-next-line no-control-regex
