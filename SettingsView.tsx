@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react"
 import {
-  ArrowLeft, Bell, Blocks, Bot, Gauge, GitPullRequest, Palette, Search, Server, Settings2, Sparkles, Terminal, X, type LucideIcon,
+  ArrowLeft, Bell, Blocks, Bot, Check, Gauge, GitPullRequest, Palette, Search, Server, Settings2, Sparkles, Terminal, X, type LucideIcon,
 } from "lucide-react"
 import { EnvironmentSettings } from "./EnvironmentSettings"
 import { colorPalettes, paletteVariables, type Theme } from "./appearance-palettes"
@@ -252,14 +252,44 @@ export function SettingsView({
           {(["light", "system", "dark"] as const).map(value => <button type="button" role="radio" key={value} aria-checked={settings.theme === value} className={settings.theme === value ? "is-active" : ""} onClick={() => update({ theme: value })}>{value[0].toUpperCase() + value.slice(1)}</button>)}
         </div>
       </Row>
-      <Row title="Color palette" description="Every palette works in light and dark." stacked>
+      <Row title="Color palette" description="Nine quiet themes tuned for both light and dark mode." stacked>
         <div className="st-palettes">
           {colorPalettes.map(palette => {
             const variables = paletteVariables(palette.id, resolved)
-            return <button type="button" key={palette.id} className={`st-palette ${settings.palette === palette.id ? "is-active" : ""}`} onClick={() => update({ palette: palette.id })} aria-pressed={settings.palette === palette.id} title={palette.description}>
-              <span className="st-swatch" style={variables}><i /><i /><i /></span>
-              <span>{palette.id === "tokyo" ? (resolved === "dark" ? "Tokyo Night" : "Tokyo Day") : palette.name}</span>
-            </button>
+            const active = settings.palette === palette.id
+            return (
+              <button
+                type="button"
+                key={palette.id}
+                className={`st-palette-tile ${active ? "is-active" : ""}`}
+                onClick={() => update({ palette: palette.id })}
+                aria-pressed={active}
+                title={palette.description}
+              >
+                <span className="st-tile-preview" style={variables} aria-hidden="true">
+                  <span className="st-tile-sidebar">
+                    <i className="is-dot" />
+                    <i />
+                    <i className="is-short" />
+                  </span>
+                  <span className="st-tile-canvas">
+                    <span className="st-tile-line is-strong" />
+                    <span className="st-tile-line is-muted" />
+                    <span className="st-tile-card">
+                      <span className="st-tile-line is-short" />
+                      <span className="st-tile-accent" />
+                    </span>
+                  </span>
+                </span>
+                <span className="st-tile-meta">
+                  <span className="st-tile-head">
+                    <strong>{palette.name}</strong>
+                    {active ? <Check size={13} className="st-tile-check" /> : null}
+                  </span>
+                  <small>{palette.description}</small>
+                </span>
+              </button>
+            )
           })}
         </div>
       </Row>
