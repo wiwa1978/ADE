@@ -1,5 +1,5 @@
 import { useState } from "react"
-import {
+import { CalendarClock,
   Archive,
   ArchiveRestore,
   Bot,
@@ -31,8 +31,9 @@ import type { InboxEntry } from "../session-state"
 import { LiveSessionPane } from "./LiveSessionPane"
 import { LiveFactoryRunPane } from "./LiveFactoryRunPane"
 import { ProjectSubagentsTab } from "./ProjectSubagentsTab"
+import { ProjectAutomationsTab } from "./ProjectAutomationsTab"
 
-type ProjectTab = "sessions" | "kanban" | "issues" | "pulls" | "subagents"
+type ProjectTab = "sessions" | "kanban" | "issues" | "pulls" | "subagents" | "automations"
 type StreamLayout = "single" | "split" | "grid"
 
 export function ProjectStreamsWorkspace({
@@ -50,6 +51,7 @@ export function ProjectStreamsWorkspace({
   onCloseStreamPane,
   onOpenStreamPane,
   onMaximizeSession,
+  onOpenStartedSession,
   onMaximizeFactoryRun,
   onQuickStartStream,
   onSendQuickMessage,
@@ -76,6 +78,8 @@ export function ProjectStreamsWorkspace({
   onCloseStreamPane: (streamId: string) => void
   onOpenStreamPane: (streamId: string) => void
   onMaximizeSession: (sessionId: string) => void
+  /** Open a session that was just started outside the session list (it isn't loaded yet). */
+  onOpenStartedSession?: (sessionId: string) => Promise<void>
   onMaximizeFactoryRun: (runId: string) => void
   onQuickStartStream: (prompt: string) => Promise<void>
   onSendQuickMessage: (session: Conversation, text: string) => Promise<void>
@@ -206,6 +210,10 @@ export function ProjectStreamsWorkspace({
             <Bot className="size-3.5" />
             <span>Agents</span>
             {totalSubagentsCount > 0 ? <span className="ade-count-badge is-accent">{totalSubagentsCount}</span> : null}
+          </button>
+          <button type="button" role="tab" aria-selected={activeTab === "automations"} className={`ade-project-tab ${activeTab === "automations" ? "is-active" : ""}`} onClick={() => setActiveTab("automations")}>
+            <CalendarClock className="size-3.5" />
+            <span>Automations</span>
           </button>
         </nav>
 
@@ -392,6 +400,15 @@ export function ProjectStreamsWorkspace({
             onOpenProjectSettings={onToggleSettings}
           />
         </div>
+      ) : null}
+
+      {activeTab === "automations" ? (
+        <ProjectAutomationsTab
+          projectId={project.id}
+          hasGitHub={Boolean(project.githubUrl)}
+          hasCheckout={Boolean(project.repository)}
+          onOpenSession={id => void (onOpenStartedSession ? onOpenStartedSession(id) : onMaximizeSession(id))}
+        />
       ) : null}
 
       {activeTab === "subagents" ? (

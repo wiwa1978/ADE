@@ -28,6 +28,8 @@ export type RouteDeps = {
 	secrets: import("../project-secrets.ts").ProjectSecrets;
 	sendToAgent: ReturnType<typeof import("../agent-workflow.ts").createAgentWorkflow>["sendToAgent"];
 	runCheck: (sessionId: string) => void;
+	automations: import("../automations.ts").AutomationStore;
+	automationRunner: import("../automation-runner.ts").AutomationRunner;
 	cleanUpArchivedWorkspace: (
 		session: { id: string; workspace: string | null; repository: string | null; kind: string | null },
 		removeWorktreeRequested: boolean,

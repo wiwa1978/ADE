@@ -8,6 +8,8 @@ import { copyIntoWorktree, ProjectScriptStore, ScriptRunner } from "./project-sc
 import { createCheckpoints } from "./checkpoints.ts";
 import { EngineManager } from "./engines.ts";
 import { UsageTracker } from "./usage.ts";
+import { AutomationStore } from "./automations.ts";
+import { createAutomationRunner } from "./automation-runner.ts";
 import type { LocalAgentHost } from "./host.ts";
 import type { WorktreeManager } from "./worktrees.ts";
 import type { createSessionGit } from "./session-git.ts";
@@ -137,5 +139,19 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		const engine = engines.get(session.id);
 		if (engine) usage.record(session.id, "0", engine.usage, session.projectId ?? null);
 	}
-	return { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck };
+	// Background agents: scheduled and issue-triggered automations (R11).
+	const automations = new AutomationStore(stateDirectory);
+	const automationRunner = createAutomationRunner({
+		store: automations,
+		projects: () => host.projects?.() ?? [],
+		sessions: viewSessions,
+		createSession: input => host.createCodingTask(input, worktreeManager),
+		setEngine: (sessionId, engine) => { engines.setEngine(sessionId, engine); },
+		prepareWorktree,
+		sendToAgent: async (sessionId, content) => {
+			await sendToAgent(sessionId, content, { async: true });
+			host.events?.emit?.("sessions.changed", { id: sessionId, reason: "automation" });
+		},
+	});
+	return { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner };
 }

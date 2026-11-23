@@ -98,3 +98,19 @@
 .ade-attempt-files li { display: flex; gap: 6px; align-items: center; }
 .ade-attempt-files code { flex: 1; min-width: 0; }
 .ade-attempt-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Automations */
+.ade-automations { flex: 1; overflow: auto; padding: 20px 24px; display: grid; gap: 14px; align-content: start; max-width: 920px; }
+.ade-automations-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.ade-automations-head h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+.ade-automations-head p { margin: 0; color: rgb(var(--muted)); font-size: 12.5px; max-width: 620px; }
+.ade-automation-form { display: grid; gap: 10px; padding: 14px; border: 1px solid rgb(var(--border)); border-radius: 12px; background: rgb(var(--surface)); }
+.ade-automation-form label { display: grid; gap: 4px; font-size: 12px; color: rgb(var(--muted)); }
+.ade-automation-form input, .ade-automation-form select, .ade-automation-form textarea { font: inherit; font-size: 13px; color: rgb(var(--foreground)); background: rgb(var(--background)); border: 1px solid rgb(var(--border)); border-radius: 7px; padding: 6px 8px; }
+.ade-automation-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.ade-automation-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.ade-automation-list li { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid rgb(var(--border)); border-radius: 12px; background: rgb(var(--surface)); }
+.ade-automation-list li.is-paused { opacity: 0.6; }
+.ade-automation-main { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.ade-automation-actions { display: flex; align-items: center; gap: 6px; }
+.ade-automation-toggle { display: flex; align-items: center; gap: 5px; font-size: 12px; color: rgb(var(--muted)); }

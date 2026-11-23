@@ -8,7 +8,7 @@ import { readInstructions, searchWorkspaceFiles, writeInstructions } from "../ag
 
 export function registerAgentWorkflowRoutes(
 	router: Router,
-	{ host, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, usage, secrets }: RouteDeps,
+	{ host, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, usage, secrets, automations, automationRunner }: RouteDeps,
 ): void {
 	// --- Usage: tokens and cost per session, project and day ---
 	router.get("/api/usage", (ctx) => {
@@ -48,6 +48,39 @@ export function registerAgentWorkflowRoutes(
 		scripts.save(project.id, await ctx.readBody());
 		ctx.json(200, scriptsResponse(project.id, project.repository));
 	}, { originError: "Use ADE to change project scripts." });
+
+	// --- Automations: scheduled and issue-triggered background agents ---
+	router.get("/api/projects/:id/automations", (ctx) => {
+		ctx.json(200, { automations: automations.forProject(projectFor(ctx.params.id).id) });
+	});
+
+	router.post("/api/projects/:id/automations", async (ctx) => {
+		const project = projectFor(ctx.params.id);
+		const body = await ctx.readBody();
+		const trigger = body.trigger as { type?: unknown; label?: unknown } | undefined;
+		// Issues that already have the label are skipped, so creating an automation doesn't start a burst of runs.
+		const seen = trigger?.type === "issue-label" && typeof trigger.label === "string" ? await automationRunner.currentIssues(project.id, trigger.label.trim()) : [];
+		automations.create(project.id, body, seen);
+		ctx.json(200, { automations: automations.forProject(project.id) });
+	}, { originError: "Use ADE to change automations." });
+
+	router.put("/api/automations/:id", async (ctx) => {
+		const item = automations.update(ctx.params.id, await ctx.readBody());
+		ctx.json(200, { automations: automations.forProject(item.projectId) });
+	}, { originError: "Use ADE to change automations." });
+
+	router.delete("/api/automations/:id", (ctx) => {
+		const { projectId } = automations.get(ctx.params.id);
+		automations.remove(ctx.params.id);
+		ctx.json(200, { automations: automations.forProject(projectId) });
+	}, { originError: "Use ADE to change automations." });
+
+	router.post("/api/automations/:id/run", async (ctx) => {
+		await ctx.readBody();
+		const item = automations.get(ctx.params.id);
+		const sessionId = await automationRunner.run(item, "Run now");
+		ctx.json(200, { sessionId, automations: automations.forProject(item.projectId) });
+	}, { originError: "Use ADE to run automations." });
 
 	// --- Secrets per project (names only; values never come back) ---
 	router.get("/api/projects/:id/secrets", (ctx) => {

@@ -103,12 +103,17 @@ export function useSessions(params: {
 
   useEffect(() => {
     let cancelled = false
-    void request<{ sessions: Conversation[] }>("/api/sessions")
-      .then(data => { if (!cancelled) setSessions(data.sessions ?? []) })
-      .catch(err => {
-        if (!cancelled) console.warn("[ADE] Could not load sessions:", err instanceof Error ? err.message : String(err))
-      })
-    return () => { cancelled = true }
+    const tick = () => {
+      void request<{ sessions: Conversation[] }>("/api/sessions")
+        .then(data => { if (!cancelled) setSessions(data.sessions ?? []) })
+        .catch(err => {
+          if (!cancelled) console.warn("[ADE] Could not load sessions:", err instanceof Error ? err.message : String(err))
+        })
+    }
+    tick()
+    // Sessions can start in the background (automations); refresh now and then in case an event was missed.
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") tick() }, 20_000)
+    return () => { cancelled = true; window.clearInterval(timer) }
   }, [environmentVersion])
 
   // Replay any pending task starts stored before reload.

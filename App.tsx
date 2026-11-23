@@ -385,6 +385,7 @@ function AppInner() {
         attemptsGroup={attemptsGroup}
         onOpenAttempts={openAttempts}
         onBackFromAttempts={() => setScreen("inbox")}
+        onReloadSessions={sess.loadSessions}
         onArchiveAttempt={id => sess.toggleArchive(id, false)}
       />
 

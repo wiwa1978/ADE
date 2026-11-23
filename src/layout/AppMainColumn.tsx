@@ -111,6 +111,7 @@ type AppMainColumnProps = {
   attemptsGroup: string | null
   onOpenAttempts: (group: string) => void
   onBackFromAttempts: () => void
+  onReloadSessions: () => Promise<void>
   onArchiveAttempt: (sessionId: string) => Promise<void>
 }
 
@@ -262,6 +263,7 @@ export function AppMainColumn(props: AppMainColumnProps) {
             onCloseStreamPane={streamId => props.onCloseStreamPane(selectedProject.id, streamId)}
             onOpenStreamPane={streamId => props.onOpenStreamPane(selectedProject.id, streamId)}
             onMaximizeSession={id => { props.onClearUnread(id); props.onOpenSession(id) }}
+            onOpenStartedSession={async id => { await props.onReloadSessions(); props.onOpenSession(id) }}
             onMaximizeFactoryRun={() => { props.onSelectProject(selectedProject.id); props.onOpenScreen("factory") }}
             onQuickStartStream={async prompt => {
               if (!prompt.trim()) {

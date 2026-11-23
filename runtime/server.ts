@@ -144,7 +144,7 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 	origins?: readonly (string | undefined)[];
 }) {
 	let githubConnectionRevision = 0;
-	const { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck } = createAgentWorkflow({ host, worktreeManager, sessionGit });
+	const { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner } = createAgentWorkflow({ host, worktreeManager, sessionGit });
 	/** Close terminals in an archived session's workspace and optionally remove its ADE worktree (keeping the branch). */
 	async function cleanUpArchivedWorkspace(session: { id: string; workspace: string | null; repository: string | null; kind: string | null }, removeWorktreeRequested: boolean) {
 		let terminalsClosed = 0;
@@ -189,6 +189,8 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 		secrets,
 		sendToAgent,
 		runCheck,
+		automations,
+		automationRunner,
 	});
 
 	const server = createServer((request, response) => {
@@ -239,7 +241,8 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 		});
 	});
 	// Dev servers started with Run and Claude Code/Codex processes stop with the runtime.
-	server.on("close", () => { scriptRunner.stopAll(); engines.abortAll(); usage.flush(); });
+	server.on("close", () => { scriptRunner.stopAll(); engines.abortAll(); usage.flush(); automationRunner.stop(); });
+	server.on("listening", () => automationRunner.start());
 	return server;
 }
 
