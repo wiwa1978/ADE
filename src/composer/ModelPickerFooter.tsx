@@ -2,7 +2,7 @@ import { Check, ChevronUp, Shield, ShieldAlert, ShieldOff } from "lucide-react"
 import type { ApprovalPolicy } from "../../app-types"
 
 const ACCESS_OPTIONS: { value: ApprovalPolicy; label: string; description: string }[] = [
-  { value: "auto-all", label: "Full access", description: "Run commands without pausing" },
+  { value: "auto-all", label: "Autopilot", description: "Run everything without asking (no merging or force-pushing)" },
   { value: "auto-safe", label: "Auto-safe", description: "Auto-allow read-only commands" },
   { value: "ask", label: "Ask every cmd", description: "Require approval for every command" },
 ]

@@ -260,6 +260,10 @@ export class LocalAgentHost {
 		this.#sessionManager.setWorktreeManager(manager);
 	}
 
+	latestTurn(sessionId: string) {
+		return this.#turns.latestForSession(sessionId) ?? null;
+	}
+
 	getWorkspacePath(sessionId: string): string | null {
 		return this.#tasks.getWorkspacePath(sessionId);
 	}

@@ -7,6 +7,7 @@ import type { ApprovalPolicy, PendingApproval } from "../packages/protocol/index
 import type { RuntimeEventBus } from "./events.ts";
 import { runHostMigrations } from "./db/migrations.ts";
 import { badRequest, notFound } from "./http-error.ts";
+import { guardrailFor } from "./guardrails.ts";
 
 export type { ApprovalPolicy, PendingApproval };
 
@@ -118,6 +119,15 @@ export class ApprovalManager {
 			.run(randomUUID(), toolName, clean, Date.now(), effect);
 	}
 
+	/** Why a call is refused outright: a hard guardrail (every mode, including Autopilot) or a block rule. */
+	blockReason(toolName: string, args: Record<string, unknown>): string | null {
+		const rail = toolName === "run_command" && typeof args.command === "string" ? guardrailFor(args.command) : null;
+		if (rail) return `Blocked by ADE's guardrails: ${rail.reason} This applies in every permission mode; don't try to work around it.`;
+		const denied = this.deniedBy(toolName, args);
+		if (denied) return `Blocked by a rule in Settings → Agents & permissions ("${denied}"). Don't try to work around it; ask the user if you need it.`;
+		return null;
+	}
+
 	/** The deny rule that blocks this call, if any. Deny rules apply under every policy, even Full auto. */
 	deniedBy(toolName: string, args: Record<string, unknown>): string | null {
 		const rules = this.#db.prepare("SELECT prefix FROM approval_rules WHERE toolName=? AND effect='deny'").all(toolName) as { prefix: string }[];
@@ -172,8 +182,8 @@ export class ApprovalManager {
 				hook(ToolTask, {
 					beforeTool: async (call, api, ctx) => {
 						const args = (call.arguments && typeof call.arguments === "object" ? call.arguments : {}) as Record<string, unknown>;
-						const denied = this.deniedBy(call.name, args);
-						if (denied) return { block: `Blocked by a rule in Settings → Agents & permissions ("${denied}"). Don't try to work around it; ask the user if you need it.` };
+						const block = this.blockReason(call.name, args);
+						if (block) return { block };
 						if (!this.shouldRequireApproval(sessionId, call.name, args)) {
 							return undefined;
 						}

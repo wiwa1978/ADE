@@ -21,3 +21,12 @@ test("deny rules block commands under every policy, including inside compound co
 	assert.equal(approvals.hasAllowRule("run_command", "git push"), false);
 	assert.deepEqual(approvals.listRules().map(rule => [rule.prefix, rule.effect]), [["git push", "deny"], ["npm test", "allow"]]);
 });
+
+test("in Autopilot nothing asks, but the guardrails still block", () => {
+	const approvals = new ApprovalManager(new DatabaseSync(":memory:"), new RuntimeEventBus());
+	approvals.setPolicy("auto-all");
+	assert.equal(approvals.shouldRequireApproval("s", "run_command", { command: "rm -rf build && npm publish" }), false);
+	assert.equal(approvals.blockReason("run_command", { command: "npm test" }), null);
+	assert.match(approvals.blockReason("run_command", { command: "git push --force" }) ?? "", /guardrails: Force-pushing/);
+	assert.match(approvals.blockReason("run_command", { command: "gh pr merge 4" }) ?? "", /Merging is up to the user/);
+});

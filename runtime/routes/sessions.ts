@@ -22,7 +22,7 @@ import { RUN_TARGETS, type RunTarget } from "../execution-targets.ts";
 
 export function registerSessionRoutes(
 	router: Router,
-	{ host, worktreeManager, sessionGit, cleanUpArchivedWorkspace, engines, inbox, viewSessions, prepareWorktree, sendToAgent, executionTargets, subagentKey }: RouteDeps,
+	{ host, worktreeManager, sessionGit, cleanUpArchivedWorkspace, engines, inbox, viewSessions, prepareWorktree, sendToAgent, executionTargets, subagentKey, scheduler, usageWaiter }: RouteDeps,
 ): void {
 	router.get("/api/sessions", (ctx) => {
 		ctx.json(200, { sessions: viewSessions() });
@@ -204,9 +204,13 @@ export function registerSessionRoutes(
 			if (!run) return agent;
 			const snapshot = engines.snapshot(key);
 			const working = engines.isWorking(key);
+			const queued = scheduler.position(key);
+			const usageWait = usageWaiter.waiting(key);
 			return {
 				...agent,
-				status: working ? "running" : run.lastStatus === "failed" ? "failed" : run.lastStatus === "completed" ? "completed" : "waiting",
+				status: working ? "running" : queued || usageWait ? "waiting" : run.lastStatus === "failed" ? "failed" : run.lastStatus === "completed" ? "completed" : "waiting",
+				...(queued ? { queuePosition: queued } : {}),
+				...(usageWait ? { usageWaitUntil: usageWait.until } : {}),
 				model: run.engine === "claude-code" ? "Claude Code" : "Codex",
 				timeline: snapshot.items,
 				messages: snapshot.items.flatMap((item): Array<{ id: string; role: "user" | "assistant"; content: string }> => item.kind === "user" ? [{ id: item.id, role: "user", content: item.content }] : item.kind === "assistant" && item.text ? [{ id: item.id, role: "assistant", content: item.text }] : []),
@@ -366,7 +370,8 @@ export function registerSessionRoutes(
 			// Claude Code / Codex subagents are stopped by ending their CLI run.
 			const key = subagentKey(ctx.params.id, ctx.params.subagentId);
 			if (engines.get(key)) {
-				ctx.json(200, { stopped: engines.abort(key).ok });
+				usageWaiter.cancel(key);
+				ctx.json(200, { stopped: scheduler.cancel(key) || engines.abort(key).ok });
 				return;
 			}
 			ctx.json(200, await host.stopSubagent(ctx.params.id, ctx.params.subagentId));

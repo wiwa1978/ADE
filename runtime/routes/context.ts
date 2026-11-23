@@ -34,6 +34,9 @@ export type RouteDeps = {
 	executionTargets: import("../execution-targets.ts").ExecutionTargets;
 	subagentPolicies: import("../subagent-policy.ts").SubagentPolicyStore;
 	subagentKey: (sessionId: string, conversationId: string) => string;
+	limitGuard: import("../limits.ts").LimitGuard;
+	usageWaiter: import("../usage-limits.ts").UsageLimitWaiter;
+	scheduler: import("../scheduler.ts").SubagentScheduler;
 	cleanUpArchivedWorkspace: (
 		session: { id: string; workspace: string | null; repository: string | null; kind: string | null },
 		removeWorktreeRequested: boolean,

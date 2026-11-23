@@ -1,3 +1,4 @@
+import { clock, useSessionHold } from "../subagents/session-hold"
 import {
   Play,
   ScrollText,
@@ -94,6 +95,7 @@ export function WorkspaceHeaderBar({
   /** For parallel attempts: open the comparison. */
   onOpenAttempts?: (group: string) => void
 }) {
+  const hold = useSessionHold(session.workspace ? session.id : null, isBusy)
   return (
     <header className="ade-workspace-header">
       <div className="ade-workspace-header-left">
@@ -107,6 +109,12 @@ export function WorkspaceHeaderBar({
         {stateLabel ? <span className={`ade-row-tag is-${stateLabel.tone}`} title={stateLabel.hint}>{stateLabel.label}</span>
           : isBusy ? <span className="ade-row-tag is-running">Working</span>
             : approvals.length > 0 ? <span className="ade-row-tag is-waiting">Needs approval</span> : null}
+        {!isBusy && hold.usageWait ? (
+          <span className="ade-row-tag is-waiting" title={hold.usageWait.reason}>{hold.usageWait.fallback ? `Usage limit · on ${hold.usageWait.fallback}` : `Usage limit · continues ${clock(hold.usageWait.until)}`}</span>
+        ) : !isBusy && hold.stop ? (
+          <span className="ade-row-tag is-failed" title={`${hold.stop.reason} Continue the session to go on; change limits in Settings → Agents & permissions.`}>{hold.stop.kind === "day" ? "Stopped: daily limit" : hold.stop.kind === "cost" ? "Stopped: cost limit" : "Stopped: time limit"}</span>
+        ) : null}
+        {hold.queued.length ? <span className="ade-row-tag is-idle" title="Claude Code and Codex subagents start as this machine has room">{hold.queued.length} queued</span> : null}
         {session.attemptGroup && onOpenAttempts ? (
           <button type="button" className="ade-row-tag is-review" onClick={() => onOpenAttempts(session.attemptGroup!)} title="This session is one of several attempts at the same task">
             {session.label.match(/ · ([A-D])$/) ? `Attempt ${session.label.match(/ · ([A-D])$/)![1]} · ` : ""}Compare

@@ -1,5 +1,6 @@
 import { CheckCircle2, CircleDashed, CircleSlash, Loader2, PauseCircle, XCircle } from "lucide-react"
 import type { ConversationTimelineSnapshot, SessionTaskItem, SubagentInfo, TimelineItem } from "../../app-types"
+import { clock, type SessionHold } from "../subagents/session-hold"
 
 type Status = "done" | "working" | "waiting" | "failed" | "blocked" | "pending"
 
@@ -37,10 +38,28 @@ function firstLine(text: string, max = 220) {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line
 }
 
-function StatusCell({ status }: { status: Status }) {
+function StatusCell({ status, note }: { status: Status; note?: string }) {
   const info = statusInfo[status]
   const Icon = info.icon
-  return <span className={`ade-progress-status is-${info.tone}`}><Icon className={`size-3.5 ${status === "working" ? "animate-spin" : ""}`} /> {info.label}</span>
+  return <>
+    <span className={`ade-progress-status is-${info.tone}`}><Icon className={`size-3.5 ${status === "working" ? "animate-spin" : ""}`} /> {info.label}</span>
+    {note ? <div className="ade-muted ade-xs">{note}</div> : null}
+  </>
+}
+
+/** "Queued (#2)", "Usage limit · continues 03:01", "Stopped: …" */
+function holdNote(hold: SessionHold | undefined, subagentId: string | null) {
+  if (!hold) return undefined
+  if (subagentId === null) {
+    if (hold.stop) return hold.stop.reason
+    if (hold.usageWait) return hold.usageWait.fallback ? `Usage limit · switched to ${hold.usageWait.fallback}` : `Usage limit · continues ${clock(hold.usageWait.until)}`
+    return undefined
+  }
+  const queued = hold.queued.find(item => item.subagentId === subagentId)
+  if (queued) return `Queued (#${queued.position}): starts when there's room`
+  const wait = hold.usageWaits.find(item => item.subagentId === subagentId)
+  if (wait) return `Usage limit · continues ${clock(wait.until)}`
+  return undefined
 }
 
 /**
@@ -55,6 +74,7 @@ export function ProgressPanel({
   subagents,
   subagentTimelines,
   tasks,
+  hold,
   onOpenSubagent,
 }: {
   leadLabel: string
@@ -64,6 +84,7 @@ export function ProgressPanel({
   subagents: SubagentInfo[]
   subagentTimelines: Record<string, ConversationTimelineSnapshot>
   tasks: SessionTaskItem[]
+  hold?: SessionHold
   onOpenSubagent: (id: string) => void
 }) {
   const leadAsked = [...leadItems].reverse().find(item => item.kind === "user")
@@ -73,7 +94,8 @@ export function ProgressPanel({
       name: "Main agent",
       role: "ADE agent (Pi Durable)",
       asked: leadAsked && leadAsked.kind === "user" ? leadAsked.content : leadLabel,
-      status: (leadBusy ? "working" : leadFailed ? "failed" : leadItems.length ? "done" : "pending") as Status,
+      status: (leadBusy ? "working" : hold?.usageWait ? "waiting" : hold?.stop || leadFailed ? "failed" : leadItems.length ? "done" : "pending") as Status,
+      note: holdNote(hold, null),
       result: lastReply(leadItems),
       branch: null as string | null,
     },
@@ -83,6 +105,7 @@ export function ProgressPanel({
       role: [sub.role, harnessLabel[sub.harness ?? "pi"]].filter(Boolean).join(" · "),
       asked: sub.assignment,
       status: subagentStatus(sub.status),
+      note: holdNote(hold, sub.id),
       result: sub.error || lastReply(subagentTimelines[sub.id]?.items ?? sub.timeline) || [...sub.messages].reverse().find(message => message.role === "assistant")?.content || "",
       branch: sub.branch ?? null,
     })),
@@ -121,7 +144,7 @@ export function ProgressPanel({
                   {row.role ? <div className="ade-muted ade-xs">{row.role}</div> : null}
                   {row.branch ? <div className="ade-muted ade-xs ade-mono">{row.branch}</div> : null}
                 </td>
-                <td><StatusCell status={row.status} /></td>
+                <td><StatusCell status={row.status} note={row.note} /></td>
                 <td title={row.asked}><span className="ade-progress-clamp">{firstLine(row.asked, 160) || "—"}</span></td>
                 <td title={row.result}><span className="ade-progress-clamp">{row.result ? firstLine(row.result) : <span className="ade-muted">{row.status === "working" ? "Working on it…" : "—"}</span>}</span></td>
               </tr>

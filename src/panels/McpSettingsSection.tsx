@@ -105,12 +105,13 @@ export function McpAndSecuritySettings({
               className={`ade-chip-btn ${approvalPolicy === p ? "is-active" : ""}`}
               onClick={() => void onChangeApprovalPolicy(p)}
             >
-              {p === "auto-safe" ? "Auto-safe (read-only allowed)" : p === "ask" ? "Ask every command" : "Full auto"}
+              {p === "auto-safe" ? "Ask (read-only runs)" : p === "ask" ? "Ask every command" : "Autopilot"}
             </button>
           ))}
         </div>
 
-        <p className="ade-muted ade-xs">Rules apply to the ADE agent. <strong>Always allow</strong> skips the approval prompt; <strong>Always block</strong> stops the command under every policy, including Full auto. A rule matches commands that start with it.</p>
+        <p className="ade-muted ade-xs"><strong>Autopilot</strong> runs everything without asking, for work you leave running overnight. In every mode agents can't merge pull requests, force-push, push to main, delete remote branches or repositories, or delete outside the workspace: they push their own branch and open a pull request, and you merge.</p>
+        <p className="ade-muted ade-xs">Rules apply to the ADE agent. <strong>Always allow</strong> skips the approval prompt; <strong>Always block</strong> stops the command under every policy, including Autopilot. A rule matches commands that start with it.</p>
         {onAddApprovalRule ? (
           <form
             className="ade-rule-form"

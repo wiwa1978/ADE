@@ -12,6 +12,7 @@ import {
   Terminal,
   X,
 } from "lucide-react"
+import { useSessionHold } from "../subagents/session-hold"
 import type {
   BrowserState,
   Conversation,
@@ -132,6 +133,7 @@ export function BesidePane({
   onRunStatusChange?: (status: RunStatus) => void
   onOpenProjectSettings?: () => void
 }) {
+  const hold = useSessionHold(activeBesideTab?.kind === "progress" ? session.id : null, agentBusy)
   const tabIcon = (tab: WorkspaceTab) => {
     switch (tab.kind) {
       case "subagent": {
@@ -269,6 +271,7 @@ export function BesidePane({
             subagents={subagents}
             subagentTimelines={subagentTimelines}
             tasks={tasks}
+            hold={hold}
             onOpenSubagent={onOpenSubagent}
           />
         ) : null}

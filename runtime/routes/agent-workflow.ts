@@ -9,7 +9,7 @@ import { harnessGuidance } from "../subagent-policy.ts";
 
 export function registerAgentWorkflowRoutes(
 	router: Router,
-	{ host, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, usage, secrets, automations, automationRunner, integrations, executionTargets, subagentPolicies }: RouteDeps,
+	{ host, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, usage, secrets, automations, automationRunner, integrations, executionTargets, subagentPolicies, limitGuard, usageWaiter, subagentKey, scheduler }: RouteDeps,
 ): void {
 	// --- Usage: tokens and cost per session, project and day ---
 	router.get("/api/usage", (ctx) => {
@@ -49,6 +49,27 @@ export function registerAgentWorkflowRoutes(
 		scripts.save(project.id, await ctx.readBody());
 		ctx.json(200, scriptsResponse(project.id, project.repository));
 	}, { originError: "Use ADE to change project scripts." });
+
+	// --- Limits for unattended work ---
+	router.get("/api/limits", (ctx) => {
+		ctx.json(200, { limits: limitGuard.get(), todayCost: usage.todayCost() });
+	});
+
+	router.put("/api/limits", async (ctx) => {
+		ctx.json(200, { limits: limitGuard.set(await ctx.readBody()) });
+	}, { originError: "Use ADE to change limits." });
+
+	// Why a session isn't running by itself right now: stopped by a limit, or waiting for a usage limit to reset.
+	router.get("/api/sessions/:id/hold", (ctx) => {
+		const id = ctx.params.id;
+		const prefix = subagentKey(id, "");
+		ctx.json(200, {
+			stop: limitGuard.stopped(id),
+			usageWait: usageWaiter.waiting(id),
+			usageWaits: usageWaiter.waitingWith(prefix).map(({ key, ...wait }) => ({ subagentId: key.slice(prefix.length), ...wait })),
+			queued: scheduler.queued().filter(key => key.startsWith(prefix)).map(key => ({ subagentId: key.slice(prefix.length), position: scheduler.position(key) })),
+		});
+	});
 
 	// --- Subagent harnesses (the main agent is always Pi Durable) ---
 	router.get("/api/subagent-policy", (ctx) => {

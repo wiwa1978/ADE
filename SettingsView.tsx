@@ -17,6 +17,7 @@ import { FontPicker } from "./src/appearance/FontPicker"
 import { SubagentSettings } from "./src/subagents/SubagentSettings"
 import { ProvidersPanel } from "./src/settings/ProvidersPanel"
 import { KeybindingsSection } from "./src/settings/KeybindingsSection"
+import { OvernightSettings } from "./src/subagents/OvernightSettings"
 
 /** Settings categories. Every category here changes something real; nothing is a placeholder. */
 export type SettingsCategory =
@@ -38,7 +39,7 @@ const groups: { label: string; items: SettingsItem[] }[] = [
     label: "AI",
     items: [
       { id: "models", label: "Providers", icon: Sparkles, description: "Model providers, CLI agents, API keys, and runtime settings.", keywords: "openai anthropic claude copilot codex pi cursor opencode radius ollama compatible api key provider reasoning models" },
-      { id: "agents", label: "Agents & permissions", icon: Bot, description: "Command approvals, MCP servers, and skills available to agents.", keywords: "approval policy mcp skills rules permissions browser chrome" },
+      { id: "agents", label: "Agents & permissions", icon: Bot, description: "Ask or Autopilot, limits for unattended work, MCP servers, and skills.", keywords: "approval policy autopilot ask mcp skills rules permissions browser chrome limit cost budget overnight usage limit fallback queue concurrent" },
       { id: "subagents", label: "Subagents", icon: Workflow, description: "What subagents run on (Pi, Claude Code, Codex) and who picks.", keywords: "harness claude code codex pi durable subagent model delegate" },
       { id: "usage", label: "Usage", icon: Gauge, description: "Tokens and cost per project and session, and a monthly budget.", keywords: "cost spend tokens budget billing price money" },
     ],
@@ -449,6 +450,7 @@ export function SettingsView({
         </div>
       </Section>
     ) : null}
+    <OvernightSettings modelCatalog={modelCatalog} />
   </>
 
   // --- Git & GitHub ---

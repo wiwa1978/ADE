@@ -27,6 +27,11 @@ export class TurnStore {
 		return dbGet<{ status: TurnRow["status"] }>(this.#db, "SELECT status FROM turns WHERE id=?", id)?.status;
 	}
 
+	/** The session's latest turn (a coding task or chat thread). */
+	latestForSession(sessionId: string): TurnRow | undefined {
+		return dbGet<TurnRow>(this.#db, "SELECT * FROM turns WHERE taskId=? OR chatId=? ORDER BY createdAt DESC, id DESC LIMIT 1", sessionId, sessionId);
+	}
+
 	hasAnyForTask(taskId: string): boolean {
 		return Boolean(this.#db.prepare("SELECT 1 FROM turns WHERE taskId=? LIMIT 1").get(taskId));
 	}

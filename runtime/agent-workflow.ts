@@ -11,6 +11,9 @@ import { copyIntoWorktree, ProjectScriptStore, ScriptRunner } from "./project-sc
 import { createCheckpoints } from "./checkpoints.ts";
 import { EngineManager } from "./engines.ts";
 import { UsageTracker } from "./usage.ts";
+import { LimitGuard } from "./limits.ts";
+import { CONTINUE_PROMPT, UsageLimitWaiter } from "./usage-limits.ts";
+import { SubagentScheduler } from "./scheduler.ts";
 import { AutomationStore } from "./automations.ts";
 import { Integrations, type SlackEvents } from "./integrations.ts";
 import { createAutomationRunner } from "./automation-runner.ts";
@@ -103,6 +106,8 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	 * rewinding, then hand it to Claude Code / Codex or the ADE agent.
 	 */
 	async function sendToAgent(sessionId: string, content: string, options: { id?: string; provider?: string; model?: string; reasoning?: string; async?: boolean } = { async: true }) {
+		// Once today's budget is spent, nothing new starts (automations and hand-backs included).
+		limitGuard.assertCanStart();
 		const workspace = host.getWorkspacePath(sessionId);
 		if (workspace) await checkpoints.create(sessionId, workspace, content).catch(() => null);
 		inbox.invalidate(sessionId);
@@ -161,6 +166,15 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		const was = agentBusy.get(event.sessionId) ?? false;
 		const now = Boolean(payload.busy);
 		agentBusy.set(event.sessionId, now);
+		if (!was && now) {
+			limitGuard.started(event.sessionId);
+			usageWaiter.cancel(event.sessionId);
+		}
+		if (was && !now) {
+			limitGuard.finished(event.sessionId);
+			afterRun(event.sessionId);
+		}
+		if (now) limitGuard.check(event.sessionId);
 		if (was && !now) {
 			runCheck(event.sessionId);
 			const sessionId = event.sessionId;
@@ -181,6 +195,84 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 
 	/** Every agent reports its running token/cost totals with each timeline update; keep a ledger of them. */
 	const usage = new UsageTracker(stateDirectory);
+	// Limits for unattended work: stop a task that runs too long or costs too much, and stop
+	// everything once the day's budget is spent (Settings → Agents & permissions).
+	const limitGuard = new LimitGuard(stateDirectory, {
+		sessionCost: id => usage.sessionCost(id),
+		todayCost: () => usage.todayCost(),
+		stop: id => {
+			if (engines.get(id)) engines.abort(id);
+			else void Promise.resolve(host.abortSession?.(id)).catch(() => undefined);
+			engines.abortMatching(`sub-${id}-`);
+			scheduler.cancelMatching(subagentKey(id, ""));
+		},
+		notify: (id, stop) => {
+			host.events?.emit?.("sessions.changed", { id, limit: stop });
+			notify("failed", id, (label, project) => `⏹ *${label}* (${project}): ${stop.reason}`);
+		},
+	});
+	limitGuard.start();
+
+	// Usage limits: when the provider says "limit reached", continue on the fallback model if one is
+	// set, otherwise wait for the reset and tell the agent to continue (overnight work keeps going).
+	const resumeSubagent = new Map<string, (resumed: boolean) => void>();
+	const usageWaiter = new UsageLimitWaiter({
+		fallback: () => {
+			const { fallbackProvider, fallbackModel } = limitGuard.get();
+			return fallbackProvider && fallbackModel ? { provider: fallbackProvider, model: fallbackModel } : null;
+		},
+		resume: (id, model) => {
+			if (id.startsWith("sub-")) {
+				const state = engines.get(id);
+				const resolveResume = resumeSubagent.get(id);
+				resumeSubagent.delete(id);
+				try {
+					const parent = state?.parent;
+					if (!parent?.cwd) throw new Error("gone");
+					void scheduler.submit(id, () => engines.send(id, parent.cwd!, CONTINUE_PROMPT, host.approvals.policy(parent.sessionId), subagentModel(state!.engine)), countsHere(parent.sessionId)).then(started => resolveResume?.(started));
+				} catch {
+					resolveResume?.(false);
+				}
+				return;
+			}
+			const last = host.latestTurn?.(id);
+			void sendToAgent(id, CONTINUE_PROMPT, { async: true, ...(model ? { provider: model.provider, model: model.model } : {}), ...(last?.reasoning ? { reasoning: last.reasoning } : {}) }).catch(() => undefined);
+		},
+		notify: (id, wait, message) => {
+			if (id.startsWith("sub-")) {
+				if (!wait) {
+					resumeSubagent.get(id)?.(false);
+					resumeSubagent.delete(id);
+				}
+				const parent = engines.get(id)?.parent;
+				if (parent) host.events?.emit?.("subagents.update", { sessionId: parent.sessionId, subagentId: parent.conversationId, busy: false, usageWait: wait }, parent.sessionId);
+				return;
+			}
+			host.events?.emit?.("sessions.changed", { id, usageWait: wait });
+			if (message) notify("failed", id, (label, project) => `⏳ *${label}* (${project}): ${message}`);
+		},
+	});
+	/** The error text of an engine's last run (Claude Code / Codex). */
+	const engineFailure = (key: string) => (engines.get(key)?.items ?? []).slice(-3).map(item => item.kind === "error" ? item.message : item.kind === "assistant" ? item.text : "").join("\n");
+	/** A session's agent finished: on a usage limit, wait or fall back; otherwise reset the count. */
+	function afterRun(sessionId: string) {
+		// Give the turn's final status a moment to be stored before reading it.
+		setTimeout(() => {
+			try {
+				if (limitGuard.stopped(sessionId)) return;
+				const engine = engines.get(sessionId);
+				if (engine) {
+					if (engine.lastStatus === "failed" && usageWaiter.failed(sessionId, engineFailure(sessionId), null, { fallback: false })) return;
+				} else {
+					const turn = host.latestTurn?.(sessionId);
+					if (turn?.status === "failed" && usageWaiter.failed(sessionId, turn.error ?? "", turn.provider ? { provider: turn.provider, model: turn.model } : null)) return;
+				}
+				usageWaiter.succeeded(sessionId);
+			} catch {
+				// The runtime may be shutting down.
+			}
+		}, 1000).unref?.();
+	}
 	const projectOf = new Map<string, string | null>();
 	host.events?.subscribe?.(event => {
 		if (event.type !== "timeline.update" || !event.sessionId) return;
@@ -198,6 +290,27 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	// Pi (any model), Claude Code or Codex, as the user allows (Settings → Subagents).
 	const subagentPolicies = new SubagentPolicyStore(stateDirectory);
 	const subagentKey = (sessionId: string, conversationId: string) => `sub-${sessionId}-${conversationId}`.replace(/[^\w-]/g, "");
+	// Heavy subagents start when this machine has room (Settings → Agents & permissions → subagents at once).
+	const scheduler = new SubagentScheduler({
+		settings: () => ({ maxConcurrent: limitGuard.get().maxSubagents }),
+		onChange: key => {
+			const parent = engines.get(key)?.parent;
+			if (parent) host.events?.emit?.("subagents.update", { sessionId: parent.sessionId, subagentId: parent.conversationId, busy: engines.isWorking(key), queued: scheduler.position(key) }, parent.sessionId);
+		},
+	});
+	scheduler.start();
+	/** Runs on this machine's memory: here, in Docker or in WSL2 (not on an SSH host or Boat.dev VM). */
+	const countsHere = (sessionId: string) => !["ssh", "boat"].includes(sessionTarget(sessionId));
+	const subagentStarts = new Map<string, Promise<boolean>>();
+	host.events?.subscribe?.(event => {
+		if (event.type !== "sessions.changed") return;
+		const id = (event.payload as { id?: unknown } | null)?.id;
+		if (typeof id === "string" && id.startsWith("sub-") && !engines.isWorking(id)) scheduler.finished(id);
+	});
+	const subagentModel = (engine: string) => {
+		const policy = subagentPolicies.get();
+		return (engine === "claude-code" ? policy.claudeModel : policy.codexModel) || null;
+	};
 	setExternalSubagentRunner({
 		installed(sessionId) {
 			const set = new Set<SubagentHarness>(["pi"]);
@@ -210,22 +323,48 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 			const key = subagentKey(sessionId, conversationId);
 			const existing = engines.get(key);
 			if (engines.isWorking(key) || existing?.lastStatus === "completed") return;
+			if (scheduler.position(key)) return;
 			engines.setEngine(key, harness, { sessionId, conversationId, cwd });
-			const policy = subagentPolicies.get();
 			// A read-only subagent can't change files; others follow the session's approval setting.
 			const approval = readOnly ? "ask" : host.approvals.policy(sessionId);
 			const prompt = existing?.items.length ? "ADE restarted while you were working. Continue the task where you left off, then give your report." : task;
-			engines.send(key, cwd, prompt, approval, (harness === "claude-code" ? policy.claudeModel : policy.codexModel) || null);
+			subagentStarts.set(key, scheduler.submit(key, () => engines.send(key, cwd, prompt, approval, subagentModel(harness)), countsHere(sessionId)));
 		},
 		message(sessionId, conversationId, text) {
 			const key = subagentKey(sessionId, conversationId);
 			const state = engines.get(key);
-			if (!state?.parent?.cwd) throw Object.assign(new Error("That subagent isn't available anymore."), { statusCode: 404 });
-			const policy = subagentPolicies.get();
-			engines.send(key, state.parent.cwd, text, host.approvals.policy(sessionId), (state.engine === "claude-code" ? policy.claudeModel : policy.codexModel) || null);
+			const parent = state?.parent;
+			if (!parent?.cwd) throw Object.assign(new Error("That subagent isn't available anymore."), { statusCode: 404 });
+			if (scheduler.position(key)) throw Object.assign(new Error("That subagent is still queued; it gets your task when it starts."), { statusCode: 409 });
+			usageWaiter.cancel(key);
+			subagentStarts.set(key, scheduler.submit(key, () => engines.send(key, parent.cwd!, text, host.approvals.policy(sessionId), subagentModel(state!.engine)), countsHere(sessionId)));
 		},
-		wait: (sessionId, conversationId) => engines.waitFor(subagentKey(sessionId, conversationId)),
-		stop: (sessionId, conversationId) => engines.abort(subagentKey(sessionId, conversationId)).ok,
+		// A subagent that hits a usage limit waits for the reset and continues; the main agent keeps waiting for its report.
+		async wait(sessionId, conversationId) {
+			const key = subagentKey(sessionId, conversationId);
+			// Queued: wait for its turn first (false = stopped before it started).
+			const started = subagentStarts.get(key);
+			if (started && !await started) return { status: "failed" as const, text: "Stopped before it started." };
+			for (;;) {
+				const result = await engines.waitFor(key);
+				if (result.status !== "failed" || limitGuard.stopped(sessionId)) {
+					if (result.status !== "failed") usageWaiter.succeeded(key);
+					return result;
+				}
+				const resumed = new Promise<boolean>(resolveResume => resumeSubagent.set(key, resolveResume));
+				if (!usageWaiter.failed(key, engineFailure(key), null, { fallback: false })) {
+					resumeSubagent.delete(key);
+					return result;
+				}
+				if (!await resumed) return result;
+			}
+		},
+		stop: (sessionId, conversationId) => {
+			const key = subagentKey(sessionId, conversationId);
+			usageWaiter.cancel(key);
+			if (scheduler.cancel(key)) return true;
+			return engines.abort(key).ok;
+		},
 	}, () => subagentPolicies.get());
 
 	// Background agents: scheduled and issue-triggered automations (R11).
@@ -243,5 +382,5 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 			notify("automations", sessionId, (label, project) => `🤖 Automation started *${label}* (${project}).`);
 		},
 	});
-	return { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner, integrations, executionTargets, subagentPolicies, subagentKey };
+	return { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner, integrations, executionTargets, subagentPolicies, subagentKey, limitGuard, usageWaiter, scheduler };
 }

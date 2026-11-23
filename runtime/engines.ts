@@ -9,6 +9,7 @@ import { join, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { RuntimeEventBus } from "./events.ts";
 import { redact, secretEnv } from "./project-secrets.ts";
+import { claudeDenyRules } from "./guardrails.ts";
 import { commandInvocation, q, sessionTarget, stopOnTarget } from "./execution-targets.ts";
 
 export type EngineId = "claude-code" | "codex";
@@ -137,7 +138,8 @@ export function gitWritableDirs(cwd: string): string[] {
 export function engineArgs(engine: EngineId, prompt: string, externalId: string | null, policy: ApprovalPolicy, model: string | null, writableDirs: string[] = [], contained = false) {
 	if (engine === "claude-code") {
 		const mode = policy === "auto-all" ? "bypassPermissions" : policy === "ask" ? "default" : "acceptEdits";
-		const args = ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", mode];
+		// ADE's guardrails as deny rules: they hold even in bypassPermissions (Autopilot).
+		const args = ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", mode, "--settings", JSON.stringify({ permissions: { deny: claudeDenyRules() } })];
 		if (externalId) args.push("--resume", externalId);
 		if (model) args.push("--model", model);
 		args.push(prompt);
@@ -370,6 +372,11 @@ export class EngineManager {
 
 	#pidFile(sessionId: string) {
 		return `/tmp/ade-engine-${sessionId.replace(/[^a-zA-Z0-9-]/g, "").slice(-60)}.pid`;
+	}
+
+	/** Stop every run whose key starts with this prefix (a session's subagents). */
+	abortMatching(prefix: string) {
+		for (const id of [...this.#running.keys()]) if (id.startsWith(prefix)) this.abort(id);
 	}
 
 	abortAll() {

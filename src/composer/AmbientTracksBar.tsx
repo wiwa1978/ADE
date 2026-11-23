@@ -79,7 +79,7 @@ export function AmbientTracksBar({
   const policyLabels: Record<ApprovalPolicy, string> = {
     "auto-safe": "Auto-safe",
     ask: "Ask every cmd",
-    "auto-all": "Full auto",
+    "auto-all": "Autopilot",
   }
 
   return (
@@ -242,7 +242,7 @@ export function AmbientTracksBar({
           type="button"
           className="ade-track-pill ade-track-pill-right"
           onClick={() => onChangeApprovalPolicy(nextPolicy[approvalPolicy])}
-          title="Click to cycle command approval policy (Auto-safe → Ask every cmd → Full auto)"
+          title="Click to cycle command approval policy (Auto-safe → Ask every cmd → Autopilot)"
         >
           <Shield className="size-3" />
           <span>{policyLabels[approvalPolicy]}</span>

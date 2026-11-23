@@ -103,6 +103,18 @@ export class UsageTracker {
 		this.#scheduleSave();
 	}
 
+	/** Everything a session has cost so far. */
+	sessionCost(sessionId: string) {
+		return this.#ledger.sessions[sessionId]?.cost ?? 0;
+	}
+
+	/** What all agents have cost today. */
+	todayCost() {
+		let total = 0;
+		for (const value of Object.values(this.#ledger.days[dayKey(this.#now())] ?? {})) total += value.cost;
+		return total;
+	}
+
 	report(): UsageReport {
 		const now = this.#now();
 		const month = dayKey(now).slice(0, 7);

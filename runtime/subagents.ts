@@ -9,6 +9,7 @@ import { createShellTools, type ProcessManager } from "./shell-tools.ts";
 import type { RuntimeEventBus } from "./events.ts";
 import { resolveBaseCommit, type WorktreeManager } from "./worktrees.ts";
 import { externalSubagents, subagentPolicy } from "./subagent-harness.ts";
+import { GUARDRAIL_INSTRUCTIONS } from "./guardrails.ts";
 import { harnessChoiceText, harnessNames, resolveHarness, type SubagentHarness } from "./subagent-policy.ts";
 
 export type SubagentMode = "readonly" | "workspace" | "worktree";
@@ -255,7 +256,7 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 					harness,
 					cwd,
 					readOnly: mode === "readonly",
-					task: `You are a subagent named "${name}" (${role}) working for a coordinating agent. ${mode === "readonly" ? "Only read and investigate; don't change files." : "Make the changes in this folder and verify them."}\n\nTask:\n${taskText}\n\nEnd with a short report: what you did, what you found, and anything left to do.`,
+					task: `You are a subagent named "${name}" (${role}) working for a coordinating agent. ${mode === "readonly" ? "Only read and investigate; don't change files." : "Make the changes in this folder and verify them."}\n\nTask:\n${taskText}\n\n${GUARDRAIL_INSTRUCTIONS}\n\nEnd with a short report: what you did, what you found, and anything left to do.`,
 				});
 				const report = () => external.wait(opts.sessionId, String(id)).then(result => ({ status: result.status, report: result.text || `(${harnessNames[harness]} finished without a text report)` }));
 				if (background) {
