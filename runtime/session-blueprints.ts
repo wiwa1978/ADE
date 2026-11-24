@@ -56,10 +56,15 @@ const MODEL_CONFIG: ModelRoutingConfig = { profile: "balanced", appDefault: { pr
 
 const TERMINAL: StageStatus[] = ["completed", "skipped"];
 
+/** Tools that still work while the agent waits at a gate: looking around and talking to the team. */
+const GATE_ALLOWED = new Set(["read", "list_files", "grep_search", "find_files", "read_skill", "finish_stage", "team_read", "team_post", "wait_subagent", "list_subagents"]);
+
 export class SessionBlueprints {
 	#db: DatabaseSync;
 	#events?: RuntimeEventBus;
 	#now: () => number;
+	/** Sessions whose agent just stopped at a gate: until the next turn begins, it may only read and talk. */
+	#gated = new Set<string>();
 
 	constructor(db: DatabaseSync, events?: RuntimeEventBus, now: () => number = Date.now) {
 		this.#db = db;
@@ -106,6 +111,30 @@ export class SessionBlueprints {
 		if (first) record.history.push({ at: now, stageId: first.id, event: "started" });
 		this.#save(sessionId, blueprintId, record);
 		return record;
+	}
+
+	/** The turn's answer when it ended at a gate (it has no text of its own), or null. */
+	gateNote(sessionId: string): string | null {
+		if (!this.#gated.has(sessionId)) return null;
+		const stage = this.summary(sessionId)?.stage;
+		return stage?.status === "awaiting_approval"
+			? `Waiting for your approval: ${stage.name}. Approve it, or ask for changes, in the Stages tab.`
+			: "Stopped: it needs your decision. See the Stages tab.";
+	}
+
+	/** A new turn begins (the user wrote, or decided): the gate stop is over. */
+	unlock(sessionId: string) {
+		this.#gated.delete(sessionId);
+	}
+
+	/**
+	 * Why a tool may not run right now: the agent stopped at a gate and must wait for the user. Only
+	 * reading and talking to the team pass; anything that changes things is refused for the rest of that turn.
+	 */
+	gateReason(sessionId: string, toolName: string): string | null {
+		if (!this.#gated.has(sessionId) || GATE_ALLOWED.has(toolName)) return null;
+		const stage = this.summary(sessionId)?.stage;
+		return `Stopped: "${stage?.name ?? "this stage"}" is waiting for the user's approval. End your turn now (a short summary is enough); the user approves or asks for changes in ADE, and you continue after that.`;
 	}
 
 	blueprintId(sessionId: string) {
@@ -249,10 +278,12 @@ export class SessionBlueprints {
 		if (result.requiresHumanEscalation) {
 			record.history.push({ at: now, stageId: stage.id, event: "escalated", note: input.verdict?.summary });
 			this.#save(sessionId, row.blueprintId!, record);
+			this.#gated.add(sessionId);
 			return { reply: `Recorded. This needs the user's decision${record.run.auditLoopbacksUsed >= record.run.maxAuditLoopbacks ? " (the review asked for changes again after the allowed number of rounds)" : ""}. Stop here: end your turn by explaining the open findings and what you recommend.`, waiting: true };
 		}
 		if (record.run.stages[index].status === "awaiting_approval") {
 			this.#save(sessionId, row.blueprintId!, record);
+			this.#gated.add(sessionId);
 			return { reply: `Recorded "${stage.name}". The user reviews it before the next stage. Stop here: end your turn with a short summary of what's ready for review and where to find it. Don't start the next stage.`, waiting: true };
 		}
 		return this.#advance(sessionId, row, blueprint, record, `Recorded "${stage.name}".`);
@@ -265,6 +296,7 @@ export class SessionBlueprints {
 		record.run = run;
 		if (action.kind === "execute_stage") record.history.push({ at: now, stageId: action.stage.id, event: "started" });
 		this.#save(sessionId, row.blueprintId!, record);
+		if (action.kind === "await_approval" || action.kind === "failed") this.#gated.add(sessionId);
 		if (action.kind === "completed") return { reply: `${prefix} All stages are done. End your turn with a short final summary: what was built, where the PR or branch is, and anything left for the user.`, waiting: false };
 		if (action.kind === "await_approval") return { reply: `${prefix} The next stage, "${action.stage.name}", starts after the user approves it. Stop here and end your turn with a short summary.`, waiting: true };
 		if (action.kind === "failed") return { reply: `${prefix} The blueprint can't continue: ${action.reason}. Explain this to the user.`, waiting: true };
@@ -345,7 +377,8 @@ export class SessionBlueprints {
 					: undefined;
 				const result = this.finish(sessionId, { stageId: args.stageId, summary: args.summary, artifacts: args.artifacts, verdict });
 				if (result.waiting) onWaiting?.(sessionId);
-				return { output: [{ type: "text", text: result.reply }], details: { waiting: result.waiting } };
+				// At a gate the turn ends here, by ADE, not by the agent's good manners.
+				return { output: [{ type: "text", text: result.reply }], details: { waiting: result.waiting }, ...(result.waiting ? { control: { terminate: true } } : {}) };
 			},
 		});
 		return defineExtension({ name: "ade-blueprint-stages", tools: [finishStage] });

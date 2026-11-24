@@ -68,6 +68,7 @@ export class LocalAgentHost {
 		this.mcp = new McpManager(this.#db, this.events);
 
 		this.blueprints = new SessionBlueprints(this.#db, this.events);
+		this.approvals.setGate((sessionId, toolName) => this.blueprints.gateReason(sessionId, toolName));
 		this.team = new TeamBoard(stateDirectory, this.events);
 		this.#models = new ModelConfigService({ db: this.#db, stateDirectory, environment, modelConfigFactory });
 		this.#projects = new ProjectStore(this.#db, githubIssueFetcher);
@@ -110,6 +111,7 @@ export class LocalAgentHost {
 			models: this.#models,
 			sessions: this.#sessionManager,
 			listSessions: () => this.sessions(),
+			gateNote: taskId => this.blueprints.gateNote(taskId),
 		});
 	}
 

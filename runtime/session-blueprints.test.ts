@@ -144,3 +144,30 @@ test("Request changes on a stage that hasn't started keeps it waiting; nothing i
 	assert.match(blueprints.decide("s1", "approve")!, /approved starting "Merge-Ready PR"/);
 	assert.equal(blueprints.summary("s1")!.stage?.status, "running");
 });
+
+test("after a gate the agent may only read and talk until the next turn; the tool result ends the turn", async () => {
+	const { blueprints } = setup("speckit");
+	const finish = (blueprints.createExtension("s1").tools ?? []).find(tool => tool.name === "finish_stage") as unknown as {
+		execute: (args: Record<string, unknown>, api: unknown) => Promise<{ output: Array<{ text: string }>; control?: { terminate?: boolean } }>;
+	};
+	const call = (args: Record<string, unknown>) => finish.execute(args, { conversationId: 0 });
+
+	// A stage without a gate doesn't end the turn, and nothing is locked.
+	const first = await call({ stageId: "constitution", summary: "ok" });
+	assert.equal(first.control, undefined);
+	assert.equal(blueprints.gateReason("s1", "write"), null);
+
+	// Specify has a gate: the result ends the turn, and changing things is refused for the rest of it.
+	const gate = await call({ stageId: "specify", summary: "Spec written." });
+	assert.equal(gate.control?.terminate, true);
+	assert.match(gate.output[0].text, /Stop here/);
+	assert.match(blueprints.gateReason("s1", "write") ?? "", /"Specify" is waiting for the user's approval[\s\S]*End your turn/);
+	for (const tool of ["edit", "run_command", "spawn_subagent", "team_tasks", "browser_click"]) assert.ok(blueprints.gateReason("s1", tool), `${tool} is refused`);
+	for (const tool of ["read", "grep_search", "list_files", "team_read", "team_post", "finish_stage"]) assert.equal(blueprints.gateReason("s1", tool), null, `${tool} still works`);
+	assert.match(blueprints.gateNote("s1") ?? "", /Waiting for your approval: Specify/);
+
+	// The next turn lifts it.
+	blueprints.unlock("s1");
+	assert.equal(blueprints.gateReason("s1", "write"), null);
+	assert.equal(blueprints.gateNote("s1"), null);
+});

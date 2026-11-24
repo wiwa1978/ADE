@@ -164,6 +164,8 @@ export class SessionManager {
 			? `You are ADE's coding lead inside an Agentic Development Environment. ${task.workspace ? "You have full workspace tools (list_files, read, write, edit, grep_search, find_files) and shell command tools (run_command, manage_process) in the bound workspace." : "This session has no bound local workspace: do not claim local file access."} You can spawn 1 or more parallel subagents using spawn_subagent (readonly, workspace, or isolated worktree mode; foreground or background) and coordinate with message_subagent, wait_subagent, list_subagents, and stop_subagent. You also have built-in browser tools (browser_navigate, browser_snapshot, browser_click, browser_type, browser_scroll, browser_screenshot, browser_eval, browser_open_external), structured artifact tools (write_artifact, update_tasks), and skills (read_skill). Keep responses concise and well-structured.`
 			: MODES[mode].instructions;
 		// The session's blueprint: which stage it's in and what to do there (none for Vibe).
+		// A new turn is starting: whatever stop a gate put on the last one is over.
+		if (task) this.#blueprints?.unlock(task.id);
 		const stagePrompt = task ? this.#blueprints?.instructions(task.id) ?? null : null;
 		// The team board: the main agent leads it (tasks, plans, answers); subagents work from it.
 		const teamPrompt = task && this.#team ? `${TEAM_INSTRUCTIONS} You are the lead: when work splits into parts for subagents, put them on the task board first (team_tasks add, with an owner and what each waits for), then start the subagents; check team_read for questions and plans waiting for you, review done tasks, and send back what isn't right.` : null;

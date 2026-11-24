@@ -25,6 +25,7 @@ export class TurnExecutor {
 	#active = new Map<string, Promise<unknown>>();
 	#recovering = new Set<string>();
 	#closing = false;
+	#gateNote?: (taskId: string) => string | null;
 
 	constructor(opts: {
 		db: DatabaseSync;
@@ -35,6 +36,8 @@ export class TurnExecutor {
 		models: ModelConfigService;
 		sessions: SessionManager;
 		listSessions: () => ReturnType<TurnStore["listSessions"]>;
+		/** A turn that ended at a blueprint gate has no text of its own; this is its answer. */
+		gateNote?: (taskId: string) => string | null;
 	}) {
 		this.#db = opts.db;
 		this.#events = opts.events;
@@ -44,6 +47,7 @@ export class TurnExecutor {
 		this.#models = opts.models;
 		this.#sessions = opts.sessions;
 		this.#listSessions = opts.listSessions;
+		this.#gateNote = opts.gateNote;
 	}
 
 	isClosing(): boolean {
@@ -208,7 +212,8 @@ export class TurnExecutor {
 				}
 				const transcript = await session.root.context(context);
 				const assistantMessage = [...transcript.messages].reverse().find((message) => message.role === "assistant");
-				const answer = plainText(assistantMessage?.content);
+				const spoken = plainText(assistantMessage?.content);
+				const answer = spoken.trim() ? spoken : (turn.taskId ? this.#gateNote?.(turn.taskId) : null) ?? "";
 				if (!answer.trim()) throw new Error("The model completed without a text response");
 				this.#turns.finishTurn(turn.id, "completed", answer, null);
 				return this.#listSessions().find((item) => item.id === key);

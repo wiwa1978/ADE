@@ -120,6 +120,13 @@ export class ApprovalManager {
 	}
 
 	/** Why a call is refused outright: a hard guardrail (every mode, including Autopilot) or a block rule. */
+	/** Set by the host: why a tool must not run in a session right now (an agent stopped at a gate). */
+	#gate: ((sessionId: string, toolName: string) => string | null) | null = null;
+
+	setGate(gate: (sessionId: string, toolName: string) => string | null) {
+		this.#gate = gate;
+	}
+
 	blockReason(toolName: string, args: Record<string, unknown>): string | null {
 		const rail = toolName === "run_command" && typeof args.command === "string" ? guardrailFor(args.command) : null;
 		if (rail) return `Blocked by ADE's guardrails: ${rail.reason} This applies in every permission mode; don't try to work around it.`;
@@ -182,7 +189,7 @@ export class ApprovalManager {
 				hook(ToolTask, {
 					beforeTool: async (call, api, ctx) => {
 						const args = (call.arguments && typeof call.arguments === "object" ? call.arguments : {}) as Record<string, unknown>;
-						const block = this.blockReason(call.name, args);
+						const block = this.blockReason(call.name, args) ?? this.#gate?.(sessionId, call.name) ?? null;
 						if (block) return { block };
 						if (!this.shouldRequireApproval(sessionId, call.name, args)) {
 							return undefined;
