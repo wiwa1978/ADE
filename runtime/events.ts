@@ -1,23 +1,12 @@
 import type { ServerResponse } from "node:http";
+import type {
+	RuntimeEventMap,
+	RuntimeEventType,
+	TypedRuntimeEvent,
+} from "../packages/protocol/index.ts";
 import { logger } from "./log.ts";
 
-export type RuntimeEventType =
-	| "connected"
-	| "sessions.changed"
-	| "timeline.update"
-	| "subagents.update"
-	| "stages.update"
-	| "team.update"
-	| "approval.requested"
-	| "approval.resolved"
-	| "processes.update"
-	| "artifacts.update"
-	| "tasks.update"
-	| "browser.update"
-	| "browser.frame"
-	| "diff.update"
-	| "mcp.update"
-	| "factory.event";
+export type { RuntimeEventMap, RuntimeEventType, TypedRuntimeEvent };
 
 export type RuntimeEvent = {
 	type: RuntimeEventType;
@@ -41,7 +30,16 @@ export class RuntimeEventBus {
 		return () => this.#listeners.delete(listener);
 	}
 
-	emit(type: RuntimeEventType, payload: unknown, sessionId?: string): void {
+	on<K extends RuntimeEventType>(type: K, listener: (event: TypedRuntimeEvent<K>) => void): () => void {
+		const wrapped = (event: RuntimeEvent) => {
+			if (event.type === type) {
+				listener(event as TypedRuntimeEvent<K>);
+			}
+		};
+		return this.subscribe(wrapped);
+	}
+
+	emit<K extends RuntimeEventType>(type: K, payload: RuntimeEventMap[K], sessionId?: string): void {
 		const event: RuntimeEvent = {
 			type,
 			...(sessionId ? { sessionId } : {}),

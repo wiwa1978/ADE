@@ -545,9 +545,21 @@ test("the local API reports readiness, rejects remote origins, and persists a me
 		assert.equal(chatMessage.status, 200);
 		assert.equal(((await chatMessage.json()) as { session: SessionJson }).session.label, "Named chat");
 
-		const response = await fetch(`${runtime.url}/api/sessions/personal/messages`, {
+		const noOriginSessionMsg = await fetch(`${runtime.url}/api/sessions/personal/messages`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ content: "Say hello.", model: "faux-1", reasoning: "none" }),
+		});
+		assert.equal(noOriginSessionMsg.status, 403);
+		const foreignOriginSessionMsg = await fetch(`${runtime.url}/api/sessions/personal/messages`, {
+			method: "POST",
+			headers: { origin: "https://untrusted.example", "content-type": "application/json" },
+			body: JSON.stringify({ content: "Say hello.", model: "faux-1", reasoning: "none" }),
+		});
+		assert.equal(foreignOriginSessionMsg.status, 403);
+		const response = await fetch(`${runtime.url}/api/sessions/personal/messages`, {
+			method: "POST",
+			headers: { origin: "http://127.0.0.1:1420", "content-type": "application/json" },
 			body: JSON.stringify({ content: "Say hello.", model: "faux-1", reasoning: "none" }),
 		});
 		assert.equal(response.status, 200);

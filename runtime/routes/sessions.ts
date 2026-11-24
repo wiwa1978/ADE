@@ -19,7 +19,6 @@ import type { RouteDeps } from "./context.ts";
 import { redactForCwd } from "../project-secrets.ts";
 import { mergeSubagentBranch, subagentChanges, subagentFileDiff } from "../subagent-work.ts";
 import { transcriptMarkdown, type TranscriptItem } from "../../packages/protocol/transcript.ts";
-import { RUN_TARGETS, type RunTarget } from "../execution-targets.ts";
 import { getWorkspaceGitSummary, listWorkspaceFilesFlat } from "../workspace-files.ts";
 
 export function registerSessionRoutes(
@@ -262,13 +261,13 @@ export function registerSessionRoutes(
 	router.post(
 		"/api/coding-tasks",
 		async (ctx) => {
-			const body = await ctx.readBody();
-			const session = await host.createCodingTask(validateCodingTaskCreate(body), worktreeManager);
+			const input = validateCodingTaskCreate(await ctx.readBody());
+			const session = await host.createCodingTask(input, worktreeManager);
 			// Run on: the request's choice, else the project's default. Set before setup starts.
 			if (session?.workspace?.path && session.workspace.kind !== "none") {
 				const fallback = executionTargets.projectDefault(session.projectId);
-				const target = RUN_TARGETS.includes(body.runOn as RunTarget) ? body.runOn as RunTarget : fallback.target;
-				if (target !== "local") executionTargets.setTarget(session.id, { ...fallback, target, ...(typeof body.dockerImage === "string" ? { image: body.dockerImage } : {}) }, { workspace: session.workspace.path, repository: session.workspace.repository });
+				const target = input.runOn ?? fallback.target;
+				if (target !== "local") executionTargets.setTarget(session.id, { ...fallback, target, ...(input.dockerImage !== undefined ? { image: input.dockerImage } : {}) }, { workspace: session.workspace.path, repository: session.workspace.repository });
 			}
 			if (session) prepareWorktree(session);
 			ctx.json(200, { session });
@@ -297,7 +296,11 @@ export function registerSessionRoutes(
 		async (ctx) => {
 			const input = validateSendMessage(await ctx.readBody());
 			ctx.json(200, { session: await sendToAgent(ctx.params.id, input.content, {
-				id: input.id ?? undefined, provider: input.provider ?? undefined, model: input.model ?? undefined, reasoning: input.reasoning ?? undefined,
+				id: input.id ?? undefined,
+				provider: input.provider ?? undefined,
+				model: input.model ?? undefined,
+				reasoning: input.reasoning ?? undefined,
+				...(input.async !== undefined ? { async: input.async } : {}),
 			}) });
 		},
 		{ originError: "Use ADE to send a coding task message." },
@@ -328,7 +331,7 @@ export function registerSessionRoutes(
 			const session = await host.send(ctx.params.mode, validateSendMessage(await ctx.readBody()));
 			ctx.json(200, { session });
 		},
-		{ requireAppOrigin: false },
+		{ originError: "Use ADE to send a session message." },
 	);
 
 	router.get("/api/sessions/:id/timeline", async (ctx) => {

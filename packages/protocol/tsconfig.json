@@ -8,6 +8,7 @@
     "types": [],
     "skipLibCheck": true,
     "strict": true,
+    "noImplicitOverride": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
