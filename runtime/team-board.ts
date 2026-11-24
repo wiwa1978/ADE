@@ -1,0 +1,333 @@
+// How a session's agents work together: a shared task board (owners, dependencies, atomic takes),
+// plan approval per task, a team board of posts with read tracking, and file claims. Every change
+// is logged as a flow event (who wrote into which part, what each part handed to whom), which is
+// what the Team view draws. The model follows Ensemble for Orca's team mode (MIT,
+// github.com/DueGin/orca-ensemble).
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { badRequest, conflict, notFound } from "./http-error.ts";
+import type { RuntimeEventBus } from "./events.ts";
+
+/** "lead" (the main agent), "user", or a subagent's conversation id. */
+export type Party = string;
+
+export type TaskStatus = "todo" | "in_progress" | "done" | "dropped";
+export type TeamTask = {
+	id: string;
+	title: string;
+	detail: string;
+	owner: Party | null;
+	createdBy: Party;
+	status: TaskStatus;
+	dependsOn: string[];
+	plan: { text: string; status: "waiting" | "approved" | "returned"; note: string; at: number } | null;
+	/** Sent back by a reviewer or the lead: what to fix. */
+	returnedNote: string;
+	result: string;
+	updatedAt: number;
+	history: Array<{ at: number; by: Party; action: string; note?: string }>;
+};
+
+export type PostKind = "question" | "finding" | "answer" | "update";
+export type TeamPost = { seq: number; at: number; author: Party; to: string[]; kind: PostKind; text: string; re: number | null };
+export type FileClaim = { agent: Party; path: string; at: number };
+
+export type TeamPart = "tasks" | "plans" | "board" | "claims";
+export type TeamEvent = { seq: number; at: number; part: TeamPart; action: string; direction: "in" | "out"; from: Party; to: Party[]; subject: string; text: string; count: number };
+
+export type TeamState = {
+	version: 1;
+	tasks: TeamTask[];
+	posts: TeamPost[];
+	claims: FileClaim[];
+	events: TeamEvent[];
+	/** The last post each party has read. */
+	readSeq: Record<Party, number>;
+	/** Members show a plan and wait for approval before they work on a task. */
+	requirePlans: boolean;
+	nextTask: number;
+	nextSeq: number;
+};
+
+const MAX_EVENTS = 400;
+const FOLD_MS = 90_000;
+const empty = (): TeamState => ({ version: 1, tasks: [], posts: [], claims: [], events: [], readSeq: {}, requirePlans: false, nextTask: 1, nextSeq: 1 });
+const clip = (text: string, max = 160) => {
+	const value = text.replace(/\s+/g, " ").trim();
+	return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+};
+const normalizePath = (path: string) => path.trim().replace(/^\.\//, "").replace(/\/+$/, "") || ".";
+/** A claim on a folder covers what's inside it. */
+const covers = (claimed: string, path: string) => claimed === "." || claimed === path || path.startsWith(`${claimed}/`) || claimed.startsWith(`${path}/`);
+
+export class TeamBoard {
+	#dir: string;
+	#events?: RuntimeEventBus;
+	#now: () => number;
+	#cache = new Map<string, TeamState>();
+
+	constructor(stateDirectory: string, events?: RuntimeEventBus, now: () => number = Date.now) {
+		this.#dir = join(stateDirectory, "teams");
+		this.#events = events;
+		this.#now = now;
+	}
+
+	#file(sessionId: string) {
+		if (!/^[\w-]{1,80}$/.test(sessionId)) throw badRequest("Invalid session.");
+		return join(this.#dir, `${sessionId}.json`);
+	}
+
+	state(sessionId: string): TeamState {
+		const cached = this.#cache.get(sessionId);
+		if (cached) return cached;
+		let state = empty();
+		const file = this.#file(sessionId);
+		try {
+			if (existsSync(file)) state = { ...empty(), ...(JSON.parse(readFileSync(file, "utf8")) as Partial<TeamState>) };
+		} catch {
+			state = empty();
+		}
+		this.#cache.set(sessionId, state);
+		return state;
+	}
+
+	#save(sessionId: string, state: TeamState) {
+		mkdirSync(this.#dir, { recursive: true });
+		const file = this.#file(sessionId);
+		writeFileSync(`${file}.tmp`, JSON.stringify(state));
+		renameSync(`${file}.tmp`, file);
+		this.#cache.set(sessionId, state);
+		this.#events?.emit("team.update", { sessionId, events: state.events.length, tasks: state.tasks.length }, sessionId);
+	}
+
+	#log(state: TeamState, event: Omit<TeamEvent, "seq" | "at" | "count">) {
+		const now = this.#now();
+		// Repeated reads by the same party fold into one event.
+		if (event.action === "read") {
+			const last = [...state.events].reverse().find(entry => entry.action === "read" && entry.to.join() === event.to.join());
+			if (last && now - last.at < FOLD_MS && state.events.indexOf(last) >= state.events.length - 6) {
+				last.at = now;
+				last.count += 1;
+				last.subject = event.subject;
+				return;
+			}
+		}
+		state.events.push({ ...event, seq: state.nextSeq++, at: now, count: 1 });
+		if (state.events.length > MAX_EVENTS) state.events.splice(0, state.events.length - MAX_EVENTS);
+	}
+
+	#task(state: TeamState, id: string) {
+		const task = state.tasks.find(entry => entry.id.toLowerCase() === String(id).trim().toLowerCase());
+		if (!task) throw notFound(`There is no task ${id}. Tasks: ${state.tasks.map(entry => entry.id).join(", ") || "none yet"}.`);
+		return task;
+	}
+
+	#ready(state: TeamState, task: TeamTask) {
+		return task.dependsOn.every(dep => state.tasks.find(entry => entry.id === dep)?.status === "done");
+	}
+
+	#change(sessionId: string, change: (state: TeamState) => string) {
+		const state = structuredClone(this.state(sessionId));
+		const result = change(state);
+		this.#save(sessionId, state);
+		return result;
+	}
+
+	setRequirePlans(sessionId: string, on: boolean) {
+		this.#change(sessionId, state => { state.requirePlans = on; return ""; });
+	}
+
+	addTask(sessionId: string, by: Party, input: { title: string; detail?: string; owner?: Party | null; dependsOn?: string[] }) {
+		const title = clip(input.title ?? "", 200);
+		if (!title) throw badRequest("A task needs a title.");
+		return this.#change(sessionId, state => {
+			const dependsOn = (input.dependsOn ?? []).map(dep => this.#task(state, dep).id);
+			const id = `T${state.nextTask++}`;
+			const now = this.#now();
+			state.tasks.push({ id, title, detail: (input.detail ?? "").slice(0, 4000), owner: input.owner ?? null, createdBy: by, status: "todo", dependsOn, plan: null, returnedNote: "", result: "", updatedAt: now, history: [{ at: now, by, action: "added" }] });
+			this.#log(state, { part: "tasks", action: "add", direction: "in", from: by, to: [], subject: id, text: `${id} ${title}${dependsOn.length ? ` (waits for ${dependsOn.join(", ")})` : ""}` });
+			if (input.owner) this.#log(state, { part: "tasks", action: "assign", direction: "out", from: "tasks", to: [input.owner], subject: id, text: `${id} assigned` });
+			return id;
+		});
+	}
+
+	/** Take a task to work on: only one agent gets it, and only once what it waits for is done. */
+	takeTask(sessionId: string, agent: Party, id: string) {
+		return this.#change(sessionId, state => {
+			const task = this.#task(state, id);
+			if (task.status === "in_progress" && task.owner === agent) return `${task.id} is already yours.`;
+			if (task.status !== "todo") throw conflict(`${task.id} is ${task.status.replace("_", " ")}${task.owner ? ` (${task.owner === agent ? "yours" : "someone else's"})` : ""}.`);
+			if (task.owner && task.owner !== agent) throw conflict(`${task.id} is assigned to someone else.`);
+			if (!this.#ready(state, task)) throw conflict(`${task.id} waits for ${task.dependsOn.filter(dep => state.tasks.find(entry => entry.id === dep)?.status !== "done").join(", ")}.`);
+			task.owner = agent;
+			task.status = "in_progress";
+			task.updatedAt = this.#now();
+			task.history.push({ at: task.updatedAt, by: agent, action: "took" });
+			this.#log(state, { part: "tasks", action: "claim", direction: "in", from: agent, to: [], subject: task.id, text: `took ${task.id}: ${task.title}` });
+			return state.requirePlans ? `You have ${task.id}. Submit your plan with team_plan before you change anything; the lead approves it.` : `You have ${task.id}.`;
+		});
+	}
+
+	finishTask(sessionId: string, agent: Party, id: string, result: string) {
+		return this.#change(sessionId, state => {
+			const task = this.#task(state, id);
+			if (task.owner !== agent && agent !== "lead") throw conflict(`${task.id} isn't yours.`);
+			if (state.requirePlans && task.plan?.status !== "approved" && agent !== "lead") throw conflict(`${task.id}'s plan isn't approved yet.`);
+			task.status = "done";
+			task.result = clip(result ?? "", 2000);
+			task.returnedNote = "";
+			task.updatedAt = this.#now();
+			task.history.push({ at: task.updatedAt, by: agent, action: "done", note: task.result });
+			this.#log(state, { part: "tasks", action: "done", direction: "in", from: agent, to: [], subject: task.id, text: `${task.id} done${task.result ? `: ${clip(task.result, 120)}` : ""}` });
+			// Its file claims are released; tasks waiting for it may start.
+			const released = state.claims.filter(claim => claim.agent === agent);
+			if (released.length && !state.tasks.some(other => other !== task && other.owner === agent && other.status === "in_progress")) {
+				state.claims = state.claims.filter(claim => claim.agent !== agent);
+				this.#log(state, { part: "claims", action: "release", direction: "in", from: agent, to: [], subject: released.map(claim => claim.path).join(", "), text: `released ${released.length} ${released.length === 1 ? "path" : "paths"}` });
+			}
+			const unlocked = state.tasks.filter(other => other.status === "todo" && other.dependsOn.includes(task.id) && this.#ready(state, other));
+			for (const other of unlocked) this.#log(state, { part: "tasks", action: "ready", direction: "out", from: "tasks", to: other.owner ? [other.owner] : [], subject: other.id, text: `${other.id} can start` });
+			return unlocked.length ? `Done. ${unlocked.map(other => other.id).join(", ")} can start now.` : "Done.";
+		});
+	}
+
+	/** The lead (or you) sends a done task back, or drops or reopens one. */
+	reviewTask(sessionId: string, by: Party, id: string, action: "send_back" | "drop" | "reopen", note: string) {
+		return this.#change(sessionId, state => {
+			const task = this.#task(state, id);
+			const now = this.#now();
+			if (action === "send_back") {
+				if (task.status !== "done") throw conflict(`${task.id} isn't done.`);
+				task.status = "in_progress";
+				task.returnedNote = clip(note, 1000);
+				this.#log(state, { part: "tasks", action: "return", direction: "out", from: "tasks", to: task.owner ? [task.owner] : [], subject: task.id, text: `${task.id} sent back${note ? `: ${clip(note, 120)}` : ""}` });
+			} else if (action === "drop") {
+				task.status = "dropped";
+				this.#log(state, { part: "tasks", action: "drop", direction: "in", from: by, to: [], subject: task.id, text: `dropped ${task.id}${note ? `: ${clip(note, 100)}` : ""}` });
+			} else {
+				task.status = "todo";
+				task.owner = null;
+				this.#log(state, { part: "tasks", action: "reopen", direction: "in", from: by, to: [], subject: task.id, text: `reopened ${task.id}` });
+			}
+			task.updatedAt = now;
+			task.history.push({ at: now, by, action, note });
+			return `${task.id} is ${task.status.replace("_", " ")}.`;
+		});
+	}
+
+	submitPlan(sessionId: string, agent: Party, id: string, text: string) {
+		const plan = (text ?? "").trim();
+		if (!plan) throw badRequest("Describe the plan.");
+		return this.#change(sessionId, state => {
+			const task = this.#task(state, id);
+			if (task.owner !== agent) throw conflict(`${task.id} isn't yours; take it first.`);
+			task.plan = { text: plan.slice(0, 4000), status: "waiting", note: "", at: this.#now() };
+			task.history.push({ at: task.plan.at, by: agent, action: "plan" });
+			this.#log(state, { part: "plans", action: "submit", direction: "in", from: agent, to: [], subject: task.id, text: `plan for ${task.id}: ${clip(plan, 140)}` });
+			this.#log(state, { part: "plans", action: "notify", direction: "out", from: "plans", to: ["lead"], subject: task.id, text: `plan for ${task.id} waits for approval` });
+			return `Plan for ${task.id} submitted. Wait for the decision (team_read shows it) before changing files.`;
+		});
+	}
+
+	decidePlan(sessionId: string, by: Party, id: string, decision: "approve" | "return", note: string) {
+		return this.#change(sessionId, state => {
+			const task = this.#task(state, id);
+			if (!task.plan || task.plan.status !== "waiting") throw conflict(`${task.id} has no plan waiting.`);
+			task.plan.status = decision === "approve" ? "approved" : "returned";
+			task.plan.note = clip(note ?? "", 1000);
+			task.history.push({ at: this.#now(), by, action: decision === "approve" ? "plan approved" : "plan returned", note });
+			this.#log(state, { part: "plans", action: decision, direction: "in", from: by, to: [], subject: task.id, text: `${decision === "approve" ? "approved" : "returned"} the plan of ${task.id}${note ? `: ${clip(note, 110)}` : ""}` });
+			if (task.owner) this.#log(state, { part: "plans", action: "verdict", direction: "out", from: "plans", to: [task.owner], subject: task.id, text: `verdict on ${task.id}` });
+			return `Plan of ${task.id} ${decision === "approve" ? "approved" : "returned"}.`;
+		});
+	}
+
+	post(sessionId: string, author: Party, input: { text: string; to?: string[]; kind?: PostKind; re?: number | null }) {
+		const text = (input.text ?? "").trim();
+		if (!text) throw badRequest("Write something to post.");
+		return this.#change(sessionId, state => {
+			const seq = (state.posts.at(-1)?.seq ?? 0) + 1;
+			const to = input.to?.length ? input.to : ["all"];
+			state.posts.push({ seq, at: this.#now(), author, to, kind: input.kind ?? "update", text: text.slice(0, 4000), re: input.re ?? null });
+			// Your own post counts as read, but only when nothing before it is still unread.
+			if ((state.readSeq[author] ?? 0) >= seq - 1) state.readSeq[author] = seq;
+			this.#log(state, { part: "board", action: "post", direction: "in", from: author, to, subject: `#${seq}`, text: `${input.kind ?? "update"}: ${clip(text, 140)}` });
+			return `Posted #${seq}.`;
+		});
+	}
+
+	/** What's new for this party: posts addressed to it (or to all), and decisions on its plans and tasks. */
+	read(sessionId: string, agent: Party, names: (party: Party) => string = party => party) {
+		const state = this.state(sessionId);
+		const since = state.readSeq[agent] ?? 0;
+		const posts = state.posts.filter(post => post.seq > since && post.author !== agent && (post.to.includes("all") || post.to.includes(agent) || post.to.includes(names(agent))));
+		const mine = state.tasks.filter(task => task.owner === agent);
+		const lines: string[] = [];
+		for (const post of posts) lines.push(`#${post.seq} ${names(post.author)} (${post.kind}${post.re ? `, re #${post.re}` : ""}): ${post.text}`);
+		for (const task of mine) {
+			if (task.plan?.status === "approved" && task.status === "in_progress") lines.push(`Your plan for ${task.id} is approved${task.plan.note ? `: ${task.plan.note}` : ""}. Go ahead.`);
+			if (task.plan?.status === "returned") lines.push(`Your plan for ${task.id} was returned: ${task.plan.note || "rework it"}. Submit a new plan.`);
+			if (task.returnedNote && task.status === "in_progress") lines.push(`${task.id} was sent back: ${task.returnedNote}`);
+		}
+		const last = state.posts.at(-1)?.seq ?? 0;
+		if (posts.length) {
+			this.#change(sessionId, next => {
+				next.readSeq[agent] = last;
+				this.#log(next, { part: "board", action: "read", direction: "out", from: "board", to: [agent], subject: posts.length > 1 ? `#${posts[0].seq}–#${posts.at(-1)!.seq}` : `#${posts[0].seq}`, text: `${names(agent)} read ${posts.length} ${posts.length === 1 ? "post" : "posts"}` });
+				return "";
+			});
+		}
+		return lines.length ? lines.join("\n") : "Nothing new on the team board.";
+	}
+
+	/** Claim files before editing them; paths another agent holds are refused. */
+	claim(sessionId: string, agent: Party, paths: string[], names: (party: Party) => string = party => party) {
+		const wanted = [...new Set(paths.map(normalizePath))].slice(0, 50);
+		if (!wanted.length) throw badRequest("Name the files or folders to claim.");
+		return this.#change(sessionId, state => {
+			const granted: string[] = [];
+			const refused: string[] = [];
+			for (const path of wanted) {
+				const holder = state.claims.find(claim => claim.agent !== agent && covers(claim.path, path));
+				if (holder) {
+					refused.push(`${path} (held by ${names(holder.agent)})`);
+					this.#log(state, { part: "claims", action: "conflict", direction: "out", from: "claims", to: [agent], subject: path, text: `${names(agent)} was refused ${path}, held by ${names(holder.agent)}` });
+					continue;
+				}
+				if (!state.claims.some(claim => claim.agent === agent && claim.path === path)) state.claims.push({ agent, path, at: this.#now() });
+				granted.push(path);
+			}
+			if (granted.length) this.#log(state, { part: "claims", action: "claim", direction: "in", from: agent, to: [], subject: granted.join(", "), text: `claimed ${granted.join(", ")}` });
+			return [granted.length ? `Claimed: ${granted.join(", ")}.` : "", refused.length ? `Refused: ${refused.join("; ")}. Coordinate on the team board, or work on something else.` : ""].filter(Boolean).join(" ");
+		});
+	}
+
+	release(sessionId: string, agent: Party, paths: string[] | null) {
+		return this.#change(sessionId, state => {
+			const mine = state.claims.filter(claim => claim.agent === agent && (!paths || paths.map(normalizePath).includes(claim.path)));
+			if (!mine.length) return "You hold no such claims.";
+			state.claims = state.claims.filter(claim => !mine.includes(claim));
+			this.#log(state, { part: "claims", action: "release", direction: "in", from: agent, to: [], subject: mine.map(claim => claim.path).join(", "), text: `released ${mine.map(claim => claim.path).join(", ")}` });
+			return `Released ${mine.length} ${mine.length === 1 ? "path" : "paths"}.`;
+		});
+	}
+
+	/** Who holds a path, if someone other than `agent` does (for refusing edits). */
+	holderOf(sessionId: string, agent: Party, path: string) {
+		return this.state(sessionId).claims.find(claim => claim.agent !== agent && covers(claim.path, normalizePath(path)))?.agent ?? null;
+	}
+
+	/** The task board as text, for agents. */
+	describe(sessionId: string, names: (party: Party) => string = party => party) {
+		const state = this.state(sessionId);
+		if (!state.tasks.length) return "The task board is empty.";
+		return state.tasks.map(task => {
+			const waits = task.status === "todo" && !this.#ready(state, task) ? ` · waits for ${task.dependsOn.join(", ")}` : "";
+			const plan = task.plan ? ` · plan ${task.plan.status}` : "";
+			return `${task.id} [${task.status.replace("_", " ")}] ${task.title}${task.owner ? ` · ${names(task.owner)}` : " · unassigned"}${waits}${plan}`;
+		}).join("\n");
+	}
+}
+
+/** Told to agents that have the team tools. */
+export const TEAM_INSTRUCTIONS = "This session has a shared team board. Use team_tasks to see, add and take tasks (one agent per task; a task can wait for others) and to mark them done; team_post to ask, report findings or answer on the team board, and team_read to see what's new for you (posts, plan decisions, tasks sent back); team_claim before editing files, so two agents never edit the same file. When plans are required, submit yours with team_plan and wait for approval before changing files.";

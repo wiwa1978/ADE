@@ -11,6 +11,7 @@ import { resolveBaseCommit, type WorktreeManager } from "./worktrees.ts";
 import { externalSubagents, subagentPolicy } from "./subagent-harness.ts";
 import { GUARDRAIL_INSTRUCTIONS } from "./guardrails.ts";
 import { harnessChoiceText, harnessNames, resolveHarness, type SubagentHarness } from "./subagent-policy.ts";
+import { TEAM_INSTRUCTIONS } from "./team-board.ts";
 
 export type SubagentMode = "readonly" | "workspace" | "worktree";
 
@@ -43,6 +44,8 @@ type SubagentToolsOptions = {
 	processes?: ProcessManager;
 	events?: RuntimeEventBus;
 	onSubagentCreated?: (conversationId: string | number) => void;
+	/** The team board tools (tasks, plans, posts, claims), shared with every Pi subagent. */
+	teamTools?: readonly ModelToolEntry[];
 };
 
 function toConvId(raw: string): ConversationIdParam {
@@ -75,13 +78,14 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 				: mode === "worktree"
 					? `You are a workspace subagent with full file, search, and shell access in your own isolated Git worktree (${workspacePath ?? "assigned worktree"}). Make clean, focused changes and verify them.`
 					: `You are a workspace subagent with full file, search, and shell access in the shared workspace (${workspacePath ?? "assigned workspace"}). Make clean, focused changes and verify them.`;
-		return `You are "${role}", a focused subagent working for the session lead in ADE. ${capabilityText} Complete your assigned task thoroughly and return a clear, concise report of findings or changes made.`;
+		const teamText = opts.teamTools?.length ? ` ${TEAM_INSTRUCTIONS} Take tasks that fit your role from the board, ask on the team board instead of guessing, and mark your tasks done when they are.` : "";
+		return `You are "${role}", a focused subagent working for the session lead in ADE. ${capabilityText} Complete your assigned task thoroughly and return a clear, concise report of findings or changes made.${teamText}`;
 	};
 
 	const selectModelTools = async (mode: SubagentMode, subId: string): Promise<{ tools: ModelToolEntry[]; workspacePath: string | null; branch: string | null }> => {
 		if (mode === "readonly" || !opts.workspace || !opts.workspaceIdentity) {
 			return {
-				tools: [...opts.readTools, ...opts.searchTools],
+				tools: [...opts.readTools, ...opts.searchTools, ...(opts.teamTools ?? [])],
 				workspacePath: opts.workspace,
 				branch: null,
 			};
@@ -107,13 +111,13 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 				? createShellTools({ sessionId: opts.sessionId, workspace: op.target, identity, processes: opts.processes })
 				: null;
 			return {
-				tools: [...(wtFiles.tools ?? []), ...(wtSearch.tools ?? []), ...(wtShell?.tools ?? [])],
+				tools: [...(wtFiles.tools ?? []), ...(wtSearch.tools ?? []), ...(wtShell?.tools ?? []), ...(opts.teamTools ?? [])],
 				workspacePath: op.target,
 				branch,
 			};
 		}
 		return {
-			tools: [...opts.workspaceTools, ...opts.searchTools, ...opts.shellTools],
+			tools: [...opts.workspaceTools, ...opts.searchTools, ...opts.shellTools, ...(opts.teamTools ?? [])],
 			workspacePath: opts.workspace,
 			branch: null,
 		};

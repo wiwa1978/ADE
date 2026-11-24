@@ -7,6 +7,7 @@ export type RuntimeEventType =
 	| "timeline.update"
 	| "subagents.update"
 	| "stages.update"
+	| "team.update"
 	| "approval.requested"
 	| "approval.resolved"
 	| "processes.update"

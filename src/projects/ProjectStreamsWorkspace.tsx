@@ -108,7 +108,10 @@ export function ProjectStreamsWorkspace({
   const [launching, setLaunching] = useState(false)
   const [launchError, setLaunchError] = useState("")
 
-  const blueprint = BUILTIN_BLUEPRINTS.find(b => b.id === (project.blueprintId || "automated-factory")) ?? BUILTIN_BLUEPRINTS[0]
+  // The project's default way of working: Vibe coding or a blueprint.
+  const blueprint = !project.blueprintId || project.blueprintId === "vibe"
+    ? { id: "vibe", name: "Vibe coding" }
+    : BUILTIN_BLUEPRINTS.find(b => b.id === project.blueprintId) ?? { id: project.blueprintId, name: project.blueprintId }
   const repoSlug = project.githubUrl?.replace(/^https:\/\/github\.com\//i, "") ?? null
 
   const sessionMap = new Map(sessions.map(s => [s.id, s]))

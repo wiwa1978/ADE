@@ -342,7 +342,7 @@ beforeEach(() => {
     } else if (url === "/api/worktree-operations") {
       payload = { operations: [] }
     }
-    return { ok: true, json: async () => payload } as Response
+    return { ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) } as Response
   }) as typeof fetch
   const rawContainer = browser.document.createElement("div")
   browser.document.body.append(rawContainer)
@@ -428,6 +428,28 @@ test("Agents view shows every agent side by side with what each is doing and cha
   assert.match(backend, /\$0\.18/)
   // The selected agent's changes and full timeline open below the cards.
   assert.match(container.querySelector(".ade-agent-changes")?.textContent ?? "", /Changes on ade\/sub-1/)
+})
+
+test("Team view shows members, the data flow between them and the latest flows", async () => {
+  await act(async () => root.render(React.createElement(App)))
+  const taskRow = [...container.querySelectorAll('[role="button"]')].find(el => el.textContent?.includes("Build split-pane ADE"))
+  assert.ok(taskRow, "Missing Build split-pane ADE session in sidebar")
+  await act(async () => { (taskRow as HTMLElement).click() })
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+  await click("Team")
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+  const view = container.querySelector(".ade-flow")
+  assert.ok(view, "the Team view opens")
+  const text = view.textContent ?? ""
+  assert.match(text, /Members/)
+  assert.match(text, /Backend Worker/, "each subagent is a member")
+  assert.match(text, /Data flow/)
+  assert.match(text, /Brief/)
+  assert.match(text, /Latest flows/)
+  // A part opens its page.
+  const brief = [...view.querySelectorAll(".ade-flow-card")].find(card => card.textContent?.includes("Brief")) as HTMLElement
+  await act(async () => { brief.click() })
+  assert.ok(container.querySelector(".ade-flow-tabs"), "the part's page opens with tabs")
 })
 
 test("opens Built-in Browser pane and triggers external system browser launch", async () => {

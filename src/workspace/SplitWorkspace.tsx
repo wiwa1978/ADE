@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Activity, Bot, CircleDot, Columns2, ListChecks, FileDiff, FileText, FolderTree, GitPullRequest, Globe, Play, ScrollText, Terminal, Workflow, X } from "lucide-react"
+import { Activity, Bot, CircleDot, Columns2, ListChecks, Users, FileDiff, FileText, FolderTree, GitPullRequest, Globe, Play, ScrollText, Terminal, Workflow, X } from "lucide-react"
 import type { SidePanelItem } from "./SidePanelMenu"
 import { publishSessionTools } from "../layout/session-tools"
 import { TerminalPanel } from "../../TerminalPanel"
@@ -325,6 +325,11 @@ export function SplitWorkspace({
   const openTranscript = useCallback(() => openBeside({ id: "transcript", kind: "transcript", title: "Transcript" }), [openBeside])
   const openProgress = useCallback(() => openBeside({ id: "progress", kind: "progress", title: "Progress" }), [openBeside])
   const openAgents = useCallback(() => openBeside({ id: "agents", kind: "agents", title: "Agents" }), [openBeside])
+  // The Team view wants room: it opens wide, the chat keeps a narrow column ("Wider" in Agents switches back).
+  const openTeam = () => {
+    openBeside({ id: "team", kind: "team", title: "Team" })
+    if (narrowRatio === null) { setNarrowRatio(splitRatio); setSplitRatio(30) }
+  }
   // "Wider" in the Agents view gives the side panel most of the room (and back).
   const [narrowRatio, setNarrowRatio] = useState<number | null>(null)
   const toggleAgentsWide = () => {
@@ -411,6 +416,7 @@ export function SplitWorkspace({
   // Everything the side panel can open, with live status (the panel's menu lists these).
   const is = (kind: WorkspaceTab["kind"]) => showBeside && activeBesideTab?.kind === kind
   const sidePanelItems: SidePanelItem[] = [
+    ...(hasWorkspace ? [{ id: "team", label: "Team", description: "Under the hood: who takes part, the data flow between them and the latest flows, live", icon: Users, onOpen: openTeam, live: isBusy || runningSubagentsCount > 0, active: is("team") }] : []),
     ...(subagents.length ? [{ id: "agents", label: "Agents", description: "Every agent side by side: what each is doing, thinking and changed", icon: Bot, onOpen: openAgents, badge: runningSubagentsCount || undefined, live: runningSubagentsCount > 0, active: is("agents") || is("subagent") }] : []),
     ...(subagents.length || progressCount.total > 1 ? [{ id: "progress", label: "Progress", description: "A table of every agent and task and how far each is", icon: ListChecks, onOpen: openProgress, badge: `${progressCount.done}/${progressCount.total}`, active: is("progress"), menuOnly: true }] : []),
     ...(blueprint ? [{ id: "stages", label: "Stages", description: `${blueprint.name.replace(/\s*\(.*\)$/, "")}: where the work is and what waits for you`, icon: Workflow, onOpen: () => { closeBesideTab("tools"); openStagesDrawer() }, badge: `${blueprint.done}/${blueprint.total}`, attention: blueprint.stage?.status === "awaiting_approval", active: bottomTerminalOpen && activeDrawerTab === "stages" }] : []),
@@ -526,6 +532,7 @@ export function SplitWorkspace({
               onStartFromIssue={onStartFromIssue}
               agentsWide={narrowRatio !== null}
               onToggleAgentsWide={toggleAgentsWide}
+              onOpenStagesDrawer={openStagesDrawer}
               splitRatio={splitRatio}
               session={session}
               workspacePath={workspacePath}

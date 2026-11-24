@@ -28,6 +28,7 @@ import type { ConversationTimelineSnapshot } from "./timeline.ts";
 import type { WorktreeManager } from "./worktrees.ts";
 import { createStartFrom } from "./start-from.ts";
 import { SessionBlueprints } from "./session-blueprints.ts";
+import { TeamBoard } from "./team-board.ts";
 
 const startFromService = createStartFrom();
 
@@ -54,6 +55,8 @@ export class LocalAgentHost {
 	readonly factoryRunner: LocalFactoryRunner;
 	/** Each session's way of working (Vibe or a blueprint) and its stage progress. */
 	readonly blueprints: SessionBlueprints;
+	/** Each session's team board: tasks, plans, posts, file claims and the flow events. */
+	readonly team: TeamBoard;
 
 	constructor({ stateDirectory, environment = process.env, modelConfigFactory, githubIssueFetcher = fetch, worktreeManager }: {
 		stateDirectory: string;
@@ -72,6 +75,7 @@ export class LocalAgentHost {
 		this.mcp = new McpManager(this.#db, this.events);
 
 		this.blueprints = new SessionBlueprints(this.#db, this.events);
+		this.team = new TeamBoard(stateDirectory, this.events);
 		this.#models = new ModelConfigService({ db: this.#db, stateDirectory, environment, modelConfigFactory });
 		this.#projects = new ProjectStore(this.#db, githubIssueFetcher);
 		this.#turns = new TurnStore(this.#db);
@@ -102,6 +106,7 @@ export class LocalAgentHost {
 			worktreeManager,
 			safeErrorMessage: (error) => this.safeErrorMessage(error),
 			blueprints: this.blueprints,
+			team: this.team,
 		});
 		this.#turnExecutor = new TurnExecutor({
 			db: this.#db,

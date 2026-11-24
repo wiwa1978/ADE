@@ -59,6 +59,35 @@ export function registerAgentWorkflowRoutes(
 		ctx.json(200, { ...view, switchedTo: blueprintId === VIBE_BLUEPRINT_ID ? "vibe" : blueprintId });
 	}, { originError: "Use ADE to change the way of working." });
 
+	// --- Team board: tasks, plans, posts, file claims and the flow events (the Team view) ---
+	router.get("/api/sessions/:id/team", (ctx) => {
+		const state = host.team.state(ctx.params.id);
+		ctx.json(200, { tasks: state.tasks, posts: state.posts.slice(-200), claims: state.claims, events: state.events, requirePlans: state.requirePlans });
+	});
+
+	// You decide on a plan (instead of, or before, the lead).
+	router.post("/api/sessions/:id/team/plans/:taskId", async (ctx) => {
+		const body = await ctx.readBody() as { decision?: unknown; note?: unknown } | null;
+		if (body?.decision !== "approve" && body?.decision !== "return") throw badRequest("Approve, or return the plan.");
+		const message = host.team.decidePlan(ctx.params.id, "user", ctx.params.taskId, body.decision, typeof body.note === "string" ? body.note : "");
+		ctx.json(200, { message });
+	}, { originError: "Use ADE to decide on plans." });
+
+	// You post on the team board, e.g. to answer an agent's question.
+	router.post("/api/sessions/:id/team/posts", async (ctx) => {
+		const body = await ctx.readBody() as { text?: unknown; to?: unknown; re?: unknown } | null;
+		if (typeof body?.text !== "string") throw badRequest("Write something to post.");
+		const to = Array.isArray(body.to) ? body.to.filter((item): item is string => typeof item === "string") : [];
+		ctx.json(200, { message: host.team.post(ctx.params.id, "user", { text: body.text, kind: "answer", to, re: typeof body.re === "number" ? body.re : null }) });
+	}, { originError: "Use ADE to post on the team board." });
+
+	router.put("/api/sessions/:id/team/settings", async (ctx) => {
+		const body = await ctx.readBody() as { requirePlans?: unknown } | null;
+		if (typeof body?.requirePlans !== "boolean") throw badRequest("Say whether plans need approval.");
+		host.team.setRequirePlans(ctx.params.id, body.requirePlans);
+		ctx.json(200, { requirePlans: body.requirePlans });
+	}, { originError: "Use ADE to change team settings." });
+
 	// --- Usage: tokens and cost per session, project and day ---
 	router.get("/api/usage", (ctx) => {
 		ctx.json(200, usage.report());

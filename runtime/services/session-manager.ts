@@ -33,6 +33,8 @@ import { createShellTools, type ProcessManager } from "../shell-tools.ts";
 import { buildSkillsAndRulesPrompt, createSkillsExtension, discoverSkillsAndRules } from "../skills.ts";
 import { createSubagentTools } from "../subagents.ts";
 import type { SessionBlueprints } from "../session-blueprints.ts";
+import { TEAM_INSTRUCTIONS, type TeamBoard } from "../team-board.ts";
+import { createTeamTools } from "../team-tools.ts";
 import {
 	projectTimeline,
 	type ConversationTimelineSnapshot,
@@ -57,6 +59,7 @@ export class SessionManager {
 	#worktreeManager?: WorktreeManager;
 	#safeErrorMessage: (error: unknown) => string;
 	#blueprints?: SessionBlueprints;
+	#team?: TeamBoard;
 	#sessions = new Map<string, OpenSession>();
 	#watches = new Map<string, WatchHandle>();
 
@@ -75,6 +78,7 @@ export class SessionManager {
 		worktreeManager?: WorktreeManager;
 		safeErrorMessage: (error: unknown) => string;
 		blueprints?: SessionBlueprints;
+		team?: TeamBoard;
 	}) {
 		this.#stateDirectory = opts.stateDirectory;
 		this.#events = opts.events;
@@ -90,6 +94,7 @@ export class SessionManager {
 		this.#worktreeManager = opts.worktreeManager;
 		this.#safeErrorMessage = opts.safeErrorMessage;
 		this.#blueprints = opts.blueprints;
+		this.#team = opts.team;
 	}
 
 	setWorktreeManager(manager: WorktreeManager): void {
@@ -160,7 +165,9 @@ export class SessionManager {
 			: MODES[mode].instructions;
 		// The session's blueprint: which stage it's in and what to do there (none for Vibe).
 		const stagePrompt = task ? this.#blueprints?.instructions(task.id) ?? null : null;
-		const instructions = [baseInstructions, skillsPrompt, stagePrompt].filter(Boolean).join("\n\n");
+		// The team board: the main agent leads it (tasks, plans, answers); subagents work from it.
+		const teamPrompt = task && this.#team ? `${TEAM_INSTRUCTIONS} You are the lead: when work splits into parts for subagents, put them on the task board first (team_tasks add, with an owner and what each waits for), then start the subagents; check team_read for questions and plans waiting for you, review done tasks, and send back what isn't right.` : null;
+		const instructions = [baseInstructions, skillsPrompt, stagePrompt, teamPrompt].filter(Boolean).join("\n\n");
 		const openSession = this.#sessions.get(key);
 		const thinkingLevel = reasoning as "none" | "off" | "low" | "medium" | "high" | "xhigh" | "max";
 		if (openSession) {
@@ -179,6 +186,12 @@ export class SessionManager {
 		if (workspaceExt) registry.install(workspaceExt);
 		if (searchExt) registry.install(searchExt);
 		if (shellExt) registry.install(shellExt);
+		const teamExt = task && this.#team ? createTeamTools({
+			sessionId: key,
+			board: this.#team,
+			agents: async () => (await this.featureAgents(task.id)).map(agent => ({ id: String(agent.id), name: agent.name })),
+		}) : null;
+		if (teamExt) registry.install(teamExt);
 		if (task) {
 			const wsTools = workspaceExt?.tools ?? [];
 			registry.install(createSubagentTools({
@@ -193,6 +206,7 @@ export class SessionManager {
 				worktreeManager: this.#worktreeManager,
 				processes: this.#processes,
 				events: this.#events,
+				teamTools: teamExt?.tools ?? [],
 				onSubagentCreated: (convId) => {
 					const current = this.#sessions.get(key);
 					if (current) void this.watchConversation(key, current.harness, convId, true);

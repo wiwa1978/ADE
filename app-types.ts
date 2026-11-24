@@ -192,6 +192,8 @@ export type WorkspaceTabKind =
   | "issues"
   /** Every agent in the session side by side. */
   | "agents"
+  /** Under the hood: members, the data flow and the latest flows. */
+  | "team"
 
 export type WorkspaceTab = {
   id: string

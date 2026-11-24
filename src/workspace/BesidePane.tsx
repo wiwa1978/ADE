@@ -13,12 +13,16 @@ import {
   PanelRightClose,
   Plus,
   Terminal,
+  Users,
   X,
 } from "lucide-react"
 import { useSessionHold } from "../subagents/session-hold"
 import { SidePanelMenu, type SidePanelItem } from "./SidePanelMenu"
 import { IssuesPanel } from "../panels/IssuesPanel"
 import { AgentsView } from "../agents/AgentsView"
+import { useAgentsWork } from "../agents/agent-summary"
+import { FlowView } from "../flow/FlowView"
+import { useTeamState } from "../flow/team-state"
 import { useSessionStages } from "../blueprints/session-stages"
 import type {
   GitHubIssue,
@@ -58,6 +62,7 @@ export function BesidePane({
   onStartFromIssue,
   agentsWide = false,
   onToggleAgentsWide,
+  onOpenStagesDrawer,
   subagents,
   subagentTimelines,
   gitSummary,
@@ -111,6 +116,7 @@ export function BesidePane({
   onStartFromIssue?: (issue: GitHubIssue) => void
   agentsWide?: boolean
   onToggleAgentsWide?: () => void
+  onOpenStagesDrawer?: () => void
   subagents: SubagentInfo[]
   subagentTimelines: Record<string, ConversationTimelineSnapshot>
   gitSummary: WorkspaceGitSummary
@@ -152,8 +158,11 @@ export function BesidePane({
   onRunStatusChange?: (status: RunStatus) => void
   onOpenProjectSettings?: () => void
 }) {
-  const hold = useSessionHold(activeBesideTab?.kind === "progress" || activeBesideTab?.kind === "agents" ? session.id : null, agentBusy)
-  const { stages: progressStages } = useSessionStages(activeBesideTab?.kind === "progress" && session.blueprint ? session.id : null, `${JSON.stringify(session.blueprint ?? null)}:${agentBusy}`)
+  const hold = useSessionHold(activeBesideTab?.kind === "progress" || activeBesideTab?.kind === "agents" || activeBesideTab?.kind === "team" ? session.id : null, agentBusy)
+  const { stages: progressStages } = useSessionStages((activeBesideTab?.kind === "progress" || activeBesideTab?.kind === "team") && session.blueprint ? session.id : null, `${JSON.stringify(session.blueprint ?? null)}:${agentBusy}`)
+  const teamWork = useAgentsWork(activeBesideTab?.kind === "team" ? session.id : null, subagents.map(sub => `${sub.id}:${sub.status}`).join(","))
+  const stageNames = new Map((progressStages?.stages ?? []).map(stage => [stage.id, stage.name]))
+  const { team: teamBoard, reload: reloadTeam } = useTeamState(activeBesideTab?.kind === "team" ? session.id : null)
   const tabIcon = (tab: WorkspaceTab) => {
     switch (tab.kind) {
       case "subagent": {
@@ -171,6 +180,7 @@ export function BesidePane({
       case "tools": return <LayoutGrid className="size-3.5" />
       case "issues": return <CircleDot className="size-3.5" />
       case "agents": return <Bot className="size-3.5" />
+      case "team": return <Users className="size-3.5" />
       default: return <Columns2 className="size-3.5" />
     }
   }
@@ -220,6 +230,25 @@ export function BesidePane({
 
       <div className="ade-beside-content">
         {activeBesideTab.kind === "tools" ? <SidePanelMenu items={menuItems} /> : null}
+        {activeBesideTab.kind === "team" ? (
+          <FlowView
+            session={session}
+            leadBusy={agentBusy}
+            leadItems={timelineItems}
+            subagents={subagents}
+            subagentTimelines={subagentTimelines}
+            tasks={tasks}
+            stageHistory={(progressStages?.history ?? []).map(entry => ({ ...entry, stageName: stageNames.get(entry.stageId) ?? entry.stageId }))}
+            blueprintName={session.blueprint ? session.blueprint.name.replace(/\s*\(.*\)$/, "") : null}
+            waitingStage={session.blueprint?.stage?.status === "awaiting_approval" ? session.blueprint.stage.name : null}
+            queued={hold.queued.map(item => item.subagentId)}
+            cost={teamWork ? teamWork.lead.cost + teamWork.agents.reduce((sum, item) => sum + (item.cost ?? 0), 0) : null}
+            onOpenAgent={onOpenSubagent}
+            onOpenPart={part => { if (part === "stages") onOpenStagesDrawer?.(); else if (part === "changes") onOpenDiff() }}
+            team={teamBoard}
+            onTeamChanged={reloadTeam}
+          />
+        ) : null}
         {activeBesideTab.kind === "agents" ? (
           <AgentsView
             sessionId={session.id}
