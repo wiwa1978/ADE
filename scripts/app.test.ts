@@ -544,6 +544,46 @@ test("Appearance searchable FontPicker filters Google Fonts, loads stylesheet, a
   assert.match(saved.interfaceFont ?? "", /Geist/)
 })
 
+test("Appearance Accent color sets data-accent, overrides --primary for presets and custom hex, and resets on Default", async () => {
+  await act(async () => root.render(React.createElement(App)))
+
+  assert.equal(browser.document.documentElement.dataset.accent, undefined)
+
+  await click("Settings")
+  await click("Appearance")
+
+  // Pick a preset accent (Coral) in dark mode
+  const coralBtn = container.querySelector('button[aria-label="Coral"]')
+  assert.ok(coralBtn, "Missing Coral accent swatch")
+  await act(async () => { (coralBtn as HTMLElement).click() })
+
+  assert.equal(browser.document.documentElement.dataset.accent, "on")
+  assert.equal(browser.document.documentElement.style.getPropertyValue("--primary").trim(), "251 146 60")
+  assert.equal((JSON.parse(browser.localStorage.getItem("ade-settings-v1") ?? "{}") as { accentColor?: string }).accentColor, "coral")
+
+  // Switching to Light mode uses Coral's light-mode shade and light-appropriate foreground
+  await click("Light")
+  assert.equal(browser.document.documentElement.dataset.accent, "on")
+  assert.equal(browser.document.documentElement.style.getPropertyValue("--primary").trim(), "234 88 12")
+  assert.equal(browser.document.documentElement.style.getPropertyValue("--primary-foreground").trim(), "255 255 255")
+
+  // Set a custom hex accent color
+  const colorInput = container.querySelector('input[aria-label="Custom accent color"]')
+  assert.ok(colorInput, "Missing Custom accent color input")
+  await act(async () => setInput(colorInput, "#ff00aa"))
+  assert.equal(browser.document.documentElement.dataset.accent, "on")
+  assert.equal(browser.document.documentElement.style.getPropertyValue("--primary").trim(), "255 0 170")
+  assert.equal((JSON.parse(browser.localStorage.getItem("ade-settings-v1") ?? "{}") as { accentColor?: string }).accentColor, "#ff00aa")
+
+  // Reset to Default clears data-accent and restores palette primary (Graphite light: #3b76a8 -> 59 118 168)
+  const defaultBtn = container.querySelector(".st-accent-none")
+  assert.ok(defaultBtn, "Missing Default accent button")
+  await act(async () => { (defaultBtn as HTMLElement).click() })
+  assert.equal(browser.document.documentElement.dataset.accent, undefined)
+  assert.equal(browser.document.documentElement.style.getPropertyValue("--primary").trim(), "59 118 168")
+  assert.equal((JSON.parse(browser.localStorage.getItem("ade-settings-v1") ?? "{}") as { accentColor?: string }).accentColor, "")
+})
+
 test("Create Project wizard steps through Environments -> Sources and Skip creates an empty project with right-side settings open", async () => {
   await act(async () => root.render(React.createElement(App)))
 

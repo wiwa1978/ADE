@@ -3,6 +3,26 @@ import type { CSSProperties } from "react"
 export type Theme = "light" | "dark" | "system"
 export type ResolvedTheme = Exclude<Theme, "system">
 export type ColorPalette = "graphite" | "paseo" | "sand" | "slate" | "nord" | "sage" | "ash" | "amber" | "dusk"
+export type AccentPresetId = "blue" | "indigo" | "violet" | "rose" | "coral" | "amber" | "emerald" | "teal" | "cyan"
+
+export type AccentPreset = {
+  id: AccentPresetId
+  name: string
+  light: string
+  dark: string
+}
+
+export const accentPresets: AccentPreset[] = [
+  { id: "blue", name: "Blue", light: "#2563eb", dark: "#60a5fa" },
+  { id: "indigo", name: "Indigo", light: "#4f46e5", dark: "#818cf8" },
+  { id: "violet", name: "Violet", light: "#7c3aed", dark: "#a78bfa" },
+  { id: "rose", name: "Rose", light: "#e11d48", dark: "#fb7185" },
+  { id: "coral", name: "Coral", light: "#ea580c", dark: "#fb923c" },
+  { id: "amber", name: "Amber", light: "#d97706", dark: "#fbbf24" },
+  { id: "emerald", name: "Emerald", light: "#059669", dark: "#34d399" },
+  { id: "teal", name: "Teal", light: "#0d9488", dark: "#2dd4bf" },
+  { id: "cyan", name: "Cyan", light: "#0284c7", dark: "#38bdf8" },
+]
 
 export const colorPalettes: { id: ColorPalette; name: string; description: string }[] = [
   { id: "graphite", name: "Graphite", description: "Quiet neutral charcoal with calm steel blue." },
@@ -65,13 +85,63 @@ export function isColorPalette(value: unknown): value is ColorPalette {
   return colorPalettes.some((palette) => palette.id === value)
 }
 
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/
+
+export function normalizeHexColor(value: string): string | null {
+  const trimmed = value.trim()
+  if (HEX_COLOR_RE.test(trimmed)) return trimmed.toLowerCase()
+  if (/^#[0-9a-fA-F]{3}$/.test(trimmed)) {
+    const [, r, g, b] = trimmed
+    return `#${r}${r}${g}${g}${b}${b}`.toLowerCase()
+  }
+  return null
+}
+
+export function isAccentColor(value: unknown): value is string {
+  if (typeof value !== "string") return false
+  if (value === "") return true
+  if (accentPresets.some((preset) => preset.id === value)) return true
+  return HEX_COLOR_RE.test(value)
+}
+
+export function resolveAccentHex(accentColor: string | undefined, mode: ResolvedTheme): string | null {
+  if (!accentColor) return null
+  const preset = accentPresets.find((item) => item.id === accentColor)
+  if (preset) return preset[mode]
+  return normalizeHexColor(accentColor)
+}
+
+export function accentDisplayName(accentColor: string): string {
+  if (!accentColor) return "Default"
+  const preset = accentPresets.find((item) => item.id === accentColor)
+  if (preset) return preset.name
+  return accentColor.toUpperCase()
+}
+
 function rgb(hex: string) {
   return [1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16)).join(" ")
 }
 
-export function paletteVariables(palette: ColorPalette, mode: ResolvedTheme): CSSProperties & Record<`--${string}`, string> {
+export function contrastForegroundHex(hex: string): string {
+  const [r, g, b] = [1, 3, 5].map((offset) => {
+    const srgb = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255
+    return srgb <= 0.03928 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4
+  })
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+  return luminance > 0.28 ? "#141416" : "#ffffff"
+}
+
+export function paletteVariables(
+  palette: ColorPalette,
+  mode: ResolvedTheme,
+  accentColor = "",
+): CSSProperties & Record<`--${string}`, string> {
   const resolvedPalette: ColorPalette = isColorPalette(palette) ? palette : "graphite"
-  const [background, foreground, surface, nav, muted, border, primary, strong, primaryForeground, rose] = palettes[resolvedPalette][mode].map(rgb)
+  const [background, foreground, surface, nav, muted, border, palettePrimary, paletteStrong, palettePrimaryForeground, rose] = palettes[resolvedPalette][mode].map(rgb)
+  const accentHex = resolveAccentHex(accentColor, mode)
+  const primary = accentHex ? rgb(accentHex) : palettePrimary
+  const strong = accentHex ? primary : paletteStrong
+  const primaryForeground = accentHex ? rgb(contrastForegroundHex(accentHex)) : palettePrimaryForeground
   const raised = mode === "dark" ? (resolvedPalette === "paseo" ? rgb("#302e2b") : surface) : rgb("#ffffff")
   return {
     "--background": background,

@@ -10,7 +10,40 @@
   button:disabled,textarea:disabled,input:disabled,select:disabled{cursor:not-allowed}
   button:focus-visible{outline:1.5px solid rgb(var(--primary)/.6);outline-offset:1px}
   input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
+  :root[data-accent="on"]{accent-color:rgb(var(--primary))}
+  :root[data-accent="on"] ::selection{background:rgb(var(--primary)/.28)}
+  :root[data-accent="on"] svg.lucide{color:rgb(var(--primary))}
+  :root[data-accent="on"] :is(
+    .ade-btn-primary,
+    .sf-btn-primary,
+    .st-button.is-primary,
+    .action-button,
+    .primary-button,
+    .ade-send-btn,
+    .ade-brand-badge,
+    .brand-icon,
+    .nav-add-project,
+    .ade-wt-create-btn,
+    .ade-chip-btn.is-primary,
+    .ade-mob-action-pill,
+    .ade-btn-danger,
+    .ade-mob-icon-btn.is-danger,
+    .ade-row-icon,
+    .sf-badge-ok,
+    .sf-badge-warn,
+    .sf-badge-eu,
+    .st-status,
+    .st-banner.is-error,
+    .st-accent-swatch,
+    .st-tile-preview,
+    .composer button:not(.composer-attach):not(.composer-file-remove):not(:disabled),
+    [class*="bg-[rgb(var(--primary"]
+  ) svg.lucide{color:inherit}
 }
+:root[data-accent="on"] .project-row>svg,
+:root[data-accent="on"] .conversation-target>svg,
+:root[data-accent="on"] .sidebar .nav-item>svg,
+:root[data-accent="on"] .settings-project-list svg{color:rgb(var(--primary))}
 [data-highlight-theme="monochrome"] pre code,
 [data-highlight-theme="monochrome"] pre code span{color:rgb(var(--foreground)) !important}
 [data-highlight-theme="github"] .hljs-keyword,[data-highlight-theme="github"] .tok-keyword{color:#ff7b72 !important}

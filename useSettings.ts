@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react"
-import { isColorPalette, isTheme, paletteVariables, type ColorPalette, type Theme } from "./appearance-palettes"
+import { isAccentColor, isColorPalette, isTheme, paletteVariables, resolveAccentHex, type ColorPalette, type Theme } from "./appearance-palettes"
 import { ensureGoogleFontLoaded } from "./src/appearance/fonts"
 import { CUSTOM_ACTION_OPTIONS, type CustomKeybinding } from "./src/keybindings"
 
 export type Settings = {
   theme: Theme
   palette: ColorPalette
+  /** Optional accent color preset id or #rrggbb hex; "" uses the palette default. */
+  accentColor: string
   model: string
   provider: string
   harness: string
@@ -45,6 +47,7 @@ const storageKey = "ade-settings-v1"
 const defaults: Settings = {
   theme: "dark",
   palette: "graphite",
+  accentColor: "",
   model: "",
   provider: "",
   harness: "pi",
@@ -82,6 +85,7 @@ function readSettings(): { settings: Settings; error: string } {
       settings: {
         theme: isTheme(value.theme) ? value.theme : defaults.theme,
         palette: isColorPalette(value.palette) ? value.palette : defaults.palette,
+        accentColor: isAccentColor(value.accentColor) ? value.accentColor : defaults.accentColor,
         model: typeof value.model === "string" ? value.model : defaults.model,
         provider: typeof value.provider === "string" && value.provider.length <= 64 ? value.provider : "",
         harness: defaults.harness,
@@ -177,8 +181,11 @@ export function useSettings() {
     root.style.fontFamily = interfaceFont
     root.style.fontSize = "14px"
     root.dataset.highlightTheme = settings.highlightTheme
-    Object.entries(paletteVariables(settings.palette, resolved)).forEach(([name, value]) => root.style.setProperty(name, value))
-  }, [settings.palette, resolved, settings.interfaceFont, settings.interfaceSize, settings.contentSize, settings.codeFont, settings.codeSize, settings.contentWidth, settings.highlightTheme])
+    const activeAccent = resolveAccentHex(settings.accentColor, resolved)
+    if (activeAccent) root.dataset.accent = "on"
+    else delete root.dataset.accent
+    Object.entries(paletteVariables(settings.palette, resolved, settings.accentColor)).forEach(([name, value]) => root.style.setProperty(name, value))
+  }, [settings.palette, settings.accentColor, resolved, settings.interfaceFont, settings.interfaceSize, settings.contentSize, settings.codeFont, settings.codeSize, settings.contentWidth, settings.highlightTheme])
 
   function update(patch: Partial<Settings>) {
     const next = { ...settings, ...patch }

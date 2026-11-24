@@ -1,10 +1,12 @@
 import { EuOnlySettings } from "./src/settings/EuOnlySettings"
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react"
 import {
-  ArrowLeft, Bell, Blocks, Bot, Workflow, Check, Gauge, GitPullRequest, Palette, Search, Server, Settings2, Smartphone, Sparkles, Terminal, X, type LucideIcon,
+  ArrowLeft, Bell, Blocks, Bot, Workflow, Check, Gauge, GitPullRequest, Palette, Pipette, Search, Server, Settings2, Smartphone, Sparkles, Terminal, X, type LucideIcon,
 } from "lucide-react"
 import { EnvironmentSettings } from "./EnvironmentSettings"
-import { colorPalettes, lookPresets, paletteVariables, type Theme } from "./appearance-palettes"
+import {
+  accentDisplayName, accentPresets, colorPalettes, contrastForegroundHex, lookPresets, normalizeHexColor, paletteVariables, resolveAccentHex, type Theme,
+} from "./appearance-palettes"
 import type { ApprovalPolicy, ApprovalRule, BrowserState, EnvironmentDirectory, McpServerStatus, ProviderCatalogEntry, RuntimeHealth, SkillsAndRulesCatalog } from "./app-types"
 import type { Project } from "./ProjectsView"
 import type { Settings } from "./useSettings"
@@ -55,7 +57,7 @@ const groups: { label: string; items: SettingsItem[] }[] = [
   {
     label: "Interface",
     items: [
-      { id: "appearance", label: "Appearance", icon: Palette, description: "Theme, color palette, fonts, and layout.", keywords: "dark light theme palette font size width syntax" },
+      { id: "appearance", label: "Appearance", icon: Palette, description: "Theme, accent color, palette, fonts, and layout.", keywords: "dark light theme accent color icon tint palette font size width syntax" },
     ],
   },
   {
@@ -306,6 +308,8 @@ export function SettingsView({
       <small>px</small>
     </span>
   )
+  const activeAccentHex = resolveAccentHex(settings.accentColor, resolved)
+  const isCustomAccent = Boolean(settings.accentColor) && !accentPresets.some(preset => preset.id === settings.accentColor)
   const activePreset = lookPresets.find(preset => preset.palette === settings.palette && preset.interfaceFont === settings.interfaceFont && preset.codeFont === settings.codeFont
     && preset.interfaceSize === settings.interfaceSize && preset.contentSize === settings.contentSize && preset.codeSize === settings.codeSize && preset.contentWidth === settings.contentWidth)
   const appearance = <>
@@ -313,6 +317,65 @@ export function SettingsView({
       <Row title="Mode" description={settings.theme === "system" ? `Following your system (${resolved}).` : undefined}>
         <div className="st-segmented" role="radiogroup" aria-label="Mode">
           {(["light", "system", "dark"] as const).map(value => <button type="button" role="radio" key={value} aria-checked={settings.theme === value} className={settings.theme === value ? "is-active" : ""} onClick={() => update({ theme: value })}>{value[0].toUpperCase() + value.slice(1)}</button>)}
+        </div>
+      </Row>
+      <Row
+        title="Accent color"
+        description="Tints icons, active navigation, selections, and controls across the app. Choose Default to keep the palette's neutral look."
+        stacked
+      >
+        <div className="st-accent-picker" role="group" aria-label="Accent color">
+          <button
+            type="button"
+            className={`st-accent-none ${!settings.accentColor ? "is-active" : ""}`}
+            aria-pressed={!settings.accentColor}
+            title="Use the palette default (neutral icons)"
+            onClick={() => update({ accentColor: "" })}
+          >
+            <span className="st-accent-none-dot" aria-hidden="true" />
+            <span>Default</span>
+          </button>
+          <div className="st-accent-swatches">
+            {accentPresets.map(preset => {
+              const hex = preset[resolved]
+              const active = settings.accentColor === preset.id
+              return (
+                <button
+                  type="button"
+                  key={preset.id}
+                  className={`st-accent-swatch ${active ? "is-active" : ""}`}
+                  style={{ backgroundColor: hex, color: contrastForegroundHex(hex) }}
+                  aria-label={preset.name}
+                  aria-pressed={active}
+                  title={preset.name}
+                  onClick={() => update({ accentColor: preset.id })}
+                >
+                  {active ? <Check size={13} strokeWidth={2.5} aria-hidden="true" /> : null}
+                </button>
+              )
+            })}
+            <label
+              className={`st-accent-swatch st-accent-custom ${isCustomAccent ? "is-active" : ""}`}
+              style={isCustomAccent && activeAccentHex ? { backgroundColor: activeAccentHex, color: contrastForegroundHex(activeAccentHex) } : undefined}
+              title={isCustomAccent ? `Custom (${settings.accentColor.toUpperCase()})` : "Custom color"}
+            >
+              <input
+                type="color"
+                className="st-accent-color-input"
+                aria-label="Custom accent color"
+                value={activeAccentHex ?? "#3b82f6"}
+                onChange={event => {
+                  const hex = normalizeHexColor(event.target.value)
+                  if (hex) update({ accentColor: hex })
+                }}
+              />
+              {isCustomAccent ? <Check size={13} strokeWidth={2.5} aria-hidden="true" /> : <Pipette size={13} aria-hidden="true" />}
+            </label>
+          </div>
+          <span className="st-accent-current">
+            <strong>{accentDisplayName(settings.accentColor)}</strong>
+            {activeAccentHex ? <code>{activeAccentHex.toUpperCase()}</code> : null}
+          </span>
         </div>
       </Row>
       <Row title="Look" description="A palette, fonts, sizes and width in one click, in the style of familiar tools. Fine-tune below." stacked>

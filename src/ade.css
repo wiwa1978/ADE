@@ -5281,3 +5281,77 @@ div.ade-flow-member { cursor: default; }
 .ade-flow-post-kind { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
 .ade-flow-post-compose { display: flex; gap: 8px; align-items: flex-end; }
 .ade-flow-post-compose textarea { flex: 1; min-height: 52px; padding: 8px 10px; border: 1px solid rgb(var(--border)); border-radius: 8px; background: rgb(var(--background)); color: rgb(var(--foreground)); font: inherit; resize: vertical; }
+
+/* ───────────── Optional Accent Color Mode (Settings > Appearance) ───────────── */
+:root[data-accent="on"] *::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--primary) / 0.55);
+}
+:root[data-accent="on"] .ade-activity-btn svg.lucide {
+  color: rgb(var(--primary) / 0.78);
+}
+:root[data-accent="on"] .ade-activity-btn:hover {
+  background: rgb(var(--primary) / 0.1);
+}
+:root[data-accent="on"] .ade-activity-btn:hover svg.lucide,
+:root[data-accent="on"] .ade-activity-btn.is-active svg.lucide {
+  color: rgb(var(--primary));
+}
+:root[data-accent="on"] .ade-activity-btn.is-active {
+  background: rgb(var(--primary) / 0.14);
+  color: rgb(var(--primary));
+}
+:root[data-accent="on"] .ade-rail-badge:not(.is-quiet) {
+  color: rgb(var(--primary-foreground));
+}
+:root[data-accent="on"] .ade-new-session-btn {
+  border-color: rgb(var(--primary) / 0.35);
+}
+:root[data-accent="on"] .ade-new-session-btn:hover {
+  border-color: rgb(var(--primary) / 0.7);
+  background: rgb(var(--primary) / 0.09);
+}
+:root[data-accent="on"] .ade-nav-row:hover {
+  background: rgb(var(--primary) / 0.07);
+}
+:root[data-accent="on"] .ade-nav-row.is-selected {
+  background: rgb(var(--primary) / 0.13);
+  box-shadow: inset 2px 0 0 rgb(var(--primary));
+}
+:root[data-accent="on"] .st-nav-item:hover {
+  background: rgb(var(--primary) / 0.07);
+}
+:root[data-accent="on"] .st-nav-item.is-active {
+  background: rgb(var(--primary) / 0.13);
+  box-shadow: inset 2px 0 0 rgb(var(--primary));
+}
+:root[data-accent="on"] .st-segmented button.is-active,
+:root[data-accent="on"] .sf-seg-btn.is-active,
+:root[data-accent="on"] .ade-drawer-tab.is-active {
+  background: rgb(var(--primary) / 0.16);
+  color: rgb(var(--primary));
+}
+:root[data-accent="on"] .st-prov-row.is-active {
+  background: rgb(var(--primary) / 0.11);
+}
+:root[data-accent="on"] .ade-tab.is-active {
+  border-color: rgb(var(--primary) / 0.38);
+  background: rgb(var(--primary) / 0.09);
+}
+:root[data-accent="on"] .ade-header-tool-btn.is-active {
+  border-color: rgb(var(--primary) / 0.38);
+  background: rgb(var(--primary) / 0.13);
+  color: rgb(var(--foreground));
+}
+:root[data-accent="on"] .ade-pill {
+  border-color: rgb(var(--primary) / 0.25);
+}
+:root[data-accent="on"] .ade-breadcrumb:hover,
+:root[data-accent="on"] .message-markdown a,
+:root[data-accent="on"] .ade-mob-tab.is-active {
+  color: rgb(var(--primary));
+}
+:root[data-accent="on"] .ade-flow-filter button.is-active {
+  background: rgb(var(--primary) / 0.14);
+  border-color: rgb(var(--primary) / 0.45);
+  color: rgb(var(--primary));
+}
