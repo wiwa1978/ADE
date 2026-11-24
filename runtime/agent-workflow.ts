@@ -1,6 +1,7 @@
 // Services behind the agent workflow features (Inbox, project scripts, checkpoints, Claude Code/Codex).
-import { realpathSync } from "node:fs";
-import { resolve, sep } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
+import { packageManagerFor, resolveChecks, runChecks } from "./stage-checks.ts";
 import { ProjectSecrets, setSecretResolver } from "./project-secrets.ts";
 import { ExecutionTargets, sessionTarget, setExecutionTargets } from "./execution-targets.ts";
 import { setExternalSubagentRunner } from "./subagent-harness.ts";
@@ -165,6 +166,46 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 			void sendToAgent(sessionId, checkFailedPrompt(effective.check, state.output)).catch(() => undefined);
 		}).catch(() => undefined);
 	}
+	// Stage checks: when the agent finishes a stage that has checks (build, lint, test…), ADE runs them
+	// itself in the session's workspace (with the same runner as the project's check script, so the
+	// output also shows in Run) and refuses the stage while one fails. See stage-checks.ts.
+	const runOneCheck = async (sessionId: string, workspace: string, command: string, env: Record<string, string>) => {
+		const sleep = (ms: number) => new Promise(done => setTimeout(done, ms));
+		// An earlier check (after a turn, or another stage's) may still be running: let it finish first.
+		for (let waited = 0; scriptRunner.state(sessionId, "check").status === "running" && waited < 300_000; waited += 500) await sleep(500);
+		if (scriptRunner.state(sessionId, "check").status === "running") return { exitCode: 1, output: "Another check was still running after 5 minutes." };
+		let finished!: (result: { exitCode: number | null; output: string }) => void;
+		const done = new Promise<{ exitCode: number | null; output: string }>(resolveDone => { finished = resolveDone; });
+		const timer = setTimeout(() => scriptRunner.stop(sessionId, "check"), 10 * 60_000);
+		try {
+			await scriptRunner.start(sessionId, "check", command, workspace, env, state => {
+				clearTimeout(timer);
+				finished({ exitCode: state.status === "stopped" ? 1 : state.exitCode, output: state.status === "stopped" ? `${state.output}\nStopped: the check ran longer than 10 minutes.` : state.output });
+			});
+		} catch (error) {
+			clearTimeout(timer);
+			finished({ exitCode: 1, output: error instanceof Error ? error.message : String(error) });
+		}
+		return done;
+	};
+	host.blueprints?.setChecker(async (sessionId, stage) => {
+		const workspace = host.getWorkspacePath(sessionId);
+		const session = viewSessions().find(item => item.id === sessionId);
+		if (!workspace || !session) return null;
+		const project = session.projectId ? host.projects().find(item => item?.id === session.projectId) : null;
+		const projectCheck = project ? scripts.effective(project.id, project.repository).check : "";
+		let packageScripts: Record<string, string> | null = null;
+		try {
+			const parsed = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8")) as { scripts?: Record<string, string> };
+			packageScripts = parsed.scripts && typeof parsed.scripts === "object" ? parsed.scripts : null;
+		} catch {
+			packageScripts = null;
+		}
+		const plan = resolveChecks({ words: stage.deterministicChecks ?? [], projectCheck, packageScripts, packageManager: packageManagerFor({ has: name => existsSync(join(workspace, name)) }) });
+		const env: Record<string, string> = project?.repository ? { ADE_PROJECT_ROOT: project.repository } : {};
+		return runChecks(plan, command => runOneCheck(sessionId, workspace, command, env));
+	});
+
 	host.events?.subscribe?.(event => {
 		if (event.type !== "timeline.update" || !event.sessionId) return;
 		const payload = event.payload as { busy?: unknown; isSubagent?: unknown } | null;

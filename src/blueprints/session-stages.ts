@@ -3,6 +3,9 @@ import { request } from "../../api"
 
 export type StageStatus = "pending" | "awaiting_approval" | "running" | "completed" | "changes_requested" | "skipped" | "failed"
 export type StageVerdict = { outcome: "pass" | "changes_requested" | "escalate_human"; summary: string; findings?: { severity: "blocker" | "major" | "minor"; file?: string; message: string }[] }
+export type StageCheckResult = { label: string; command: string; status: "passed" | "failed" | "skipped"; exitCode: number | null; output: string; ms: number }
+/** ADE's own run of a stage's checks (build, lint, test…). */
+export type StageChecksView = { source: "project" | "package" | "none"; results: StageCheckResult[]; missing: string[]; ok: boolean; at: number }
 export type StageView = {
   id: string
   name: string
@@ -15,6 +18,7 @@ export type StageView = {
   artifactPaths: string[]
   summary: string | null
   verdict: StageVerdict | null
+  checks: StageChecksView | null
   startedAt: number | null
   endedAt: number | null
 }
@@ -23,7 +27,7 @@ export type SessionStages = {
   name: string
   summary: { id: string; name: string; status: string; stage?: { id: string; name: string; status: StageStatus; index: number }; done: number; total: number } | null
   stages: StageView[]
-  history: Array<{ at: number; stageId: string; event: "started" | "finished" | "approved" | "changes_requested" | "looped_back" | "escalated"; note?: string }>
+  history: Array<{ at: number; stageId: string; event: "started" | "finished" | "approved" | "changes_requested" | "looped_back" | "escalated" | "checks_passed" | "checks_failed"; note?: string }>
   /** Set after a decision when the agent couldn't be started. */
   notice?: string | null
 }

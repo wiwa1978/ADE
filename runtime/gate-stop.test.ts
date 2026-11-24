@@ -7,7 +7,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { createAgentWorkflow } from "./agent-workflow.ts";
 import { LocalAgentHost } from "./host.ts";
+import { createSessionGit } from "./session-git.ts";
 import { WorktreeManager } from "./worktrees.ts";
 
 test("at an approval gate ADE ends the agent's turn itself: it can't carry on editing in the same turn", { timeout: 30_000 }, async () => {
@@ -41,6 +43,45 @@ test("at an approval gate ADE ends the agent's turn itself: it can't carry on ed
 		const timeline = await host.getTimeline(taskId);
 		const calls = timeline.items.flatMap(item => (item.kind === "assistant" ? item.toolCalls : []));
 		assert.deepEqual(calls.map(call => call.name), ["finish_stage", "finish_stage"]);
+	} finally {
+		await host.close();
+		manager.close();
+		rmSync(stateDir, { recursive: true, force: true });
+		rmSync(repoDir, { recursive: true, force: true });
+	}
+});
+
+test("ADE runs the project's tests itself before a verify stage can finish: a failing test blocks it, a fixed one lets it through", { timeout: 60_000 }, async () => {
+	const stateDir = mkdtempSync(join(tmpdir(), "ade-checks-"));
+	const repoDir = mkdtempSync(join(tmpdir(), "ade-checks-repo-"));
+	execFileSync("git", ["init", "-q"], { cwd: repoDir });
+	// A project whose "test" script fails until the flag file exists; it has no build, lint or typecheck script.
+	writeFileSync(join(repoDir, "package.json"), JSON.stringify({ name: "p", scripts: { test: "node -e \"process.exit(require('fs').existsSync('fixed.flag') ? 0 : 1)\"" } }));
+	const faux = fauxProvider();
+	const models = createModels();
+	models.setProvider(faux.provider);
+	const fixture = { provider: faux.provider.id, defaultModel: faux.getModel().id, availableModels: [{ id: faux.getModel().id, name: "Fixture" }], configured: true, setupMessage: "", models, faux, resolveModel: (id: string) => models.getModel(faux.provider.id, id) };
+	const host = new LocalAgentHost({ stateDirectory: stateDir, modelConfigFactory: () => fixture });
+	const manager = new WorktreeManager(stateDir);
+	host.setWorktreeManager(manager);
+	createAgentWorkflow({ host, worktreeManager: manager, sessionGit: createSessionGit() });
+	try {
+		const taskId = randomUUID();
+		await host.createCodingTask({ id: taskId, title: "Checks", repository: repoDir, kind: "checkout", blueprintId: "automated-factory" }, manager);
+		for (const stageId of ["triage", "plan", "implement"]) host.blueprints.finish(taskId, { stageId, summary: `${stageId} done` });
+
+		const refused = await host.blueprints.finishChecked(taskId, { stageId: "verify", summary: "Everything passes" });
+		assert.match(refused.reply, /one failed, so "Deterministic Hooks" is not finished[\s\S]*✕ test \(`npm test`, exit 1\)/);
+		assert.equal(host.blueprints.summary(taskId)?.stage?.id, "verify", "still on verify");
+		const checks = host.blueprints.view(taskId).stages.find(stage => stage.id === "verify")?.checks;
+		assert.deepEqual(checks?.missing, ["lint", "typecheck"], "words the project has no script for are skipped, not failed");
+
+		writeFileSync(join(repoDir, "fixed.flag"), "");
+		const done = await host.blueprints.finishChecked(taskId, { stageId: "verify", summary: "Fixed the test" });
+		assert.match(done.reply, /Recorded "Deterministic Hooks"/);
+		const verify = host.blueprints.view(taskId).stages.find(stage => stage.id === "verify");
+		assert.equal(verify?.status, "completed");
+		assert.match(verify?.summary ?? "", /Checks passed: test\. Not available here: lint, typecheck\./);
 	} finally {
 		await host.close();
 		manager.close();

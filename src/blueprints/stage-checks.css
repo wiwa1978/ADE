@@ -1,0 +1,12 @@
+/* A stage's checks, as ADE ran them: what passed, what failed (with its output), what the project has no command for. */
+.ade-stage-checks { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 8px; background: rgb(var(--foreground) / 0.04); font-size: 12px; }
+.ade-stage-checks.is-failed { background: rgb(var(--rose) / 0.1); }
+.ade-stage-checks-head { display: flex; align-items: center; gap: 8px; }
+.ade-stage-checks-head strong { font-size: 12px; }
+.ade-stage-check { display: flex; align-items: baseline; gap: 8px; }
+.ade-stage-check-mark { flex: none; width: 14px; font-weight: 700; text-align: center; }
+.ade-stage-check.is-passed .ade-stage-check-mark { color: var(--ok, #34a872); }
+.ade-stage-check.is-failed .ade-stage-check-mark { color: rgb(var(--rose)); }
+.ade-stage-check.is-skipped .ade-stage-check-mark { color: rgb(var(--muted)); }
+.ade-stage-check code { color: rgb(var(--muted)); font-size: 11px; }
+.ade-stage-check-output { margin: 4px 0 0 22px; max-height: 180px; overflow: auto; padding: 8px 10px; border-radius: 6px; background: rgb(var(--background)); font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }

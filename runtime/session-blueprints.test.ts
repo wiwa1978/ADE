@@ -171,3 +171,55 @@ test("after a gate the agent may only read and talk until the next turn; the too
 	assert.equal(blueprints.gateReason("s1", "write"), null);
 	assert.equal(blueprints.gateNote("s1"), null);
 });
+
+test("a stage with checks can't finish while ADE's own run of them fails; passing runs are recorded", async () => {
+	const { blueprints } = setup("automated-factory");
+	const failing = { source: "package" as const, ok: false, at: 1, missing: ["typecheck"], results: [
+		{ label: "lint", command: "npm run lint", status: "passed" as const, exitCode: 0, output: "", ms: 10 },
+		{ label: "test", command: "npm test", status: "failed" as const, exitCode: 1, output: "FAIL a.test.ts: expected 2, got 3", ms: 20 },
+	] };
+	let calls = 0;
+	let outcome: typeof failing | null = failing;
+	blueprints.setChecker(async (_sessionId, stage) => {
+		calls++;
+		assert.equal(stage.id, "verify");
+		return outcome;
+	});
+	for (const stageId of ["triage", "plan", "implement"]) await blueprints.finishChecked("s1", { stageId, summary: `${stageId} done` });
+	assert.equal(calls, 0, "stages without checks don't run any");
+
+	// Failing: refused with the output; the stage is still running, and the failure is on record.
+	const refused = await blueprints.finishChecked("s1", { stageId: "verify", summary: "All green, trust me" });
+	assert.match(refused.reply, /one failed, so "Deterministic Hooks" is not finished[\s\S]*✕ test[\s\S]*expected 2, got 3[\s\S]*call finish_stage again/);
+	assert.equal(blueprints.summary("s1")!.stage?.id, "verify");
+	assert.equal(blueprints.summary("s1")!.stage?.status, "running");
+	let view = blueprints.view("s1").stages.find(stage => stage.id === "verify")!;
+	assert.equal(view.checks?.ok, false);
+	assert.equal(view.summary, null, "the agent's claim wasn't recorded as the result");
+	assert.equal(blueprints.view("s1").history.at(-1)?.event, "checks_failed");
+
+	// Fixed: the checks pass, the stage finishes, and the summary says what ran.
+	outcome = { ...failing, ok: true, results: [{ ...failing.results[0] }, { ...failing.results[1], status: "passed", exitCode: 0, output: "" }] };
+	const done = await blueprints.finishChecked("s1", { stageId: "verify", summary: "Tests fixed" });
+	assert.match(done.reply, /Recorded "Deterministic Hooks"/);
+	view = blueprints.view("s1").stages.find(stage => stage.id === "verify")!;
+	assert.equal(view.status, "completed");
+	assert.match(view.summary ?? "", /Tests fixed\n\nChecks passed: lint, test\. Not available here: typecheck\./);
+	assert.equal(view.checks?.ok, true);
+	assert.deepEqual(blueprints.view("s1").history.filter(entry => entry.event.startsWith("checks")).map(entry => entry.event), ["checks_failed", "checks_passed"]);
+});
+
+test("if the checks can't run, or there is nothing to run, the stage isn't blocked", async () => {
+	const { blueprints } = setup("automated-factory");
+	for (const stageId of ["triage", "plan", "implement"]) blueprints.finish("s1", { stageId, summary: "ok" });
+	blueprints.setChecker(async () => { throw new Error("runner busy"); });
+	assert.match((await blueprints.finishChecked("s1", { stageId: "verify", summary: "ok" })).reply, /Recorded/, "a checker that throws doesn't block");
+
+	const second = setup("automated-factory");
+	for (const stageId of ["triage", "plan", "implement"]) second.blueprints.finish("s1", { stageId, summary: "ok" });
+	second.blueprints.setChecker(async () => ({ source: "none", ok: true, at: 1, missing: ["lint", "typecheck", "test"], results: [] }));
+	assert.match((await second.blueprints.finishChecked("s1", { stageId: "verify", summary: "ok" })).reply, /Recorded/);
+	const view = second.blueprints.view("s1");
+	assert.match(view.stages.find(stage => stage.id === "verify")!.summary ?? "", /Not available here: lint, typecheck, test\./, "the summary says which checks this project has no command for");
+	assert.ok(!view.history.some(entry => entry.event.startsWith("checks")), "nothing ran, so nothing is logged as run");
+});

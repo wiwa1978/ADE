@@ -26,7 +26,7 @@ export type FlowEvent = {
   text: string
 }
 
-export type StageEntry = { at: number; stageId: string; stageName: string; event: "started" | "finished" | "approved" | "changes_requested" | "looped_back" | "escalated"; note?: string }
+export type StageEntry = { at: number; stageId: string; stageName: string; event: "started" | "finished" | "approved" | "changes_requested" | "looped_back" | "escalated" | "checks_passed" | "checks_failed"; note?: string }
 
 export type RunInput = {
   leadItems: TimelineItem[]
@@ -130,6 +130,7 @@ export function buildEvents(input: RunInput): FlowEvent[] {
     else if (entry.event === "changes_requested") add({ at: entry.at, part: "stages", direction: "in", from: "user", to: [], subject: entry.stageName, text: `you sent ${entry.stageName} back${entry.note ? `: ${clip(entry.note, 90)}` : ""}` })
     else if (entry.event === "started") add({ at: entry.at, part: "stages", direction: "out", from: "stages", to: ["lead"], subject: entry.stageName, text: `${entry.stageName} started` })
     else if (entry.event === "looped_back") add({ at: entry.at, part: "stages", direction: "out", from: "stages", to: ["lead"], subject: entry.stageName, text: `review sent it back to ${entry.stageName}` })
+    else if (entry.event === "checks_failed" || entry.event === "checks_passed") add({ at: entry.at, part: "stages", direction: "out", from: "stages", to: ["lead"], subject: entry.stageName, text: entry.event === "checks_failed" ? `${entry.stageName}: ADE's checks failed` : `${entry.stageName}: ${entry.note ?? "checks passed"}` })
     else if (entry.event === "escalated") add({ at: entry.at, part: "stages", direction: "out", from: "stages", to: ["user"], subject: entry.stageName, text: `${entry.stageName} needs your decision` })
   }
 

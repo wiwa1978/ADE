@@ -10,6 +10,7 @@ import { applyStageApproval, completeStage, createBlueprintRun, planNextStep } f
 import { getBlueprint, isSessionBlueprint, VIBE_BLUEPRINT_ID } from "../packages/blueprints/index.ts";
 import type { BlueprintRunState, BlueprintStage, FactoryBlueprint, ModelRoutingConfig, SessionBlueprintSummary, StageStatus, StageVerdict } from "../packages/protocol/index.ts";
 import { badRequest, conflict, notFound } from "./http-error.ts";
+import { checksLine, failureText, type StageChecks } from "./stage-checks.ts";
 import { dbGet } from "./db/schema.ts";
 import type { RuntimeEventBus } from "./events.ts";
 
@@ -20,8 +21,10 @@ export type SessionStageRecord = {
 	summaries: Record<string, string>;
 	/** The user's "Request changes" feedback per stage, until the stage is finished again. */
 	feedback?: Record<string, string>;
+	/** What ADE's own run of each stage's checks found (latest run). */
+	checks?: Record<string, StageChecks>;
 	/** What happened, newest last: shown in the Stages view. */
-	history: Array<{ at: number; stageId: string; event: "started" | "finished" | "approved" | "changes_requested" | "looped_back" | "escalated"; note?: string }>;
+	history: Array<{ at: number; stageId: string; event: "started" | "finished" | "approved" | "changes_requested" | "looped_back" | "escalated" | "checks_passed" | "checks_failed"; note?: string }>;
 };
 
 export type StageView = {
@@ -36,6 +39,8 @@ export type StageView = {
 	artifactPaths: string[];
 	summary: string | null;
 	verdict: StageVerdict | null;
+	/** ADE's own run of the stage's checks, if it ran any. */
+	checks: StageChecks | null;
 	startedAt: number | null;
 	endedAt: number | null;
 };
@@ -65,6 +70,8 @@ export class SessionBlueprints {
 	#now: () => number;
 	/** Sessions whose agent just stopped at a gate: until the next turn begins, it may only read and talk. */
 	#gated = new Set<string>();
+	/** Runs a stage's checks in the session's workspace; null when there is nothing to run them in. */
+	#checker: ((sessionId: string, stage: BlueprintStage) => Promise<StageChecks | null>) | null = null;
 
 	constructor(db: DatabaseSync, events?: RuntimeEventBus, now: () => number = Date.now) {
 		this.#db = db;
@@ -120,6 +127,40 @@ export class SessionBlueprints {
 		return stage?.status === "awaiting_approval"
 			? `Waiting for your approval: ${stage.name}. Approve it, or ask for changes, in the Stages tab.`
 			: "Stopped: it needs your decision. See the Stages tab.";
+	}
+
+	setChecker(checker: (sessionId: string, stage: BlueprintStage) => Promise<StageChecks | null>) {
+		this.#checker = checker;
+	}
+
+	/**
+	 * finish(), after ADE has run the stage's checks itself: a stage with checks can't finish while one
+	 * fails (the agent gets the output and fixes it); passing checks are recorded and noted in the summary.
+	 * If the checks can't run at all, the stage isn't blocked.
+	 */
+	async finishChecked(sessionId: string, input: { stageId: string; summary: string; artifacts?: string[]; verdict?: StageVerdict }): Promise<{ reply: string; waiting: boolean }> {
+		const row = this.#row(sessionId);
+		const record = row ? this.#record(row) : null;
+		const blueprint = row?.blueprintId ? getBlueprint(row.blueprintId) : undefined;
+		const stage = blueprint?.stages[record?.run.currentStageIndex ?? -1];
+		const running = record && stage && stage.id === input.stageId && (record.run.stages[record.run.currentStageIndex].status === "running");
+		if (!row || !record || !stage || !running || !stage.deterministicChecks?.length || !this.#checker) return this.finish(sessionId, input);
+		let checks: StageChecks | null = null;
+		try {
+			checks = await this.#checker(sessionId, stage);
+		} catch {
+			checks = null;
+		}
+		if (!checks) return this.finish(sessionId, input);
+		// The run may have moved while the checks ran; work on the stored state.
+		const fresh = this.#record(this.#row(sessionId)!)!;
+		fresh.checks = { ...fresh.checks, [stage.id]: checks };
+		const now = this.#now();
+		if (checks.results.length) fresh.history.push({ at: now, stageId: stage.id, event: checks.ok ? "checks_passed" : "checks_failed", note: checksLine(checks).slice(0, 300) });
+		this.#save(sessionId, row.blueprintId!, fresh);
+		if (!checks.ok) return { reply: failureText(stage.name, checks), waiting: false };
+		const line = checksLine(checks);
+		return this.finish(sessionId, { ...input, summary: `${input.summary.trim()}\n\n${line}`.trim() });
 	}
 
 	/** A new turn begins (the user wrote, or decided): the gate stop is over. */
@@ -195,6 +236,7 @@ export class SessionBlueprints {
 					artifactPaths: state.artifactPaths.length ? state.artifactPaths : stage.artifactPathPattern ? [this.#artifactPath(stage.artifactPathPattern, row)] : [],
 					summary: record.summaries[stage.id] ?? null,
 					verdict: state.verdict ?? null,
+					checks: record.checks?.[stage.id] ?? null,
 					startedAt: state.startedAt ?? null,
 					endedAt: state.endedAt ?? null,
 				};
@@ -375,7 +417,7 @@ export class SessionBlueprints {
 						findings: (args.verdict.findings ?? []).map(item => ({ severity: (["blocker", "major", "minor"].includes(item.severity) ? item.severity : "minor") as "blocker" | "major" | "minor", ...(item.file ? { file: item.file } : {}), message: item.message })),
 					}
 					: undefined;
-				const result = this.finish(sessionId, { stageId: args.stageId, summary: args.summary, artifacts: args.artifacts, verdict });
+				const result = await this.finishChecked(sessionId, { stageId: args.stageId, summary: args.summary, artifacts: args.artifacts, verdict });
 				if (result.waiting) onWaiting?.(sessionId);
 				// At a gate the turn ends here, by ADE, not by the agent's good manners.
 				return { output: [{ type: "text", text: result.reply }], details: { waiting: result.waiting }, ...(result.waiting ? { control: { terminate: true } } : {}) };

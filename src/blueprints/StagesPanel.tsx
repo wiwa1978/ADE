@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Check, CircleDashed, CircleSlash, Eye, Loader2, PauseCircle, RotateCcw, Users, XCircle } from "lucide-react"
 import { request } from "../../api"
+import "./stage-checks.css"
 import { shortBlueprintName, useBlueprintOptions, VIBE_ID } from "./blueprint-options"
 import { stageStatusLabel, type SessionStages, type StageStatus, type StageView } from "./session-stages"
 
@@ -94,6 +95,7 @@ export function StagesPanel({
                   <span className="ade-stage-meta">
                     {stage.status === "awaiting_approval" ? (stage.attempt === 0 ? "Approve to start" : "Approve") : stageStatusLabel[stage.status]}
                     {stage.gate !== "never" && stage.status !== "awaiting_approval" ? " · gate" : ""}
+                    {stage.checks && !stage.checks.ok ? " · checks failed" : ""}
                     {stage.attempt > 1 ? ` · round ${stage.attempt}` : ""}
                   </span>
                   {stage.executor === "parallel_subagents" ? <Users className="ade-stage-badge size-3" aria-label="Runs in parallel subagents" /> : stage.goldfish ? <Eye className="ade-stage-badge size-3" aria-label="Independent review" /> : null}
@@ -186,6 +188,7 @@ function StageDetail({ stage, onOpenFile }: { stage: StageView; onOpenFile?: (pa
         <span className="ade-muted ade-xs">{stage.description}</span>
       </div>
       {stage.summary ? <p className="ade-stage-summary">{stage.summary}</p> : <p className="ade-muted ade-xs">{stage.status === "running" ? "The agent is working on this stage." : stage.status === "pending" ? "Not started yet." : ""}</p>}
+      {stage.checks ? <StageChecksBlock checks={stage.checks} /> : null}
       {stage.verdict ? (
         <div className={`ade-stage-verdict is-${stage.verdict.outcome}`}>
           <strong>{stage.verdict.outcome === "pass" ? "Review passed" : stage.verdict.outcome === "changes_requested" ? "Review asked for changes" : "Review needs your decision"}</strong>
@@ -204,6 +207,32 @@ function StageDetail({ stage, onOpenFile }: { stage: StageView; onOpenFile?: (pa
           ))}
         </div>
       ) : null}
+    </div>
+  )
+}
+
+/** What ADE ran to check the stage: each command with its result, failures with their output. */
+function StageChecksBlock({ checks }: { checks: NonNullable<StageView["checks"]> }) {
+  const marks = { passed: "✓", failed: "✕", skipped: "–" } as const
+  const failed = checks.results.filter(result => result.status === "failed").length
+  return (
+    <div className={`ade-stage-checks ${checks.ok ? "" : "is-failed"}`}>
+      <div className="ade-stage-checks-head">
+        <strong>ADE's checks</strong>
+        <span className="ade-muted ade-xs">{checks.results.length ? (checks.ok ? "all passed" : `${failed} failed`) : "nothing to run"}{checks.source === "project" ? " · the project's check script" : ""}</span>
+      </div>
+      {checks.results.map(result => (
+        <div key={result.command}>
+          <div className={`ade-stage-check is-${result.status}`}>
+            <span className="ade-stage-check-mark" aria-hidden="true">{marks[result.status]}</span>
+            <span>{result.label}</span>
+            <code>{result.command}</code>
+            {result.status === "skipped" ? <span className="ade-muted ade-xs">not installed here</span> : <span className="ade-muted ade-xs">{result.ms < 1000 ? `${result.ms} ms` : `${(result.ms / 1000).toFixed(1)} s`}</span>}
+          </div>
+          {result.status === "failed" && result.output ? <pre className="ade-stage-check-output">{result.output}</pre> : null}
+        </div>
+      ))}
+      {checks.missing.length ? <p className="ade-muted ade-xs" style={{ margin: 0 }}>No command in this project for: {checks.missing.join(", ")}. Add a check script in the project's settings to include them.</p> : null}
     </div>
   )
 }
