@@ -273,6 +273,12 @@ Audit date 2026-11-24 over everything since commit `0359c0d` (119 files). Measur
 
 ---
 
+### N. Competitor gaps
+
+[GAP_ANALYSIS.md](./GAP_ANALYSIS.md) compares ADE with Conductor, Capy and Orca and ranks the gaps (G1–G13) with a suggested approach for each. Tier 1 (diff comments to the agent, more agent engines, a "Review changes" button using the independent reviewer, webhook triggers, Web Push, CLI/API/deep links) is the recommended next product work after the items above; it reuses plan items D and I1. Its competitor claims come from vendor pages read through search, not hands-on use: validate them before committing to a large item.
+
+---
+
 ## 4. Housekeeping the owner decides
 
 - Delete old merged local/remote branches (overnight, run-targets, roadmap-*, ade-server, docker-runs) — ask first.
