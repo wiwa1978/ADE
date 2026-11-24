@@ -318,6 +318,8 @@ beforeEach(() => {
           },
         ],
       }
+    } else if (/^\/api\/sessions\/[^/]+\/brief$/.test(url) && method === "GET") {
+      payload = { question: "Build the split-pane workspace", work: { summary: "Split panes are in and tested.", files: 3, added: 40, removed: 2, stage: null, subagents: 1 }, approval: { kind: "command", subject: "npm test", detail: "", count: 2 } }
     } else if (url.startsWith("/api/skills/landscape") && method === "GET") {
       payload = {
         skills: [
@@ -982,4 +984,22 @@ test("Skills & tools lists every skill with where it came from, and switching on
   await act(async () => { toggle.click() })
   const saved = requests.filter(item => item.url === "/api/capabilities" && item.method === "PUT").at(-1)
   assert.deepEqual(saved?.body, { scope: "global", kind: "skill", key: "deploy", enabled: false })
+})
+
+test("Inbox shows a short summary of the picked session beside the list: what was asked, what was done, what waits for you", async () => {
+  browser.localStorage.setItem("ade.last-view", JSON.stringify({ screen: "inbox" }))
+  await act(async () => root.render(React.createElement(App)))
+  const text = () => container.textContent ?? ""
+  assert.match(text(), /Original question/)
+  assert.match(text(), /Build the split-pane workspace/)
+  assert.match(text(), /Split panes are in and tested\./)
+  assert.match(text(), /3 files · \+40 −2/)
+  assert.match(text(), /1 subagent/)
+  assert.match(text(), /Approve a command/)
+  assert.match(text(), /npm test/)
+  assert.match(text(), /\+1 more waiting/)
+  // Clicking a row picks it; it doesn't open the thread (the button in the summary does).
+  assert.ok(container.querySelector(".ade-inbox-cols"), "the list and the summary sit side by side")
+  const open = findButton("Open session")
+  assert.ok(open)
 })

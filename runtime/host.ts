@@ -277,6 +277,15 @@ export class LocalAgentHost {
 		this.#sessionManager.setWorktreeManager(manager);
 	}
 
+	/** The turns the Inbox brief draws on: what was first asked, the last answer, and the latest turn. */
+	turnsOverview(sessionId: string) {
+		return {
+			first: this.#turns.firstForSession(sessionId) ?? null,
+			lastAnswered: this.#turns.latestCompletedForSession(sessionId) ?? null,
+			latest: this.#turns.latestForSession(sessionId) ?? null,
+		};
+	}
+
 	latestTurn(sessionId: string) {
 		return this.#turns.latestForSession(sessionId) ?? null;
 	}

@@ -8,6 +8,8 @@ import { readInstructions, searchWorkspaceFiles, writeInstructions } from "../ag
 import { harnessGuidance } from "../subagent-policy.ts";
 import { sessionBlueprintOptions, VIBE_BLUEPRINT_ID } from "../../packages/blueprints/index.ts";
 import { resolveSessionBlueprint } from "../session-blueprints.ts";
+import { buildBrief } from "../session-brief.ts";
+import { getWorkspaceGitSummary } from "../workspace-files.ts";
 
 export function registerAgentWorkflowRoutes(
 	router: Router,
@@ -145,6 +147,40 @@ export function registerAgentWorkflowRoutes(
 	// --- Inbox ---
 	router.get("/api/inbox", async (ctx) => {
 		ctx.json(200, { entries: await inbox.entries() });
+	});
+
+	// A session at a glance for the Inbox: what was asked, what's been done, what waits for the person.
+	router.get("/api/sessions/:id/brief", async (ctx) => {
+		const id = ctx.params.id;
+		const engine = engines.get(id);
+		const turns = host.turnsOverview(id);
+		const entry = (await inbox.entries()).find(item => item.sessionId === id);
+		const workspace = host.getWorkspacePath(id);
+		const git = workspace ? await getWorkspaceGitSummary(workspace).catch(() => null) : null;
+		let stage: Parameters<typeof buildBrief>[0]["stage"] = null;
+		try {
+			const view = host.blueprints.view(id);
+			const current = view.summary?.stage;
+			if (view.summary && current) {
+				const detail = view.stages.find(item => item.id === current.id);
+				stage = { name: current.name, done: view.summary.done, total: view.summary.total, waiting: current.status === "awaiting_approval", waitingSummary: detail?.summary ?? null, startsAfterApproval: detail?.attempt === 0 };
+			}
+		} catch {
+			// Not a coding session: no stages.
+		}
+		const items = engine?.items ?? [];
+		const lastAssistant = [...items].reverse().find(item => item.kind === "assistant" && item.text.trim());
+		ctx.json(200, buildBrief({
+			question: engine ? items.find(item => item.kind === "user")?.content : turns.first?.content,
+			lastAnswer: engine ? (lastAssistant?.kind === "assistant" ? lastAssistant.text : null) : turns.lastAnswered?.answer,
+			lastError: engine ? [...items].reverse().find(item => item.kind === "error")?.message : turns.latest?.error,
+			lastTurnStatus: engine ? engine.lastStatus : turns.latest?.status,
+			pendingApprovals: host.approvals.listPending(id).map(item => ({ summary: item.summary, command: item.command, toolName: item.toolName })),
+			stage,
+			git: git?.isGitRepo ? { files: git.files.length, additions: git.additions, deletions: git.deletions } : null,
+			commitsAhead: entry?.commitsAhead ?? 0,
+			subagents: (await host.featureAgents(id).catch(() => [])).length,
+		}));
 	});
 
 	router.post("/api/sessions/:id/seen", async (ctx) => {

@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { Archive, ExternalLink, GitBranch, Inbox, Plus } from "lucide-react"
 import type { Conversation } from "../../app-types"
 import type { Project } from "../../ProjectsView"
@@ -5,6 +6,8 @@ import { relativeTime, sessionStateInfo, type InboxEntry, type SessionState } fr
 import { ActiveThreadSpinner } from "../sidebar/ActiveThreadSpinner"
 import { budgetState, formatCost, useUsage } from "../usage/usage-data"
 import { useI18n } from "../i18n/I18nContext"
+import { InboxBrief } from "./InboxBrief"
+import "./inbox-brief.css"
 
 const urgency: SessionState[] = ["stage-approval", "needs-approval", "failed", "checks-failing", "replied", "ready-to-review", "pr-open", "working", "merged", "idle"]
 
@@ -35,6 +38,7 @@ export function InboxView({
 }) {
   const { t } = useI18n()
   const { report } = useUsage()
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const budget = budgetState(report, monthlyBudget)
   const rows = sessions
     .filter(session => !session.archivedAt && session.id !== "coding" && session.id !== "personal")
@@ -44,6 +48,8 @@ export function InboxView({
       const ub = urgency.indexOf(b.entry?.state ?? "idle")
       return ua - ub || (b.session.updatedAt ?? 0) - (a.session.updatedAt ?? 0)
     })
+  // The summary shows the picked session, or the one that needs you most until you pick.
+  const selected = rows.find(row => row.session.id === selectedId) ?? rows[0] ?? null
   const needsYou = rows.filter(row => row.entry?.needsYou)
   const working = rows.filter(row => !row.entry?.needsYou && (row.entry?.state === "working" || row.session.status === "working"))
   const rest = rows.filter(row => !needsYou.includes(row) && !working.includes(row))
@@ -63,8 +69,8 @@ export function InboxView({
             const info = sessionStateInfo[state]
             const project = projects.find(p => p.id === session.projectId)
             return (
-              <li key={session.id}>
-                <button type="button" className="ade-inbox-row" onClick={() => onOpenSession(session)}>
+              <li key={session.id} className={selected?.session.id === session.id ? "is-selected" : ""}>
+                <button type="button" className="ade-inbox-row" aria-pressed={selected?.session.id === session.id} onClick={() => setSelectedId(session.id)} onDoubleClick={() => onOpenSession(session)}>
                   <span className={`ade-state-dot is-${info.tone}`} aria-hidden="true" />
                   <span className="ade-inbox-main">
                     <strong className="ade-truncate">{session.label}</strong>
@@ -100,7 +106,7 @@ export function InboxView({
   )
 
   return (
-    <main className="ade-inbox">
+    <main className={`ade-inbox ${selected ? "has-brief" : ""}`}>
       <header className="ade-inbox-head">
         <div>
           <h1><Inbox className="size-5" /> {t("inbox.title")}</h1>
@@ -131,11 +137,16 @@ export function InboxView({
           <p>{t("inbox.emptyDesc")}</p>
           <button type="button" className="sf-btn-primary" onClick={onNewSession}><Plus className="size-3.5" /> {t("inbox.newSession")}</button>
         </div>
-      ) : <>
-        {group(t("inbox.needsYou"), needsYou, t("inbox.needsYouEmpty"))}
-        {group(t("inbox.working"), working, t("inbox.workingEmpty"))}
-        {group(t("inbox.everythingElse"), rest)}
-      </>}
+      ) : (
+        <div className="ade-inbox-cols">
+          <div className="ade-inbox-list">
+            {group(t("inbox.needsYou"), needsYou, t("inbox.needsYouEmpty"))}
+            {group(t("inbox.working"), working, t("inbox.workingEmpty"))}
+            {group(t("inbox.everythingElse"), rest)}
+          </div>
+          {selected ? <InboxBrief sessionId={selected.session.id} title={selected.session.label} refreshKey={`${selected.entry?.state ?? ""}:${selected.session.updatedAt ?? 0}:${selected.entry?.pendingApprovals ?? 0}`} onOpen={() => onOpenSession(selected.session)} /> : null}
+        </div>
+      )}
     </main>
   )
 }

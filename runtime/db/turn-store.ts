@@ -27,6 +27,16 @@ export class TurnStore {
 		return dbGet<{ status: TurnRow["status"] }>(this.#db, "SELECT status FROM turns WHERE id=?", id)?.status;
 	}
 
+	/** The first message the person sent in a session. */
+	firstForSession(sessionId: string): TurnRow | undefined {
+		return dbGet<TurnRow>(this.#db, "SELECT * FROM turns WHERE taskId=? OR chatId=? ORDER BY createdAt ASC, id ASC LIMIT 1", sessionId, sessionId);
+	}
+
+	/** The latest turn that ended with an answer. */
+	latestCompletedForSession(sessionId: string): TurnRow | undefined {
+		return dbGet<TurnRow>(this.#db, "SELECT * FROM turns WHERE (taskId=? OR chatId=?) AND status='completed' AND answer IS NOT NULL ORDER BY createdAt DESC, id DESC LIMIT 1", sessionId, sessionId);
+	}
+
 	/** The session's latest turn (a coding task or chat thread). */
 	latestForSession(sessionId: string): TurnRow | undefined {
 		return dbGet<TurnRow>(this.#db, "SELECT * FROM turns WHERE taskId=? OR chatId=? ORDER BY createdAt DESC, id DESC LIMIT 1", sessionId, sessionId);
