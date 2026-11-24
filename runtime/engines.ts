@@ -126,8 +126,9 @@ export function applyEvent(engine: EngineId, state: EngineSession, turn: { assis
 export function gitWritableDirs(cwd: string): string[] {
 	try {
 		const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd, encoding: "utf8", timeout: 5000, windowsHide: true }).trim();
-		const root = realpathSync(cwd);
-		const dir = common ? realpathSync(common) : "";
+		// .native expands Windows short names (RUNNER~1) the way git's own paths are written.
+		const root = realpathSync.native(cwd);
+		const dir = common ? realpathSync.native(common) : "";
 		if (dir && dir !== root && !dir.startsWith(`${root}${sep}`)) return [dir];
 	} catch {
 		// Not a Git checkout: nothing extra to allow.
