@@ -19,3 +19,7 @@
   .ade-inbox-cols { grid-template-columns: minmax(0, 1fr); }
   .ade-brief { position: static; }
 }
+.ade-brief-actions { display: flex; gap: 8px; margin-top: 8px; }
+.ade-brief-ask { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.ade-brief-ask textarea { width: 100%; resize: vertical; border: 1px solid rgb(var(--border)); border-radius: 8px; background: rgb(var(--background)); color: rgb(var(--foreground)); padding: 6px 8px; font: inherit; }
+.ade-brief-error { color: rgb(232 140 130); font-size: 12px; }

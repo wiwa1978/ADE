@@ -3,7 +3,7 @@
 // without reading the thread.
 
 export type BriefApproval =
-	| { kind: "command"; subject: string; detail: string; count: number }
+	| { kind: "command"; id: string; subject: string; detail: string; count: number }
 	| { kind: "stage"; subject: string; detail: string }
 	| { kind: "failed"; subject: string; detail: string }
 	| { kind: "review"; subject: string; detail: string }
@@ -48,7 +48,7 @@ export type BriefInput = {
 	lastAnswer?: string | null;
 	lastError?: string | null;
 	lastTurnStatus?: string | null;
-	pendingApprovals: { summary: string; command?: string; toolName?: string }[];
+	pendingApprovals: { id?: string; summary: string; command?: string; toolName?: string }[];
 	/** The blueprint, if the session follows one. */
 	stage?: { name: string; done: number; total: number; waiting: boolean; waitingSummary?: string | null; startsAfterApproval?: boolean } | null;
 	git?: { files: number; additions: number; deletions: number } | null;
@@ -69,7 +69,7 @@ export function buildBrief(input: BriefInput): SessionBrief {
 	let approval: BriefApproval;
 	if (input.pendingApprovals.length) {
 		const first = input.pendingApprovals[0];
-		approval = { kind: "command", subject: shorten(first.command || first.summary, 160), detail: "", count: input.pendingApprovals.length };
+		approval = { kind: "command", id: first.id ?? "", subject: shorten(first.command || first.summary, 160), detail: "", count: input.pendingApprovals.length };
 	} else if (input.stage?.waiting) {
 		approval = { kind: "stage", subject: input.stage.name, detail: input.stage.startsAfterApproval ? "" : shorten(input.stage.waitingSummary, 200) };
 	} else if (input.lastTurnStatus === "failed" || input.lastTurnStatus === "blocked") {

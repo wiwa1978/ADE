@@ -8,7 +8,7 @@ export type SessionBrief = {
   question: string
   work: { summary: string; files: number; added: number; removed: number; stage: { name: string; done: number; total: number } | null; subagents: number }
   approval:
-    | { kind: "command"; subject: string; detail: string; count: number }
+    | { kind: "command"; id: string; subject: string; detail: string; count: number }
     | { kind: "stage" | "failed" | "review" | "none"; subject: string; detail: string }
 }
 
@@ -19,7 +19,12 @@ export type SessionBrief = {
 export function InboxBrief({ sessionId, title, refreshKey, onOpen }: { sessionId: string; title: string; refreshKey: string; onOpen: () => void }) {
   const { t } = useI18n()
   const [loaded, setLoaded] = useState<{ key: string; brief: SessionBrief | null; failed: boolean } | null>(null)
-  const key = `${sessionId}:${refreshKey}`
+  const [reload, setReload] = useState(0)
+  const [working, setWorking] = useState(false)
+  const [asking, setAsking] = useState(false)
+  const [feedback, setFeedback] = useState("")
+  const [error, setError] = useState("")
+  const key = `${sessionId}:${refreshKey}:${reload}`
 
   useEffect(() => {
     let alive = true
@@ -41,6 +46,25 @@ export function InboxBrief({ sessionId, title, refreshKey, onOpen }: { sessionId
     if (work.subagents) facts.push(work.subagents === 1 ? t("brief.oneSubagent") : t("brief.subagents", { count: work.subagents }))
   }
   const approval = brief?.approval
+
+  /** Decide right here, then show the new state of the session. */
+  const act = async (action: () => Promise<unknown>) => {
+    setWorking(true)
+    setError("")
+    try {
+      await action()
+      setAsking(false)
+      setFeedback("")
+      setReload(value => value + 1)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("stg.decisionError"))
+    } finally {
+      setWorking(false)
+    }
+  }
+  const post = (path: string, body: unknown) => request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+  const decideStage = (decision: "approve" | "request_changes") => act(() => post(`/api/sessions/${encodeURIComponent(sessionId)}/stages/decision`, { decision, feedback }))
+  const decideCommand = (id: string, allow: boolean) => act(() => post(`/api/approvals/${encodeURIComponent(id)}/resolve`, { allow }))
   return (
     <aside className="ade-brief" aria-label={title} aria-busy={!brief || stale}>
       <h2 className="ade-brief-title ade-truncate" title={title}>{title}</h2>
@@ -69,6 +93,27 @@ export function InboxBrief({ sessionId, title, refreshKey, onOpen }: { sessionId
                 {approval.kind === "stage" ? <p>{approval.detail || <span className="ade-muted">{t("brief.stageStart")}</span>}</p> : null}
                 {approval.kind === "failed" && approval.detail ? <p>{approval.detail}</p> : null}
                 {approval.kind === "review" ? <p className="ade-muted">{t("brief.reviewDetail")}</p> : null}
+                {approval.kind === "command" ? (
+                  <div className="ade-brief-actions">
+                    <button type="button" className="ade-chip-btn" disabled={working || !approval.id} onClick={() => void decideCommand(approval.id, false)}>{t("tl.deny")}</button>
+                    <button type="button" className="ade-chip-btn is-primary" disabled={working || !approval.id} onClick={() => void decideCommand(approval.id, true)}>{working ? t("stg.sending") : t("tl.allowOnce")}</button>
+                  </div>
+                ) : null}
+                {approval.kind === "stage" ? (asking ? (
+                  <div className="ade-brief-ask">
+                    <textarea value={feedback} onChange={event => setFeedback(event.target.value)} placeholder={t("cap.whatChange")} rows={3} autoFocus />
+                    <div className="ade-brief-actions">
+                      <button type="button" className="ade-chip-btn" disabled={working} onClick={() => setAsking(false)}>{t("common.cancel")}</button>
+                      <button type="button" className="ade-chip-btn is-primary" disabled={working || !feedback.trim()} onClick={() => void decideStage("request_changes")}>{t("stg.sendBack")}</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="ade-brief-actions">
+                    <button type="button" className="ade-chip-btn" disabled={working} onClick={() => setAsking(true)}>{t("stg.requestChanges")}</button>
+                    <button type="button" className="ade-chip-btn is-primary" disabled={working} onClick={() => void decideStage("approve")}>{working ? t("stg.sending") : t("stg.approve")}</button>
+                  </div>
+                )) : null}
+                {error ? <p className="ade-brief-error" role="alert">{error}</p> : null}
               </>
             ) : null}
           </section>

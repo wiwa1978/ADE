@@ -26,6 +26,7 @@ let subagentRecords: Array<Record<string, unknown>>
 let approvalRecords: Array<Record<string, unknown>>
 let artifactRecords: Array<Record<string, unknown>>
 let mcpRecords: Array<Record<string, unknown>>
+let briefApproval: Record<string, unknown> = { kind: "command", id: "appr-1", subject: "npm test", detail: "", count: 2 }
 
 before(async () => {
   browser = new Window({ url: "http://127.0.0.1:1420/" })
@@ -135,6 +136,7 @@ beforeEach(() => {
     },
   ]
   mcpRecords = []
+  briefApproval = { kind: "command", id: "appr-1", subject: "npm test", detail: "", count: 2 }
 
   browser.localStorage.clear()
   // These tests exercise every tool, so they run in Full view; the Simple view has its own tests.
@@ -319,7 +321,7 @@ beforeEach(() => {
         ],
       }
     } else if (/^\/api\/sessions\/[^/]+\/brief$/.test(url) && method === "GET") {
-      payload = { question: "Build the split-pane workspace", work: { summary: "Split panes are in and tested.", files: 3, added: 40, removed: 2, stage: null, subagents: 1 }, approval: { kind: "command", subject: "npm test", detail: "", count: 2 } }
+      payload = { question: "Build the split-pane workspace", work: { summary: "Split panes are in and tested.", files: 3, added: 40, removed: 2, stage: null, subagents: 1 }, approval: briefApproval }
     } else if (url.startsWith("/api/skills/landscape") && method === "GET") {
       payload = {
         skills: [
@@ -1002,4 +1004,27 @@ test("Inbox shows a short summary of the picked session beside the list: what wa
   assert.ok(container.querySelector(".ade-inbox-cols"), "the list and the summary sit side by side")
   const open = findButton("Open session")
   assert.ok(open)
+
+  // A command can be allowed or denied right in the summary.
+  await click("Allow once")
+  const resolved = requests.filter(item => item.url === "/api/approvals/appr-1/resolve").at(-1)
+  assert.deepEqual(resolved?.body, { allow: true })
+})
+
+test("Inbox: a stage waiting for approval can be approved, or sent back with a note, from the summary", async () => {
+  briefApproval = { kind: "stage", subject: "Plan", detail: "Three steps: route, test, docs." }
+  browser.localStorage.setItem("ade.last-view", JSON.stringify({ screen: "inbox" }))
+  await act(async () => root.render(React.createElement(App)))
+  assert.match(container.textContent ?? "", /Approve “Plan”/)
+  assert.match(container.textContent ?? "", /Three steps: route, test, docs\./)
+  await click("Approve")
+  const decision = requests.filter(item => item.url.endsWith("/stages/decision")).at(-1)
+  assert.equal((decision?.body as { decision?: string } | null)?.decision, "approve")
+  await click("Request changes")
+  const note = container.querySelector(".ade-brief-ask textarea")
+  assert.ok(note, "a note field appears")
+  await act(async () => setInput(note, "Also cover the error case"))
+  await click("Send back")
+  const back = requests.filter(item => item.url.endsWith("/stages/decision")).at(-1)
+  assert.deepEqual(back?.body, { decision: "request_changes", feedback: "Also cover the error case" })
 })

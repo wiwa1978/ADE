@@ -175,7 +175,7 @@ export function registerAgentWorkflowRoutes(
 			lastAnswer: engine ? (lastAssistant?.kind === "assistant" ? lastAssistant.text : null) : turns.lastAnswered?.answer,
 			lastError: engine ? [...items].reverse().find(item => item.kind === "error")?.message : turns.latest?.error,
 			lastTurnStatus: engine ? engine.lastStatus : turns.latest?.status,
-			pendingApprovals: host.approvals.listPending(id).map(item => ({ summary: item.summary, command: item.command, toolName: item.toolName })),
+			pendingApprovals: host.approvals.listPending(id).map(item => ({ id: item.id, summary: item.summary, command: item.command, toolName: item.toolName })),
 			stage,
 			git: git?.isGitRepo ? { files: git.files.length, additions: git.additions, deletions: git.deletions } : null,
 			commitsAhead: entry?.commitsAhead ?? 0,

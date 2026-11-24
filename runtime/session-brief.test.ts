@@ -31,7 +31,7 @@ test("the brief says what was asked, what was done, and what waits for the perso
 test("a command waiting for approval comes first, then a stage, a failure, a review, and finally nothing", () => {
 	const base = { pendingApprovals: [], lastTurnStatus: "completed" as const };
 	assert.equal(buildBrief({ ...base, pendingApprovals: [{ summary: "Run command: npm test", command: "npm test", toolName: "run_command" }, { summary: "x" }], stage: { name: "Build", done: 0, total: 2, waiting: true } }).approval.kind, "command");
-	assert.deepEqual(buildBrief({ ...base, pendingApprovals: [{ summary: "s", command: "git push origin main" }] }).approval, { kind: "command", subject: "git push origin main", detail: "", count: 1 });
+	assert.deepEqual(buildBrief({ ...base, pendingApprovals: [{ id: "a1", summary: "s", command: "git push origin main" }] }).approval, { kind: "command", id: "a1", subject: "git push origin main", detail: "", count: 1 });
 	assert.equal(buildBrief({ ...base, stage: { name: "Build", done: 0, total: 2, waiting: true, startsAfterApproval: true } }).approval.detail, "", "a stage that hasn't started has no result to describe");
 	assert.deepEqual(buildBrief({ ...base, lastTurnStatus: "failed", lastError: "Provider returned 500" }).approval, { kind: "failed", subject: "", detail: "Provider returned 500" });
 	assert.equal(buildBrief({ ...base, git: { files: 3, additions: 1, deletions: 0 } }).approval.kind, "review");
