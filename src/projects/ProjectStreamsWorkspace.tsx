@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useViewMode } from "../view-mode"
 import { CalendarClock,
   Archive,
   ArchiveRestore,
@@ -86,7 +87,10 @@ export function ProjectStreamsWorkspace({
   onSessionContextMenu?: (session: Conversation, x: number, y: number) => void
   inboxEntries?: Record<string, InboxEntry>
 }) {
-  const [activeTab, setActiveTab] = useState<ProjectTab>("sessions")
+  const [chosenTab, setActiveTab] = useState<ProjectTab>("sessions")
+  // Simple view keeps two tabs: Sessions and Agents. The others come back with Full view.
+  const simple = useViewMode() === "simple"
+  const activeTab: ProjectTab = simple && chosenTab !== "sessions" && chosenTab !== "subagents" ? "sessions" : chosenTab
   const [layout, setLayout] = useState<StreamLayout>("split")
   const [archivedOpen, setArchivedOpen] = useState(false)
   // "list" shows every session's status; "side" opens several live sessions next to each other.
@@ -194,23 +198,29 @@ export function ProjectStreamsWorkspace({
             <span>Sessions</span>
             <span className="ade-count-badge">{sessions.length}</span>
           </button>
-          <button type="button" role="tab" aria-selected={activeTab === "issues"} className={`ade-project-tab ${activeTab === "issues" ? "is-active" : ""}`} onClick={() => setActiveTab("issues")}>
-            <ListTodo className="size-3.5" />
-            <span>Issues</span>
-          </button>
-          <button type="button" role="tab" aria-selected={activeTab === "pulls"} className={`ade-project-tab ${activeTab === "pulls" ? "is-active" : ""}`} onClick={() => setActiveTab("pulls")}>
-            <GitPullRequest className="size-3.5" />
-            <span>Pull requests</span>
-          </button>
+          {!simple ? (
+            <button type="button" role="tab" aria-selected={activeTab === "issues"} className={`ade-project-tab ${activeTab === "issues" ? "is-active" : ""}`} onClick={() => setActiveTab("issues")}>
+              <ListTodo className="size-3.5" />
+              <span>Issues</span>
+            </button>
+          ) : null}
+          {!simple ? (
+            <button type="button" role="tab" aria-selected={activeTab === "pulls"} className={`ade-project-tab ${activeTab === "pulls" ? "is-active" : ""}`} onClick={() => setActiveTab("pulls")}>
+              <GitPullRequest className="size-3.5" />
+              <span>Pull requests</span>
+            </button>
+          ) : null}
           <button type="button" role="tab" aria-selected={activeTab === "subagents"} className={`ade-project-tab ${activeTab === "subagents" ? "is-active" : ""}`} onClick={() => setActiveTab("subagents")}>
             <Bot className="size-3.5" />
             <span>Agents</span>
             {totalSubagentsCount > 0 ? <span className="ade-count-badge is-accent">{totalSubagentsCount}</span> : null}
           </button>
-          <button type="button" role="tab" aria-selected={activeTab === "automations"} className={`ade-project-tab ${activeTab === "automations" ? "is-active" : ""}`} onClick={() => setActiveTab("automations")}>
-            <CalendarClock className="size-3.5" />
-            <span>Automations</span>
-          </button>
+          {!simple ? (
+            <button type="button" role="tab" aria-selected={activeTab === "automations"} className={`ade-project-tab ${activeTab === "automations" ? "is-active" : ""}`} onClick={() => setActiveTab("automations")}>
+              <CalendarClock className="size-3.5" />
+              <span>Automations</span>
+            </button>
+          ) : null}
         </nav>
 
         {activeTab === "sessions" ? (

@@ -1,5 +1,6 @@
 import { useRef, useState, type RefObject } from "react"
 import { PaneResizer } from "./PaneResizer"
+import { useViewMode } from "../view-mode"
 import { InboxView } from "../inbox/InboxView"
 import { sessionStateInfo, type InboxEntry } from "../session-state"
 import { FolderTree, Layers, PanelRight, Settings2, Sparkles } from "lucide-react"
@@ -158,7 +159,7 @@ export function AppMainColumn(props: AppMainColumnProps) {
     projectDrafts,
     projectActivity,
     projectActivityError,
-    projectRightPane,
+    projectRightPane: chosenRightPane,
     openStreamIdsByProject,
     focusedStreamId,
     connections,
@@ -178,6 +179,8 @@ export function AppMainColumn(props: AppMainColumnProps) {
   } = props
 
   const resolvedKeybindings = resolveKeybindings(settings.keybindings)
+  // Simple view keeps the project's right panel to Settings; Files and Artefacts come with Full view.
+  const projectRightPane = useViewMode() === "simple" && chosenRightPane !== "settings" ? null : chosenRightPane
 
   return (
     <div className="ade-main-column">

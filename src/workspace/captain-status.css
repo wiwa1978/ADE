@@ -1,0 +1,21 @@
+/* Simple view: the Captain's status line and the inline stage decision. */
+.ade-captain-status { display: flex; flex-direction: column; gap: 6px; padding: 0 12px 6px; }
+.ade-captain-line {
+  display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 10px;
+  border: 1px solid rgb(var(--border)); border-radius: 10px; background: rgb(var(--nav)); font-size: 12px;
+}
+.ade-captain-agents {
+  display: inline-flex; align-items: center; gap: 2px; padding: 2px 8px; border: 0; border-radius: 999px;
+  background: rgb(var(--primary) / 0.14); color: rgb(var(--foreground)); font-size: 12px; cursor: pointer;
+}
+.ade-captain-agents:hover { background: rgb(var(--primary) / 0.24); }
+.ade-gate-card { border: 1px solid rgb(217 155 56 / 0.5); border-radius: 10px; background: rgb(217 155 56 / 0.1); padding: 8px 10px; font-size: 12.5px; }
+.ade-gate-card-head { display: flex; align-items: center; gap: 8px; }
+.ade-gate-card-head svg { color: var(--warn); }
+.ade-gate-card-ask { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.ade-gate-card-ask textarea {
+  width: 100%; resize: vertical; border: 1px solid rgb(var(--border)); border-radius: 8px;
+  background: rgb(var(--background)); color: rgb(var(--foreground)); padding: 6px 8px; font: inherit;
+}
+.ade-gate-card-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.ade-gate-card-error { margin: 6px 0 0; color: rgb(var(--danger, 220 70 70)); }

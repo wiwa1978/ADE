@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { FolderPlus, Inbox, PanelLeft, Search, Settings2, Smartphone } from "lucide-react"
+import { FolderPlus, Inbox, LayoutDashboard, PanelLeft, Search, Settings2, Smartphone, Sparkles } from "lucide-react"
 import type { Conversation, RuntimeHealth } from "../../app-types"
 import type { Project } from "../../ProjectsView"
 import type { InboxEntry } from "../session-state"
@@ -8,6 +8,7 @@ import type { ContextMenuTarget } from "./SidebarContextMenu"
 import { DEFAULT_KEYBINDINGS, formatShortcut, type KeybindingMap } from "../keybindings"
 import type { AddProjectSource } from "../projects/AddProjectWizard"
 import { useSessionTools } from "../layout/session-tools"
+import { setViewMode, useViewMode } from "../view-mode"
 
 type AppSidebarProps = {
   selection: SidebarSelection
@@ -79,7 +80,9 @@ export function AppSidebar(props: AppSidebarProps) {
   const sortPinnedFirst = (list: Conversation[]) =>
     [...list].sort((a, b) => Number(props.pinnedIds.includes(b.id)) - Number(props.pinnedIds.includes(a.id)))
 
-  const tools = useSessionTools().filter(tool => !tool.menuOnly)
+  const viewMode = useViewMode()
+  // Simple view keeps the activity bar to the app's own places; the session's tools come with Full view.
+  const tools = useSessionTools().filter(tool => !tool.menuOnly && viewMode === "full")
   // The hover card beside an activity bar icon (one at a time, placed next to the icon).
   const [tip, setTip] = useState<RailTip | null>(null)
   const kb = props.keybindings ?? DEFAULT_KEYBINDINGS
@@ -117,12 +120,22 @@ export function AppSidebar(props: AppSidebarProps) {
           </RailButton>
         )
       })}
+      <RailButton
+        tip={setTip}
+        label={viewMode === "simple" ? "Show all tools" : "Simple view"}
+        description={viewMode === "simple" ? "Switch to the full view: files, changes, terminal, browser and more" : "Back to the simple view: just the Captain and what its agents are doing"}
+        onClick={() => setViewMode(viewMode === "simple" ? "full" : "simple")}
+        className="mt-auto"
+        ariaLabel={viewMode === "simple" ? "Switch to full view" : "Switch to simple view"}
+      >
+        {viewMode === "simple" ? <LayoutDashboard className="size-[18px]" /> : <Sparkles className="size-[18px]" />}
+      </RailButton>
       {props.onOpenMobilePairing ? (
-        <RailButton tip={setTip} label="Pair phone" description="Connect iPhone or Android via QR code" onClick={props.onOpenMobilePairing} className="mt-auto">
+        <RailButton tip={setTip} label="Pair phone" description="Connect iPhone or Android via QR code" onClick={props.onOpenMobilePairing}>
           <Smartphone className="size-[18px]" />
         </RailButton>
       ) : null}
-      <RailButton tip={setTip} label="Settings" description="Models, agents, appearance and more" shortcut={settingsBadge} active={props.selection.kind === "settings"} onClick={props.onOpenSettings} className={props.onOpenMobilePairing ? undefined : "mt-auto"}>
+      <RailButton tip={setTip} label="Settings" description="Models, agents, appearance and more" shortcut={settingsBadge} active={props.selection.kind === "settings"} onClick={props.onOpenSettings}>
         <Settings2 className="size-[18px]" />
       </RailButton>
       {tip ? (

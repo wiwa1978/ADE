@@ -11,6 +11,7 @@ import type { Root } from "react-dom/client"
 let browser: Window
 let server: ViteDevServer
 let createRoot: typeof import("react-dom/client").createRoot
+let setViewMode: (mode: "simple" | "full") => void
 let App: React.ComponentType
 let container: HTMLDivElement
 let root: Root
@@ -42,6 +43,7 @@ before(async () => {
   cacheDirectory = mkdtempSync(join(tmpdir(), "ade-app-test-"))
   server = await createServer({ cacheDir: cacheDirectory, server: { middlewareMode: true, hmr: false }, appType: "custom", optimizeDeps: { noDiscovery: true } })
   ;({ default: App } = (await server.ssrLoadModule("/App.tsx")) as { default: React.ComponentType })
+  ;({ setViewMode } = (await server.ssrLoadModule("/src/view-mode.ts")) as { setViewMode: typeof setViewMode })
 })
 
 after(async () => {
@@ -135,6 +137,8 @@ beforeEach(() => {
   mcpRecords = []
 
   browser.localStorage.clear()
+  // These tests exercise every tool, so they run in Full view; the Simple view has its own tests.
+  setViewMode("full")
   // Start on the session view (the app's first-run default is the Inbox).
   browser.localStorage.setItem("ade.last-view", JSON.stringify({ screen: "work", activeSessionId: "coding" }))
   ;(browser as unknown as Record<string, unknown>).setInterval = (callback: () => void, delay: number) => {
@@ -827,4 +831,20 @@ test("Mobile PWA companion shell renders 4 tabs (Inbox with 1-tap approvals, Ses
   } finally {
     browser.window.history.replaceState({}, "", "/")
   }
+})
+
+test("Simple view keeps the activity bar and session to the Captain; Full view brings every tool back", async () => {
+  setViewMode("simple")
+  await act(async () => root.render(React.createElement(App)))
+  const taskRow = [...container.querySelectorAll('[role="button"]')].find(el => el.textContent?.includes("Build split-pane ADE"))
+  assert.ok(taskRow, "the worktree session is listed")
+  await act(async () => { (taskRow as HTMLElement).click() })
+  const labels = () => [...container.querySelectorAll(".ade-activity-bar button")].map(item => item.getAttribute("aria-label"))
+  assert.ok(labels().includes("Switch to full view"), "the toggle offers the full view")
+  assert.ok(!labels().includes("Terminal") && !labels().includes("Files"), "no tools in the activity bar")
+  assert.equal(container.querySelector('button[title="Toggle Terminal (Cmd+J)"]'), null, "no quick-open icons in the composer")
+  await click("Switch to full view")
+  assert.ok(labels().includes("Switch to simple view"))
+  assert.ok(labels().some(label => label === "Terminal" || label === "Files"), "tools are back")
+  assert.equal(JSON.parse(JSON.stringify(browser.localStorage.getItem("ade.view-mode"))), "full")
 })

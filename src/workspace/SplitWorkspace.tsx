@@ -21,6 +21,8 @@ import type {
 } from "../../app-types"
 import { TimelineView } from "../timeline/TimelineView"
 import { AmbientTracksBar } from "../composer/AmbientTracksBar"
+import { CaptainStatusLine } from "./CaptainStatusLine"
+import { SIMPLE_PANEL_KINDS, useViewMode } from "../view-mode"
 import { ComposerDock } from "../composer/ComposerDock"
 import { request } from "../../api"
 import type { RunStatus } from "../panels/RunPanel"
@@ -413,9 +415,16 @@ export function SplitWorkspace({
   const openProcesses = useCallback(() => openBeside({ id: "processes", kind: "processes", title: "Processes" }), [openBeside])
 
   const activeBesideTab = besideTabs.find(t => t.id === activeBesideId) ?? null
-  const showBeside = besideTabs.length > 0 && activeBesideTab !== null && !besideHidden
+  const simple = useViewMode() === "simple"
+  // Simple view keeps only the panels that show who is working; the rest wait for Full view.
+  const showBeside = besideTabs.length > 0 && activeBesideTab !== null && !besideHidden && (!simple || SIMPLE_PANEL_KINDS.has(activeBesideTab.kind))
   const runningSubagentsCount = subagents.filter(s => s.status === "running" || s.status === "waiting").length
   const runningProcessesCount = processes.filter(p => p.status === "running").length
+  // Pause: stop the Captain's turn and every subagent that is still running.
+  const pauseAll = () => {
+    onAbortSession()
+    for (const sub of subagents) if (sub.status === "running" || sub.status === "waiting") void onStopSubagent(sub.id)
+  }
   // Everything the side panel can open, with live status (the panel's menu lists these).
   const is = (kind: WorkspaceTab["kind"]) => showBeside && activeBesideTab?.kind === kind
   const sidePanelItems: SidePanelItem[] = [
@@ -462,7 +471,17 @@ export function SplitWorkspace({
         onOpenRun={openRun}
       />
       }
-      aboveComposer={
+      aboveComposer={simple ? (
+        <CaptainStatusLine
+          sessionId={session.id}
+          busy={isBusy}
+          subagents={subagents}
+          blueprint={blueprint}
+          onOpenAgents={openAgents}
+          onPause={pauseAll}
+          onTakeOver={() => { pauseAll(); textareaRef?.current?.focus() }}
+        />
+      ) : (
         <AmbientTracksBar
           subagents={subagents}
           gitSummary={gitSummary}
@@ -481,7 +500,7 @@ export function SplitWorkspace({
           usage={timeline?.usage}
           onOpenProgress={openProgress}
         />
-      }
+      )}
       composer={
         <ComposerDock
           draft={draft}
@@ -505,7 +524,7 @@ export function SplitWorkspace({
           onSteer={onSteerSession}
           onAbort={onAbortSession}
           onCompact={onCompactSession}
-          onQuickOpenPanel={panel => {
+          onQuickOpenPanel={simple ? undefined : panel => {
             if (panel === "files") openFiles()
             else if (panel === "diff") openDiff()
             else if (panel === "browser") openBrowser()
