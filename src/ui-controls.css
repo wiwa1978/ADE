@@ -1,0 +1,245 @@
+/* Shared form controls, buttons, badges and segmented controls (the sf-* classes) used by the Add-project wizard, project settings and the issues list. */
+
+
+
+/* Segmented Control */
+.sf-segmented {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border-radius: 9px;
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--border) / 0.85);
+  gap: 2px;
+}
+
+
+.sf-seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: rgb(var(--muted));
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+
+.sf-seg-btn:hover {
+  color: rgb(var(--foreground));
+}
+
+
+.sf-seg-btn.is-active {
+  background: rgb(var(--surface-raised));
+  color: rgb(var(--foreground));
+  box-shadow: 0 1px 2px rgb(var(--shadow) / 0.16);
+}
+
+
+/* Form Controls */
+.sf-field {
+  width: 100%;
+  height: 36px;
+  padding: 0 11px;
+  border-radius: 8px;
+  border: 1px solid rgb(var(--border));
+  background: rgb(var(--field));
+  color: rgb(var(--foreground));
+  font-size: var(--input-size, 13px);
+  line-height: 1.45;
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+
+.sf-field::placeholder {
+  color: rgb(var(--placeholder, var(--muted)));
+}
+
+
+.sf-field:focus,
+.sf-field:focus-visible {
+  outline: none;
+  border-color: rgb(var(--primary) / 0.7);
+  box-shadow: 0 0 0 2px rgb(var(--primary) / 0.16);
+}
+
+
+.sf-field:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+
+/* Buttons */
+.sf-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid rgb(var(--primary));
+  background: rgb(var(--primary));
+  color: rgb(var(--primary-foreground));
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 120ms ease, transform 80ms ease;
+}
+
+
+.sf-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.07);
+}
+
+
+.sf-btn-primary:active:not(:disabled) {
+  transform: translateY(0.5px);
+}
+
+
+.sf-btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+
+.sf-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 11px;
+  border-radius: 8px;
+  border: 1px solid rgb(var(--border));
+  background: rgb(var(--surface-raised));
+  color: rgb(var(--foreground));
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+
+.sf-btn-secondary:hover:not(:disabled) {
+  border-color: rgb(var(--primary) / 0.65);
+  background: rgb(var(--surface));
+}
+
+
+.sf-btn-secondary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+
+.sf-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgb(var(--muted));
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+
+.sf-btn-ghost:hover:not(:disabled) {
+  background: rgb(var(--surface-raised));
+  color: rgb(var(--foreground));
+}
+
+
+.sf-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid rgb(var(--border) / 0.9);
+  background: rgb(var(--surface-raised));
+  color: rgb(var(--foreground));
+  font-size: 11px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+
+.sf-badge-muted {
+  color: rgb(var(--muted));
+  background: rgb(var(--surface));
+}
+
+
+.sf-badge-accent {
+  border-color: rgb(var(--primary) / 0.45);
+  background: rgb(var(--primary) / 0.14);
+  color: rgb(var(--primary));
+}
+
+
+.sf-badge-ok {
+  border-color: rgba(52, 168, 114, 0.4);
+  background: rgba(52, 168, 114, 0.14);
+  color: #4ade80;
+}
+
+
+.sf-badge-eu {
+  border-color: rgba(56, 189, 248, 0.45);
+  background: rgba(56, 189, 248, 0.14);
+  color: #38bdf8;
+}
+
+
+.sf-badge-warn {
+  border-color: rgba(217, 155, 56, 0.45);
+  background: rgba(217, 155, 56, 0.14);
+  color: #fbbf24;
+}
+
+
+/* Slide-over & Modals */
+.sf-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(4px);
+  padding: 16px;
+}
+
+
+.sf-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 550;
+  color: rgb(var(--muted));
+}

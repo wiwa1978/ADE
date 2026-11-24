@@ -424,7 +424,7 @@ export function ProjectSettings({ project, open, initialDraft, githubConnection,
             <FolderOpen className="size-3.5" /> Browse
           </button>
         </div>
-        <p id="project-checkout-hint" className="hint">Applies to new sessions and Factory runs.</p>
+        <p id="project-checkout-hint" className="hint">Applies to new sessions.</p>
       </div>
       <div className="project-field">
         <label>

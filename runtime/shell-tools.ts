@@ -8,6 +8,7 @@ import type { ManagedProcessSummary } from "../packages/protocol/index.ts";
 import type { RuntimeEventBus } from "./events.ts";
 import { isErrorCode, logger } from "./log.ts";
 import { conflict, notFound } from "./http-error.ts";
+import { sanitizedEnv } from "./env-filter.ts";
 import { redact, secretEnv } from "./project-secrets.ts";
 import { commandInvocation, stopOnTarget } from "./execution-targets.ts";
 
@@ -126,7 +127,10 @@ export class ProcessManager {
 		const invocation = remote ?? buildShellInvocation(opts.command, opts.cwd, Boolean(opts.sandbox));
 		const child = spawn(invocation.file, invocation.args, {
 			cwd: opts.cwd,
-			env: { ...process.env, ...secrets, TERM: "dumb", CI: "1", ...remote?.env },
+			// On this computer the command gets the host's environment minus its credentials (API keys,
+			// tokens); the project's own secrets are added by name. A remote target's local client
+			// (docker, ssh, wsl) needs the full host environment; the command there gets only what's passed.
+			env: remote ? { ...process.env, ...secrets, TERM: "dumb", CI: "1", ...remote.env } : { ...sanitizedEnv(), ...secrets, TERM: "dumb", CI: "1" },
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		const proc: ManagedProcess = {

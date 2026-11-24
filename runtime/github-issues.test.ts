@@ -46,11 +46,36 @@ test("GitHub issue lookup rejects mismatched repositories, pull requests, and pr
 	}), /valid issue/);
 	await assert.rejects(lookupGitHubIssue({
 		project, url: "https://github.com/owner/repo/issues/42", fetcher: (async () => ({ ok: false, status: 404 }) as Response) as typeof fetch,
-	}), /public GitHub issues only/);
+	}), /private repository, sign in with `gh auth login`/);
 	await assert.rejects(lookupGitHubIssue({
 		project, url: "https://github.com/owner/repo/issues/42", fetcher: (async () => ({ ok: true, status: 200, text: async () => "null" }) as Response) as typeof fetch,
 	}), /valid issue/);
 	await assert.rejects(lookupGitHubIssue({
 		project, url: "https://user@github.com/owner/repo/issues/42", fetcher: (async () => { throw new Error("must not fetch") }) as typeof fetch,
 	}), /Use an issue URL from owner\/repo/);
+});
+
+test("a private repository's issue is read with the user's GitHub login; a refusal says so", async () => {
+	let sent: Record<string, string> | undefined;
+	const issue = await lookupGitHubIssue({
+		project,
+		url: "https://github.com/owner/repo/issues/7",
+		token: async () => "ghp_login",
+		fetcher: (async (_url, options) => {
+			sent = options?.headers as Record<string, string>;
+			return { ok: true, status: 200, text: async () => JSON.stringify({ number: 7, title: "Private", state: "open", html_url: "https://github.com/owner/repo/issues/7", body: "x" }) } as Response;
+		}) as typeof fetch,
+	});
+	assert.equal(sent?.authorization, "Bearer ghp_login");
+	assert.equal(issue.title, "Private");
+	await assert.rejects(lookupGitHubIssue({
+		project, url: "https://github.com/owner/repo/issues/7", token: async () => "ghp_login", fetcher: (async () => ({ ok: false, status: 404 }) as Response) as typeof fetch,
+	}), /your GitHub login can't see it/);
+	// No login (or a failing lookup of it): still works for public issues, without a header.
+	let anonymous: Record<string, string> | undefined;
+	await lookupGitHubIssue({
+		project, url: "https://github.com/owner/repo/issues/7", token: async () => { throw new Error("gh missing") },
+		fetcher: (async (_url, options) => { anonymous = options?.headers as Record<string, string>; return { ok: true, status: 200, text: async () => JSON.stringify({ number: 7, title: "Public", state: "open", html_url: "https://github.com/owner/repo/issues/7", body: "" }) } as Response; }) as typeof fetch,
+	});
+	assert.equal(anonymous?.authorization, undefined);
 });

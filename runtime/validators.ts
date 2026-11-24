@@ -1,6 +1,5 @@
 import type { ApprovalPolicy } from "./approvals.ts";
 import type { McpServerConfig } from "./mcp.ts";
-import type { ModelProfileId, ModelRef } from "../packages/protocol/index.ts";
 import { badRequest } from "./http-error.ts";
 
 function badInput(message: string): Error {
@@ -199,49 +198,6 @@ export function validateProjectDetectGit(body: Record<string, unknown>) {
 	return {
 		path: requireString(body, "path", { nonEmpty: true, message: "Provide a local folder path." }).trim(),
 	};
-}
-
-export function validateFactoryRunCreate(body: Record<string, unknown>) {
-	let stageOverrides: Record<string, ModelRef> | undefined;
-	if (body.stageOverrides !== undefined) {
-		if (!body.stageOverrides || typeof body.stageOverrides !== "object" || Array.isArray(body.stageOverrides)) {
-			throw badInput('Field "stageOverrides" must be an object.');
-		}
-		stageOverrides = body.stageOverrides as Record<string, ModelRef>;
-	}
-	return {
-		runId: optionalString(body, "runId"),
-		projectId: optionalString(body, "projectId"),
-		blueprintId: optionalString(body, "blueprintId"),
-		repoPath: optionalString(body, "repoPath"),
-		githubRepo: optionalString(body, "githubRepo"),
-		issueNumber: optionalNumber(body, "issueNumber"),
-		taskPrompt: optionalString(body, "taskPrompt"),
-		baseBranch: optionalString(body, "baseBranch"),
-		modelProfile: optionalString(body, "modelProfile") as ModelProfileId | undefined,
-		stageOverrides,
-		euOnlyMode: optionalBoolean(body, "euOnlyMode"),
-		cloudActFree: optionalBoolean(body, "cloudActFree"),
-		disabledStageIds: optionalStringArray(body, "disabledStageIds"),
-		autoStart: optionalBoolean(body, "autoStart") ?? false,
-	};
-}
-
-export function validateFactoryAction(action: string, body: Record<string, unknown>) {
-	if (action === "steer") {
-		return { note: requireString(body, "note", { nonEmpty: true }) };
-	}
-	if (action === "approve") {
-		return {
-			decision: optionalEnum(body, "decision", ["approve", "request_changes", "cancel"] as const) ?? "approve",
-			cardId: optionalString(body, "cardId"),
-			note: optionalString(body, "note"),
-		};
-	}
-	if (action === "takeover") {
-		return { enable: optionalBoolean(body, "enable") ?? true };
-	}
-	return {};
 }
 
 export function validateArchiveSession(body: Record<string, unknown>) {

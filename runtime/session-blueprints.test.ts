@@ -123,3 +123,24 @@ test("switching: to Vibe drops the stages, to a blueprint starts at its first st
 	assert.equal(blueprints.summary("s1")!.stage?.id, "triage");
 	assert.throws(() => blueprints.begin("s1", "nope"), /Unknown blueprint/);
 });
+
+test("Request changes on a stage that hasn't started keeps it waiting; nothing is 'redone'", () => {
+	const { blueprints } = setup("automated-factory");
+	for (const stageId of ["triage", "plan", "implement", "verify"]) blueprints.finish("s1", { stageId, summary: `${stageId} done` });
+	blueprints.finish("s1", { stageId: "review", summary: "Reviewed", verdict: { outcome: "pass", summary: "Fine" } });
+	const gate = blueprints.summary("s1")!.stage!;
+	assert.deepEqual([gate.id, gate.status], ["publish_pr", "awaiting_approval"], "the PR stage asks before it starts");
+
+	const message = blueprints.decide("s1", "request_changes", "Squash the commits first")!;
+	assert.match(message, /doesn't want "Merge-Ready PR" to start yet[\s\S]*Squash the commits first[\s\S]*Don't start the stage/);
+	assert.doesNotMatch(message, /Redo this stage/);
+	assert.equal(blueprints.summary("s1")!.stage?.status, "awaiting_approval", "still waiting for approval");
+	const history = blueprints.view("s1").history;
+	assert.equal(history.at(-1)?.event, "changes_requested", "no stage was started");
+	assert.ok(!history.some(entry => entry.stageId === "publish_pr" && entry.event === "started"));
+	assert.match(blueprints.instructions("s1")!, /Waiting for the user: Merge-Ready PR/);
+
+	// When the user is satisfied, approving starts the stage as usual.
+	assert.match(blueprints.decide("s1", "approve")!, /approved starting "Merge-Ready PR"/);
+	assert.equal(blueprints.summary("s1")!.stage?.status, "running");
+});

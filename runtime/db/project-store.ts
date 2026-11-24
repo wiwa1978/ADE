@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { lookupGitHubIssue } from "../github-issues.ts";
+import { readLocalGhToken } from "../github-repositories.ts";
 import { badGateway, badRequest, conflict, notFound } from "../http-error.ts";
 import { logger } from "../log.ts";
 import { resolveCheckout } from "../worktrees.ts";
@@ -188,6 +189,6 @@ export class ProjectStore {
 
 	async lookupGitHubIssue(projectId: unknown, url: unknown) {
 		const project = typeof projectId === "string" ? this.get(projectId) : undefined;
-		return lookupGitHubIssue({ project, url, fetcher: this.#githubIssueFetcher });
+		return lookupGitHubIssue({ project, url, fetcher: this.#githubIssueFetcher, token: readLocalGhToken });
 	}
 }

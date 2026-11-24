@@ -287,9 +287,15 @@ export class SessionBlueprints {
 		const note = feedback.trim().slice(0, 4000);
 		if (decision === "request_changes") {
 			if (!note) throw badRequest("Say what should change.");
+			const beforeStart = record.run.stages[index].attempt === 0 && stage.approvalGate === "before";
 			record.run = applyStageApproval(record.run, blueprint, "request_changes", now);
 			record.feedback = { ...record.feedback, [stage.id]: note };
 			record.history.push({ at: now, stageId: stage.id, event: "changes_requested", note: note.slice(0, 300) });
+			if (beforeStart) {
+				// Not started yet: the stage keeps waiting for approval; nothing to redo.
+				this.#save(sessionId, row.blueprintId!, record);
+				return `The user doesn't want "${stage.name}" to start yet:\n${note}\n\nAddress that (answer, adjust your plan), then stop and wait: they approve again when they're satisfied. Don't start the stage.`;
+			}
 			const { run } = planNextStep(record.run, blueprint, MODEL_CONFIG, now);
 			record.run = run;
 			record.history.push({ at: now, stageId: stage.id, event: "started" });

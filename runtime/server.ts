@@ -18,7 +18,6 @@ import { Router } from "./router.ts";
 import { requireWorkspace, type RouteDeps } from "./routes/context.ts";
 import { registerEnvironmentRoutes } from "./routes/environments.ts";
 import { registerTerminalRoutes } from "./routes/terminals.ts";
-import { registerFactoryRoutes } from "./routes/factory.ts";
 import { registerProjectRoutes } from "./routes/projects.ts";
 import { registerGitHubRoutes } from "./routes/github.ts";
 import { registerSessionRoutes } from "./routes/sessions.ts";
@@ -118,7 +117,6 @@ export function createRuntimeRouters(deps: RouteDeps): { envRouter: Router; main
 	const mainRouter = new Router();
 	registerTerminalRoutes(mainRouter, deps);
 	registerSystemRoutes(mainRouter, deps);
-	registerFactoryRoutes(mainRouter, deps);
 	registerProjectRoutes(mainRouter, deps);
 	registerGitHubRoutes(mainRouter, deps);
 	registerAgentWorkflowRoutes(mainRouter, deps);

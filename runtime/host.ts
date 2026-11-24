@@ -1,6 +1,4 @@
 import type { DatabaseSync } from "node:sqlite";
-import { CaptainCore } from "../packages/captain-core/index.ts";
-import { createNodeSqliteCaptainHost } from "../packages/host-node/index.ts";
 import { ApprovalManager } from "./approvals.ts";
 import { ArtifactManager } from "./artifacts.ts";
 import { BrowserManager } from "./browser.ts";
@@ -16,8 +14,6 @@ import {
 	type SessionMode,
 } from "./db/types.ts";
 import { RuntimeEventBus } from "./events.ts";
-import { createPiFactoryStageExecutor } from "./factory-pi-executor.ts";
-import { LocalFactoryRunner } from "./factory-runner.ts";
 import { badRequest, notFound } from "./http-error.ts";
 import { McpManager } from "./mcp.ts";
 import { ModelConfigService, type ModelConfigFactory } from "./services/model-config-service.ts";
@@ -43,7 +39,6 @@ export class LocalAgentHost {
 	#models: ModelConfigService;
 	#sessionManager: SessionManager;
 	#turnExecutor: TurnExecutor;
-	#captainHost: ReturnType<typeof createNodeSqliteCaptainHost>;
 
 	readonly events: RuntimeEventBus;
 	readonly approvals: ApprovalManager;
@@ -51,8 +46,6 @@ export class LocalAgentHost {
 	readonly artifacts: ArtifactManager;
 	readonly browser: BrowserManager;
 	readonly mcp: McpManager;
-	readonly factory: CaptainCore;
-	readonly factoryRunner: LocalFactoryRunner;
 	/** Each session's way of working (Vibe or a blueprint) and its stage progress. */
 	readonly blueprints: SessionBlueprints;
 	/** Each session's team board: tasks, plans, posts, file claims and the flow events. */
@@ -118,26 +111,6 @@ export class LocalAgentHost {
 			sessions: this.#sessionManager,
 			listSessions: () => this.sessions(),
 		});
-
-		this.#captainHost = createNodeSqliteCaptainHost({
-			db: this.#db,
-			region: "local",
-			onEvent: (event) => this.events.emit("factory.event", event, event.runId),
-		});
-		this.factory = new CaptainCore({ host: this.#captainHost });
-		this.factoryRunner = new LocalFactoryRunner({
-			captain: this.factory,
-			stateDirectory,
-			stageExecutor: createPiFactoryStageExecutor({
-				stateDirectory,
-				resolveModelConfig: (provider) => this.#models.getConfig(provider),
-				processes: this.processes,
-				browser: this.browser,
-				artifacts: this.artifacts,
-				approvals: this.approvals,
-			}),
-		});
-		void this.factoryRunner.hydrateFromStorage();
 	}
 
 	// --- Projects & GitHub ---
@@ -375,8 +348,6 @@ export class LocalAgentHost {
 		this.processes.close();
 		this.browser.close();
 		this.mcp.close();
-		await this.factoryRunner.close();
-		this.#captainHost.close();
 		this.events.close();
 		this.#db.close();
 	}

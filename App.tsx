@@ -49,7 +49,7 @@ export default function App() {
 function AppInner() {
   const [lastView] = useState(readLastView)
   const { settings, error: settingsError, resolved, update } = useSettings()
-  const [screen, setScreen] = useState<Screen>(() => lastView.screen === "project" || lastView.screen === "factory" || lastView.screen === "work" ? lastView.screen : "inbox")
+  const [screen, setScreen] = useState<Screen>(() => lastView.screen === "project" || lastView.screen === "work" ? lastView.screen : String(lastView.screen) === "factory" ? "project" : "inbox")
   const [newSessionOpen, setNewSessionOpen] = useState(false)
   // Set when New session is opened from an issue (Issues panel): linked and filled in.
   const [newSessionIssue, setNewSessionIssue] = useState<GitHubIssue | null>(null)
@@ -138,7 +138,6 @@ function AppInner() {
     selectedProjectId,
     environmentVersion: env.environmentVersion,
     onClearSelectedProject: handleClearSelectedProject,
-    onError: model.setRuntimeError,
   })
 
   const [attemptsGroup, setAttemptsGroup] = useState<string | null>(null)
@@ -475,7 +474,6 @@ function AppInner() {
           archivedIds={sess.archivedIds}
           pinnedIds={sess.pinnedIds}
           unreadIds={sess.unreadIds}
-          factoryRuns={proj.factoryRuns}
           inbox={inbox.entries}
           inboxCount={inboxCount}
           runtime={model.runtime}
@@ -505,11 +503,6 @@ function AppInner() {
           onOpenProject={projectId => openProject(projectId, false)}
           onToggleExpandProject={id => setExpandedProjects(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]))}
           onOpenSession={openSession}
-          onOpenFactoryRun={(projectId, runId) => {
-            setSelectedProjectId(projectId)
-            proj.openStreamPane(projectId, `factory:${runId}`)
-            setScreen("project")
-          }}
           onCreateChatThread={mode => void sess.createChatThread(mode)}
           onToggleArchive={(id, archivedNow) => void sess.toggleArchive(id, archivedNow)}
           onOpenContextMenu={setContextMenu}
@@ -546,7 +539,6 @@ function AppInner() {
         projectActivity={proj.projectActivity}
         projectActivityError={proj.projectActivityError}
         projectRightPane={projectRightPane}
-        factoryRuns={proj.factoryRuns}
         openStreamIdsByProject={proj.openStreamIdsByProject}
         focusedStreamId={proj.focusedStreamId}
         connections={connections}
@@ -589,8 +581,6 @@ function AppInner() {
         newSessionIssue={newSessionIssue}
         onQuickStartStream={sess.quickStartStream}
         onSendQuickMessage={sess.sendQuickStreamMessage}
-        onStartFactoryRun={proj.startFactoryRunForProject}
-        onFactoryRunAction={proj.factoryRunAction}
         onUnarchiveSession={id => void sess.toggleArchive(id, true)}
         onStartNewSession={sess.startNewSession}
         onDeleteSession={s => void sess.deleteSession(s)}

@@ -52,12 +52,13 @@ test("the main agent (Pi) can run a subagent on Codex and gets its report back",
 	execFileSync("git", ["init", "-q"], { cwd: repoDir });
 	writeFileSync(join(repoDir, "app.ts"), "export const answer = 41;\n");
 	const started: Array<{ harness: string; cwd: string; readOnly: boolean; task: string }> = [];
+	const stopped: Array<[string, string]> = [];
 	const runner: ExternalSubagentRunner = {
 		installed: () => new Set(["pi", "codex"]),
 		start: input => { started.push(input); },
 		message: () => undefined,
 		wait: async () => ({ status: "completed", text: "Changed answer to 42 and ran the tests." }),
-		stop: () => true,
+		stop: (sessionId, conversationId) => { stopped.push([sessionId, conversationId]); return true; },
 	};
 	setExternalSubagentRunner(runner, () => DEFAULT_SUBAGENT_POLICY);
 	const faux = fauxProvider();
@@ -86,6 +87,14 @@ test("the main agent (Pi) can run a subagent on Codex and gets its report back",
 		const timeline = await host.getTimeline(taskId);
 		const call = timeline.items.flatMap(item => (item.kind === "assistant" ? item.toolCalls : [])).find(tool => tool.name === "spawn_subagent");
 		assert.match(call?.output ?? "", /Changed answer to 42/, "the main agent got the Codex subagent's report");
+
+		// The main agent's stop_subagent tool ends the Codex run too, like the Stop button does.
+		faux.setResponses([
+			fauxAssistantMessage(fauxToolCall("stop_subagent", { subagentId: String(agents[0].id) }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("Stopped it."),
+		]);
+		await host.send("coding", { content: "Stop the fixer", model: faux.getModel().id, reasoning: "none" }, taskId);
+		assert.deepEqual(stopped, [[taskId, String(agents[0].id)]]);
 	} finally {
 		setExternalSubagentRunner(null);
 		await host.close();

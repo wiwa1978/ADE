@@ -18,8 +18,6 @@ import { searchGitHubRepositories } from "../hooks/useProjects"
 import { SplitWorkspace } from "../workspace/SplitWorkspace"
 import { NewSessionView } from "../workspace/NewSessionView"
 import { ProjectStreamsWorkspace } from "../projects/ProjectStreamsWorkspace"
-import { FactoryView } from "../factory/FactoryView"
-import type { FactoryRunDetail } from "../factory/types"
 import { AttemptsView } from "../attempts/AttemptsView"
 import { resolveKeybindings } from "../keybindings"
 
@@ -50,7 +48,6 @@ type AppMainColumnProps = {
   projectActivity: ProjectActivity | null
   projectActivityError: string
   projectRightPane: "files" | "artifacts" | "settings" | null
-  factoryRuns: FactoryRunDetail[]
   openStreamIdsByProject: Record<string, string[]>
   focusedStreamId: string | null
   connections: ReturnType<typeof useConnections>
@@ -94,8 +91,6 @@ type AppMainColumnProps = {
   onOpenEnvironmentPalette: () => void
   onQuickStartStream: (project: Project, prompt: string) => Promise<void>
   onSendQuickMessage: (sess: Conversation, text: string) => Promise<void>
-  onStartFactoryRun: (project: Project, opts?: { issueNumber?: number; issueTitle?: string; issueBody?: string }) => Promise<void>
-  onFactoryRunAction: (runId: string, action: "step" | "approve" | "pause" | "steer", note?: string) => Promise<void>
   onUnarchiveSession: (id: string) => void
   onStartNewSession: (input: { projectId: string | null; kind: "none" | "checkout" | "worktree"; repository: string; prompt: string; githubIssue?: GitHubIssue; engine?: "pi" | "claude-code" | "codex"; startFrom?: StartFrom; title?: string; attempts?: Array<"pi" | "claude-code" | "codex">; runOn?: "local" | "docker" | "wsl" | "ssh" | "boat"; blueprintId?: string }) => Promise<void>
   onDeleteSession: (sess: Conversation) => void
@@ -164,7 +159,6 @@ export function AppMainColumn(props: AppMainColumnProps) {
     projectActivity,
     projectActivityError,
     projectRightPane,
-    factoryRuns,
     openStreamIdsByProject,
     focusedStreamId,
     connections,
@@ -243,21 +237,6 @@ export function AppMainColumn(props: AppMainColumnProps) {
           onDeleteApprovalRule={stream.deleteApprovalRule}
           onAddApprovalRule={stream.addApprovalRule}
         />
-      ) : screen === "factory" ? (
-        <FactoryView
-          projects={projects}
-          selectedProjectId={selectedProjectId}
-          modelCatalog={effectiveCatalog}
-          githubLogin={connections.githubConnection?.login ?? null}
-          environmentId={activeEnvironmentId}
-          terminalFontSize={settings.terminalFontSize}
-          terminalScrollback={settings.terminalScrollback}
-          browserState={stream.browserState}
-          onSelectProject={props.onSelectProject}
-          onProjectSaved={props.onProjectSaved}
-          onBrowserStateChange={stream.setBrowserState}
-          onOpenExternal={stream.openExternalBrowser}
-        />
       ) : screen === "attempts" && props.attemptsGroup ? (
         <AttemptsView
           group={props.attemptsGroup}
@@ -275,7 +254,6 @@ export function AppMainColumn(props: AppMainColumnProps) {
             project={selectedProject}
             sessions={codingTasks.filter(t => t.projectId === selectedProject.id && !archivedIds.includes(t.id))}
             archivedSessions={codingTasks.filter(t => t.projectId === selectedProject.id && archivedIds.includes(t.id))}
-            factoryRuns={factoryRuns.filter(r => r.run.projectId === selectedProject.id)}
             openStreamIds={openStreamIdsByProject[selectedProject.id] ?? []}
             focusedStreamId={focusedStreamId}
             activity={projectActivity}
@@ -289,7 +267,6 @@ export function AppMainColumn(props: AppMainColumnProps) {
             onOpenStreamPane={streamId => props.onOpenStreamPane(selectedProject.id, streamId)}
             onMaximizeSession={id => { props.onClearUnread(id); props.onOpenSession(id) }}
             onOpenStartedSession={async id => { await props.onReloadSessions(); props.onOpenSession(id) }}
-            onMaximizeFactoryRun={() => { props.onSelectProject(selectedProject.id); props.onOpenScreen("factory") }}
             onQuickStartStream={async prompt => {
               if (!prompt.trim()) {
                 props.onOpenNewSession(selectedProject.id)
@@ -298,8 +275,6 @@ export function AppMainColumn(props: AppMainColumnProps) {
               await props.onQuickStartStream(selectedProject, prompt)
             }}
             onSendQuickMessage={props.onSendQuickMessage}
-            onStartFactoryRun={opts => props.onStartFactoryRun(selectedProject, opts)}
-            onFactoryRunAction={props.onFactoryRunAction}
             onUnarchiveSession={props.onUnarchiveSession}
             inboxEntries={props.inboxEntries}
             onSessionContextMenu={props.onSessionContextMenu}

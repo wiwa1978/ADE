@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react"
 import { FolderPlus, Inbox, PanelLeft, Search, Settings2, Smartphone } from "lucide-react"
 import type { Conversation, RuntimeHealth } from "../../app-types"
 import type { Project } from "../../ProjectsView"
-import type { FactoryRunDetail } from "../factory/types"
 import type { InboxEntry } from "../session-state"
 import { Sidebar, type SidebarSelection } from "./Sidebar"
 import type { ContextMenuTarget } from "./SidebarContextMenu"
@@ -22,7 +21,6 @@ type AppSidebarProps = {
   archivedIds: string[]
   pinnedIds: string[]
   unreadIds: string[]
-  factoryRuns: FactoryRunDetail[]
   inbox: Record<string, InboxEntry>
   inboxCount: number
   runtime: RuntimeHealth | null
@@ -44,7 +42,6 @@ type AppSidebarProps = {
   onOpenProject: (projectId: string) => void
   onToggleExpandProject: (projectId: string) => void
   onOpenSession: (session: Conversation) => void
-  onOpenFactoryRun: (projectId: string, runId: string) => void
   onCreateChatThread: (mode: "coding" | "personal") => void
   onToggleArchive: (id: string, archivedNow?: boolean) => void
   onOpenContextMenu: (target: ContextMenuTarget) => void
@@ -160,7 +157,6 @@ export function AppSidebar(props: AppSidebarProps) {
         sessionsByProject={Object.fromEntries(props.visibleProjects.map(project => [project.id, sortPinnedFirst(props.codingTasks.filter(s => s.projectId === project.id && !props.archivedIds.includes(s.id)))]))}
         ungroupedSessions={props.ungroupedTasks}
         chats={props.chats}
-        factoryRunsByProject={Object.fromEntries(props.visibleProjects.map(project => [project.id, props.factoryRuns.filter(r => r.run.projectId === project.id)]))}
         archivedProjects={props.archivedProjects}
         archivedSessions={props.archivedSessions}
         inbox={props.inbox}
@@ -186,7 +182,6 @@ export function AppSidebar(props: AppSidebarProps) {
         onOpenProject={id => { closeIfMobile(); props.onOpenProject(id) }}
         onToggleProject={props.onToggleExpandProject}
         onOpenSession={s => { closeIfMobile(); props.onOpenSession(s) }}
-        onOpenFactoryRun={(pid, rid) => { closeIfMobile(); props.onOpenFactoryRun(pid, rid) }}
         onNewChat={() => { closeIfMobile(); props.onCreateChatThread("coding") }}
         onContextMenu={props.onOpenContextMenu}
         onRenameChange={props.onChangeRenameText}

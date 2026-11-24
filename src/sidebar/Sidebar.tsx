@@ -1,7 +1,6 @@
 import { useState } from "react"
-import { Archive, ChevronDown, ChevronRight, Folder, FolderGit2, GitBranch, MessageCircle, MessageSquare, Pin, Plus, Server, Workflow, X } from "lucide-react"
+import { Archive, ChevronDown, ChevronRight, Folder, FolderGit2, GitBranch, MessageCircle, MessageSquare, Pin, Plus, Server, X } from "lucide-react"
 import type { Conversation } from "../../app-types"
-import type { FactoryRunDetail } from "../factory/types"
 import type { Project } from "../../ProjectsView"
 import { sessionStateIcon, sessionStateInfo, type InboxEntry } from "../session-state"
 import type { KeybindingMap } from "../keybindings"
@@ -28,7 +27,6 @@ export type SidebarProps = {
   sessionsByProject: Record<string, Conversation[]>
   ungroupedSessions: Conversation[]
   chats: Conversation[]
-  factoryRunsByProject: Record<string, FactoryRunDetail[]>
   archivedProjects: Project[]
   archivedSessions: Conversation[]
   inbox: Record<string, InboxEntry>
@@ -54,7 +52,6 @@ export type SidebarProps = {
   onOpenProject: (projectId: string) => void
   onToggleProject: (projectId: string) => void
   onOpenSession: (session: Conversation) => void
-  onOpenFactoryRun: (projectId: string, runId: string) => void
   onNewChat: () => void
   onContextMenu: (target: ContextTarget) => void
   onRenameChange: (text: string) => void
@@ -268,7 +265,6 @@ export function Sidebar(props: SidebarProps) {
                 const expanded = props.expandedProjects.includes(project.id)
                 const rawSessions = props.sessionsByProject[project.id] ?? []
                 const sessions = (prefs.unreadOnly || prefs.pinnedOnly || q) ? rawSessions.filter(sessionMatchesFilter) : rawSessions
-                const runs = props.factoryRunsByProject[project.id] ?? []
                 const attention = rawSessions.filter(session => props.inbox[session.id]?.needsYou).length
                 const working = rawSessions.filter(session => props.inbox[session.id]?.state === "working" || session.status === "working").length
                 return (
@@ -314,25 +310,7 @@ export function Sidebar(props: SidebarProps) {
                     {expanded ? (
                       <div className="flex flex-col gap-0.5 mt-0.5">
                         {sessions.map(session => <SessionRow key={session.id} session={session} props={props} child />)}
-                        {runs.map(run => (
-                          <div
-                            key={run.run.runId}
-                            role="button"
-                            tabIndex={0}
-                            className="ade-nav-row ade-nav-row-child"
-                            onClick={() => props.onOpenFactoryRun(project.id, run.run.runId)}
-                            onKeyDown={event => { if (event.key === "Enter") props.onOpenFactoryRun(project.id, run.run.runId) }}
-                            title="Software Factory run"
-                          >
-                            <span className={`ade-state-dot is-${run.run.status === "running" ? "running" : run.run.status === "failed" ? "failed" : run.run.status === "completed" ? "ok" : "waiting"}`} />
-                            <Workflow className="size-3 shrink-0 opacity-70" />
-                            <span className="ade-truncate flex-1">
-                              {run.run.issueRef?.number ? `#${run.run.issueRef.number} ` : ""}
-                              {run.run.issueRef?.title || run.taskPrompt || run.run.runId.slice(0, 8)}
-                            </span>
-                          </div>
-                        ))}
-                        {sessions.length === 0 && runs.length === 0 ? (
+                        {sessions.length === 0 ? (
                           <button
                             type="button"
                             className="ade-nav-row ade-nav-row-child opacity-60 hover:opacity-100"

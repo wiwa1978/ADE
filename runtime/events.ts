@@ -16,8 +16,7 @@ export type RuntimeEventType =
 	| "browser.update"
 	| "browser.frame"
 	| "diff.update"
-	| "mcp.update"
-	| "factory.event";
+	| "mcp.update";
 
 export type RuntimeEvent = {
 	type: RuntimeEventType;

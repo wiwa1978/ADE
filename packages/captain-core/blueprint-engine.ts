@@ -163,7 +163,7 @@ export function completeStage(
       const targetIdx = blueprint.stages.findIndex((s) => s.id === stage.onChangesRequestedStageId);
       if (targetIdx !== -1) {
         nextRun.auditLoopbacksUsed += 1;
-        stageState.status = "changes_requested";
+        // Every stage from the target through this review runs again (this one included).
         for (let i = targetIdx; i <= idx; i++) {
           if (!nextRun.disabledStageIds.includes(blueprint.stages[i].id)) {
             nextRun.stages[i].status = "pending";
@@ -224,7 +224,14 @@ export function applyStageApproval(
   }
 
   if (decision === "request_changes") {
-    // Re-run the current stage (for an "after" gate)
+    // Before a stage starts, "changes" means "not yet": there is nothing to redo, so it keeps waiting
+    // for approval (the feedback goes to the agent; the user approves again when satisfied).
+    if (stageState.attempt === 0 && stage.approvalGate === "before") {
+      stageState.status = "awaiting_approval";
+      nextRun.status = "awaiting_human";
+      return nextRun;
+    }
+    // After a stage: run it again.
     stageState.status = "pending";
     nextRun.status = "running";
     return nextRun;

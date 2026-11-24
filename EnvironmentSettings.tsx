@@ -200,7 +200,7 @@ export function EnvironmentSettings({
   const remoteEndpoint = getCaptainEndpoint()
 
   return <section className="settings-section environment-settings">
-    <div className="section-title"><h2>Environments</h2><p>Choose where ADE stores sessions, runs the Software Factory, and opens coding workspaces.</p></div>
+    <div className="section-title"><h2>Environments</h2><p>Choose where ADE stores sessions and opens coding workspaces.</p></div>
     {error && !addOpen && <p className="error environment-error" role="alert">{error}</p>}
     {notice && <p className="runtime-notice ready" role="status">{notice}</p>}
 

@@ -22,7 +22,8 @@ async function runGh(args: string[]): Promise<string> {
 	}
 }
 
-async function readLocalGhToken(): Promise<string | null> {
+/** The token of the user's `gh` login on github.com, or null when they aren't signed in. */
+export async function readLocalGhToken(): Promise<string | null> {
 	try {
 		const { stdout } = await execute("gh", ["auth", "token", "--hostname", "github.com"], {
 			timeout: 5000,

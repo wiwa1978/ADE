@@ -57,7 +57,7 @@ export type {
 } from "./packages/protocol/index.ts"
 import type { GitHubIssue } from "./packages/protocol/index.ts"
 
-export type Screen = "inbox" | "projects" | "project" | "work" | "factory" | "settings" | "worktrees" | "attempts"
+export type Screen = "inbox" | "projects" | "project" | "work" | "settings" | "worktrees" | "attempts"
 
 export type TaskStart = {
   id: string

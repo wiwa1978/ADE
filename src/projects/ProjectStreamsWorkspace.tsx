@@ -10,38 +10,32 @@ import { CalendarClock,
   FolderTree,
   GitBranch,
   GitPullRequest,
-  KanbanSquare,
   LayoutGrid,
   ListTodo,
   Plus,
   Settings2,
   Square,
   Trash2,
-  Workflow,
 } from "lucide-react"
 import type { Conversation } from "../../app-types"
 import type { FeatureAgent } from "../../FeatureAgents"
 import { BUILTIN_BLUEPRINTS } from "../../packages/blueprints/index.ts"
 import type { Project, ProjectActivity } from "../../ProjectsView"
-import { FactoryKanban } from "../factory/FactoryKanban"
-import { FactoryIssuesList, type ProjectGitHubIssue } from "../factory/FactoryIssuesList"
-import type { FactoryRunDetail } from "../factory/types"
+import { ProjectIssuesList, type ProjectGitHubIssue } from "./ProjectIssuesList"
 import { ProjectPullRequests } from "./ProjectPullRequests"
 import { ProjectSessionList } from "./ProjectSessionList"
 import type { InboxEntry } from "../session-state"
 import { LiveSessionPane } from "./LiveSessionPane"
-import { LiveFactoryRunPane } from "./LiveFactoryRunPane"
 import { ProjectSubagentsTab } from "./ProjectSubagentsTab"
 import { ProjectAutomationsTab } from "./ProjectAutomationsTab"
 
-type ProjectTab = "sessions" | "kanban" | "issues" | "pulls" | "subagents" | "automations"
+type ProjectTab = "sessions" | "issues" | "pulls" | "subagents" | "automations"
 type StreamLayout = "single" | "split" | "grid"
 
 export function ProjectStreamsWorkspace({
   project,
   sessions,
   archivedSessions,
-  factoryRuns,
   openStreamIds,
   focusedStreamId,
   activity,
@@ -55,11 +49,8 @@ export function ProjectStreamsWorkspace({
   onOpenStreamPane,
   onMaximizeSession,
   onOpenStartedSession,
-  onMaximizeFactoryRun,
   onQuickStartStream,
   onSendQuickMessage,
-  onStartFactoryRun,
-  onFactoryRunAction,
   onUnarchiveSession,
   onDeleteSession,
   onOpenAgent,
@@ -71,7 +62,6 @@ export function ProjectStreamsWorkspace({
   project: Project
   sessions: Conversation[]
   archivedSessions: Conversation[]
-  factoryRuns: FactoryRunDetail[]
   openStreamIds: string[]
   focusedStreamId: string | null
   activity: ProjectActivity | null
@@ -86,11 +76,8 @@ export function ProjectStreamsWorkspace({
   onMaximizeSession: (sessionId: string) => void
   /** Open a session that was just started outside the session list (it isn't loaded yet). */
   onOpenStartedSession?: (sessionId: string) => Promise<void>
-  onMaximizeFactoryRun: (runId: string) => void
   onQuickStartStream: (prompt: string) => Promise<void>
   onSendQuickMessage: (session: Conversation, text: string) => Promise<void>
-  onStartFactoryRun: (opts?: { issueNumber?: number; issueTitle?: string; issueBody?: string }) => Promise<void>
-  onFactoryRunAction: (runId: string, action: "step" | "approve" | "pause" | "steer", note?: string) => Promise<void>
   onUnarchiveSession: (sessionId: string) => void
   onDeleteSession: (session: Conversation) => void
   onOpenAgent: (sessionId: string, agent: FeatureAgent) => void
@@ -115,14 +102,10 @@ export function ProjectStreamsWorkspace({
   const repoSlug = project.githubUrl?.replace(/^https:\/\/github\.com\//i, "") ?? null
 
   const sessionMap = new Map(sessions.map(s => [s.id, s]))
-  const runMap = new Map(factoryRuns.map(r => [`factory:${r.run.runId}`, r]))
 
-  const allAvailableStreamIds = [
-    ...sessions.map(s => s.id),
-    ...factoryRuns.map(r => `factory:${r.run.runId}`),
-  ]
+  const allAvailableStreamIds = sessions.map(s => s.id)
 
-  const activePaneIds = openStreamIds.filter(id => sessionMap.has(id) || runMap.has(id))
+  const activePaneIds = openStreamIds.filter(id => sessionMap.has(id))
   const visiblePaneIds =
     activePaneIds.length > 0
       ? layout === "single"
@@ -132,14 +115,7 @@ export function ProjectStreamsWorkspace({
 
   const hiddenStreamIds = allAvailableStreamIds.filter(id => !visiblePaneIds.includes(id))
 
-  const factorySubagents = factoryRuns.flatMap(detail =>
-    detail.subagents.map(sa => ({
-      ...sa,
-      runId: detail.run.runId,
-      runTitle: detail.run.issueRef?.title || detail.taskPrompt || detail.run.runId.slice(0, 8),
-    })),
-  )
-  const totalSubagentsCount = (activity?.agents.length ?? 0) + factorySubagents.length
+  const totalSubagentsCount = activity?.agents.length ?? 0
 
   async function handleQuickLaunch() {
     const trimmed = quickPrompt.trim()
@@ -167,14 +143,6 @@ export function ProjectStreamsWorkspace({
           {project.modelProfile ? <span className="ade-pill">{project.modelProfile}</span> : null}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            className="sf-btn-secondary !h-8"
-            onClick={() => void onStartFactoryRun()}
-            title="Launch a new Software Factory run on this project"
-          >
-            <Workflow className="size-3.5" /> Factory run
-          </button>
           <button
             type="button"
             className="sf-btn-primary !h-8"
@@ -224,12 +192,7 @@ export function ProjectStreamsWorkspace({
           <button type="button" role="tab" aria-selected={activeTab === "sessions"} className={`ade-project-tab ${activeTab === "sessions" ? "is-active" : ""}`} onClick={() => setActiveTab("sessions")}>
             <Columns2 className="size-3.5" />
             <span>Sessions</span>
-            <span className="ade-count-badge">{sessions.length + factoryRuns.length}</span>
-          </button>
-          <button type="button" role="tab" aria-selected={activeTab === "kanban"} className={`ade-project-tab ${activeTab === "kanban" ? "is-active" : ""}`} onClick={() => setActiveTab("kanban")}>
-            <KanbanSquare className="size-3.5" />
-            <span>Factory</span>
-            <span className="ade-count-badge">{factoryRuns.length}</span>
+            <span className="ade-count-badge">{sessions.length}</span>
           </button>
           <button type="button" role="tab" aria-selected={activeTab === "issues"} className={`ade-project-tab ${activeTab === "issues" ? "is-active" : ""}`} onClick={() => setActiveTab("issues")}>
             <ListTodo className="size-3.5" />
@@ -277,10 +240,8 @@ export function ProjectStreamsWorkspace({
           <ProjectSessionList
             projectName={project.name}
             sessions={sessions}
-            factoryRuns={factoryRuns}
             entries={inboxEntries}
             onOpenSession={onMaximizeSession}
-            onOpenFactoryRun={runId => { onOpenStreamPane(`factory:${runId}`); setSessionView("side") }}
             onQuickStart={onQuickStartStream}
             onSessionContextMenu={onSessionContextMenu}
           />
@@ -315,9 +276,6 @@ export function ProjectStreamsWorkspace({
                 </button>
               </form>
               <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
-                <button type="button" className="sf-btn-secondary" onClick={() => void onStartFactoryRun()}>
-                  <Workflow className="size-3.5" /> Start Software Factory Run
-                </button>
                 <button type="button" className="sf-btn-ghost" onClick={() => setActiveTab("issues")}>
                   <ListTodo className="size-3.5" /> Browse GitHub Issues
                 </button>
@@ -337,20 +295,6 @@ export function ProjectStreamsWorkspace({
                       onMaximize={() => onMaximizeSession(sess.id)}
                       onClose={() => onCloseStreamPane(sess.id)}
                       onSendQuickMessage={onSendQuickMessage}
-                    />
-                  )
-                }
-                const runDetail = runMap.get(streamId)
-                if (runDetail) {
-                  return (
-                    <LiveFactoryRunPane
-                      key={streamId}
-                      detail={runDetail}
-                      focused={focusedStreamId === streamId}
-                      onFocus={() => onFocusStream(streamId)}
-                      onMaximize={() => onMaximizeFactoryRun(runDetail.run.runId)}
-                      onClose={() => onCloseStreamPane(streamId)}
-                      onAction={onFactoryRunAction}
                     />
                   )
                 }
@@ -398,26 +342,10 @@ export function ProjectStreamsWorkspace({
         </div>
       ) : null}
 
-      {activeTab === "kanban" ? (
-        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-          <FactoryKanban
-            runs={factoryRuns}
-            selectedRunId={null}
-            onSelectRun={runId => onMaximizeFactoryRun(runId)}
-            onAutoRun={runId => void onFactoryRunAction(runId, "step")}
-            onNewRun={() => void onStartFactoryRun()}
-          />
-        </div>
-      ) : null}
-
       {activeTab === "issues" ? (
         <div className="flex-1 min-h-0 flex flex-col overflow-auto">
-          <FactoryIssuesList
+          <ProjectIssuesList
             project={project}
-            onStartFromIssue={async issue => {
-              await onStartFactoryRun({ issueNumber: issue.number, issueTitle: issue.title, issueBody: issue.body })
-              setActiveTab("kanban")
-            }}
             onStartSessionFromIssue={onStartSessionFromIssue}
             onOpenProjectSettings={onToggleSettings}
           />
@@ -447,10 +375,8 @@ export function ProjectStreamsWorkspace({
 
       {activeTab === "subagents" ? (
         <ProjectSubagentsTab
-          factorySubagents={factorySubagents}
           activity={activity}
           activityError={activityError}
-          onMaximizeFactoryRun={onMaximizeFactoryRun}
           onOpenAgent={onOpenAgent}
         />
       ) : null}

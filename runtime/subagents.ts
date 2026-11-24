@@ -421,11 +421,13 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 		}),
 		replay: "safe",
 		async execute(args, api, ctx) {
+			// A subagent on Claude Code or Codex is a CLI run (or waiting in the queue): end that too.
+			const endedExternal = externalSubagents()?.stop(opts.sessionId, String(args.subagentId)) ?? false;
 			const child = await api.conversation(toConvId(args.subagentId), ctx);
-			if (!child) throw new Error(`Subagent ${args.subagentId} not found.`);
-			await child.abort(ctx);
+			if (!child && !endedExternal) throw new Error(`Subagent ${args.subagentId} not found.`);
+			if (child) await child.abort(ctx);
 			opts.events?.emit("subagents.update", { sessionId: opts.sessionId, subagentId: String(args.subagentId) }, opts.sessionId);
-			return { output: [{ type: "text", text: `Aborted subagent ${args.subagentId}.` }] };
+			return { output: [{ type: "text", text: `Stopped subagent ${args.subagentId}.` }] };
 		},
 	});
 

@@ -2,7 +2,6 @@ import type {
   BlueprintStage,
   FailureObservation,
   RepoMicroSkill,
-  TokenSavingsReport,
   ToolDescriptor,
   ToolUsageRecord,
 } from "../protocol/index.ts";
@@ -136,27 +135,4 @@ export class FailureLoopWatchdog {
   get interventionCount(): number {
     return this.#interventionCount;
   }
-}
-
-export function estimateTokenSavings(params: {
-  prunedToolTokensPerTurn: number;
-  turnsExecuted: number;
-  loopInterventions: number;
-  sandboxMinutesAvoided: number;
-  blendedInputUsdPerMillion?: number;
-}): TokenSavingsReport {
-  const rate = params.blendedInputUsdPerMillion ?? 3.0;
-  const fromToolPruning = params.prunedToolTokensPerTurn * params.turnsExecuted;
-  // Conservative estimate: each prevented failure loop saves ~12k tokens of wasted retries
-  const fromLoopInterventions = params.loopInterventions * 12_000;
-  const estimatedTokensSaved = fromToolPruning + fromLoopInterventions;
-  const estimatedUsdSaved = Number(((estimatedTokensSaved / 1_000_000) * rate).toFixed(4));
-
-  return {
-    prunedToolTokensPerTurn: params.prunedToolTokensPerTurn,
-    loopInterventions: params.loopInterventions,
-    sandboxMinutesAvoided: params.sandboxMinutesAvoided,
-    estimatedTokensSaved,
-    estimatedUsdSaved,
-  };
 }

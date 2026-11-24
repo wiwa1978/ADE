@@ -14,16 +14,14 @@ export type ProjectGitHubIssue = {
   updatedAt: string
 }
 
-export function FactoryIssuesList({
+export function ProjectIssuesList({
   project,
   onOpenProjectSettings,
-  onStartFromIssue,
   onStartSessionFromIssue,
 }: {
   project: Project | null
   onOpenProjectSettings: () => void
-  onStartFromIssue: (issue: ProjectGitHubIssue) => Promise<void>
-  /** Start a regular agent session (worktree + chat) for the issue. */
+  /** Start an agent session (worktree + chat) for the issue. */
   onStartSessionFromIssue?: (issue: ProjectGitHubIssue) => Promise<void>
 }) {
   const [issues, setIssues] = useState<ProjectGitHubIssue[]>([])
@@ -180,22 +178,6 @@ export function FactoryIssuesList({
                     {startingNumber === issue.number ? "Starting…" : "Start session"}
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  className={onStartSessionFromIssue ? "sf-btn-secondary" : "sf-btn-primary"}
-                  disabled={startingNumber !== null}
-                  onClick={async () => {
-                    setStartingNumber(issue.number)
-                    try {
-                      await onStartFromIssue(issue)
-                    } finally {
-                      setStartingNumber(null)
-                    }
-                  }}
-                >
-                  {onStartSessionFromIssue ? null : <Play className="size-3.5" />}
-                  Factory run
-                </button>
               </div>
             </div>
           ))

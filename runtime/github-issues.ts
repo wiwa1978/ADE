@@ -23,10 +23,13 @@ export async function lookupGitHubIssue({
 	project,
 	url,
 	fetcher = fetch,
+	token: readToken = async () => null,
 }: {
 	project: ProjectRepoRef;
 	url: unknown;
 	fetcher?: typeof fetch;
+	/** The user's GitHub login (from `gh`), so private repositories' issues can be read. */
+	token?: () => Promise<string | null>;
 }): Promise<LinkedGitHubIssue> {
 	if (!project) throw badRequest("Choose a project linked to a GitHub repository.");
 	const repository = parseRepository(project.githubUrl);
@@ -49,17 +52,21 @@ export async function lookupGitHubIssue({
 
 	const number = Number(match[3]);
 	if (!Number.isSafeInteger(number)) throw badRequest("The issue number is invalid.");
+	const token = await readToken().catch(() => null);
 	let response;
 	try {
 		response = await fetcher(`https://api.github.com/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/issues/${number}`, {
-			headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "ADE-local-runtime" },
+			headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "ADE-local-runtime", ...(token ? { authorization: `Bearer ${token}` } : {}) },
 			signal: AbortSignal.timeout(10_000),
 		});
 	} catch {
 		throw badGateway("GitHub could not be reached to read this issue.");
 	}
 	if (response.status === 404 || response.status === 410) {
-		throw notFound("Issue not found. ADE's first issue flow can read public GitHub issues only.");
+		throw notFound(token
+			? "Issue not found, or your GitHub login can't see it."
+			: "Issue not found. For a private repository, sign in with `gh auth login` so ADE can read it."
+		);
 	}
 	if (!response.ok) {
 		throw badGateway(`GitHub issue lookup failed with status ${response.status}.`);

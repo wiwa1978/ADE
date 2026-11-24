@@ -1,26 +1,21 @@
 import { useState } from "react"
-import { GitBranch, Play, Workflow } from "lucide-react"
+import { GitBranch, Play } from "lucide-react"
 import type { Conversation } from "../../app-types"
-import type { FactoryRunDetail } from "../factory/types"
 import { relativeTime, sessionStateInfo, type InboxEntry } from "../session-state"
 
 /** The project's sessions as a scannable list: what each agent is doing and what it needs. */
 export function ProjectSessionList({
   projectName,
   sessions,
-  factoryRuns,
   entries,
   onOpenSession,
-  onOpenFactoryRun,
   onQuickStart,
   onSessionContextMenu,
 }: {
   projectName: string
   sessions: Conversation[]
-  factoryRuns: FactoryRunDetail[]
   entries: Record<string, InboxEntry>
   onOpenSession: (sessionId: string) => void
-  onOpenFactoryRun: (runId: string) => void
   onQuickStart: (prompt: string) => Promise<void>
   onSessionContextMenu?: (session: Conversation, x: number, y: number) => void
 }) {
@@ -61,7 +56,7 @@ export function ProjectSessionList({
       </form>
       {error ? <div className="ade-banner-error">{error}</div> : null}
 
-      {sorted.length === 0 && factoryRuns.length === 0 ? (
+      {sorted.length === 0 ? (
         <p className="ade-inbox-empty">No sessions yet. Describe a task above, or start one from a GitHub issue.</p>
       ) : (
         <ul className="ade-session-rows">
@@ -96,18 +91,6 @@ export function ProjectSessionList({
               </li>
             )
           })}
-          {factoryRuns.map(run => (
-            <li key={run.run.runId}>
-              <button type="button" onClick={() => onOpenFactoryRun(run.run.runId)}>
-                <span className={`ade-state-dot is-${run.run.status === "running" ? "running" : run.run.status === "failed" ? "failed" : run.run.status === "completed" ? "ok" : "waiting"}`} aria-hidden="true" />
-                <span className="ade-inbox-main">
-                  <strong className="ade-truncate"><Workflow className="inline size-3.5" /> {run.run.issueRef?.title || run.taskPrompt || "Factory run"}</strong>
-                  <small>Software Factory run{run.run.issueRef?.number ? ` · issue #${run.run.issueRef.number}` : ""}</small>
-                </span>
-                <span className="ade-row-tag">{run.run.status}</span>
-              </button>
-            </li>
-          ))}
         </ul>
       )}
     </div>

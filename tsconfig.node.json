@@ -23,14 +23,7 @@
   "include": [
     "vite.config.ts",
     "runtime/**/*.ts",
-    "scripts/**/*.ts",
-    "packages/host-node/**/*.ts",
-    "packages/host-remote/**/*.ts",
-    "packages/sandbox-docker/**/*.ts",
-    "packages/sandbox-remote/**/*.ts",
-    "packages/github-local/**/*.ts",
-    "packages/relay/**/*.ts",
-    "packages/gateway/**/*.ts"
+    "scripts/**/*.ts"
   ],
   "exclude": ["runtime/*.test.ts", "scripts/*.test.ts", "packages/**/*.test.ts"]
 }

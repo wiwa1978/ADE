@@ -225,7 +225,8 @@ export class McpManager {
 		}
 	}
 
-	list(): McpServerStatus[] {
+	/** The servers with their real env and headers: for connecting only, never sent to the app. */
+	#all(): McpServerStatus[] {
 		const rows = this.#db.prepare("SELECT * FROM mcp_servers ORDER BY createdAt ASC").all() as unknown as McpServerRow[];
 		return rows.map(row => {
 			let cfg: StoredMcpConfig = {};
@@ -250,6 +251,16 @@ export class McpManager {
 				tools: rt?.tools ?? [],
 			};
 		});
+	}
+
+	/** The servers as the app sees them: env and header values are masked (names stay), as are secrets in the URL. */
+	list(): McpServerStatus[] {
+		return this.#all().map(server => ({
+			...server,
+			env: maskValues(server.env),
+			headers: maskValues(server.headers),
+			url: server.url ? maskUrl(server.url) : server.url,
+		}));
 	}
 
 	save(input: Partial<McpServerConfig>): McpServerStatus {
@@ -290,7 +301,7 @@ export class McpManager {
 	}
 
 	async connect(id: string): Promise<McpServerStatus> {
-		const server = this.list().find(s => s.id === id);
+		const server = this.#all().find(s => s.id === id);
 		if (!server) throw notFound("MCP server not found.");
 		this.disconnect(id);
 		const client = server.transport === "http"
@@ -372,5 +383,27 @@ export class McpManager {
 		for (const id of [...this.#runtime.keys()]) {
 			this.disconnect(id);
 		}
+	}
+}
+
+export const MASKED = "••••••";
+
+/** Keep the names, hide the values: what a stored secret looks like to the app. */
+export function maskValues(values: Record<string, string> | undefined): Record<string, string> {
+	return Object.fromEntries(Object.keys(values ?? {}).map(key => [key, MASKED]));
+}
+
+/** Hide credentials in a URL: user:password@ and query values (tokens are often passed as ?key=…). */
+export function maskUrl(url: string) {
+	try {
+		const parsed = new URL(url);
+		if (parsed.username || parsed.password) {
+			parsed.username = "";
+			parsed.password = "";
+		}
+		for (const key of [...parsed.searchParams.keys()]) parsed.searchParams.set(key, MASKED);
+		return parsed.toString().replaceAll(encodeURIComponent(MASKED), MASKED);
+	} catch {
+		return url;
 	}
 }
