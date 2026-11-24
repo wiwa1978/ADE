@@ -12,6 +12,8 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # Windows is not a shipping target yet: it reports, but a failure there does not fail the build.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
