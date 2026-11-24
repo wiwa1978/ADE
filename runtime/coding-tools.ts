@@ -17,7 +17,7 @@ export function workspacePath(
 	{ mustExist = false }: { mustExist?: boolean } = {},
 ): string {
 	if (typeof requested !== "string" || !requested || requested.includes("\0")) throw new Error("Provide a workspace-relative path.");
-	const canonicalRoot = realpathSync(root);
+	const canonicalRoot = realpathSync.native(root);
 	const target = resolve(canonicalRoot, requested);
 	const local = relative(canonicalRoot, target);
 	if (isAbsolute(local) || local === ".." || local.startsWith(`..${sep}`)) throw new Error("Path is outside the task workspace.");

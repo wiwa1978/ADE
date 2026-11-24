@@ -94,7 +94,7 @@ export async function resolveCheckout(repository: string): Promise<string> {
 	if (!entry || entry.bare || entry.prunable) {
 		throw inputError("Choose the root directory of an available Git checkout or worktree.");
 	}
-	return realpathSync(entry.path);
+	return realpathSync.native(entry.path);
 }
 
 export async function resolveBaseCommit(repository: string, base: string): Promise<string> {
@@ -183,7 +183,7 @@ export class WorktreeManager {
 		const base = input.base;
 		let repository: string;
 		try {
-			repository = realpathSync(input.repository);
+			repository = realpathSync.native(input.repository);
 		} catch {
 			throw inputError("The repository path does not exist or cannot be accessed.");
 		}

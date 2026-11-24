@@ -168,11 +168,14 @@ function inside(child: string, parent: string) {
 	return child === parent || child.startsWith(`${parent}${sep}`);
 }
 
-function real(path: string) {
+/** The real path, also for a folder that doesn't exist (yet): its nearest existing parent is resolved, so Windows short names (RUNNER~1) don't make equal paths look different. */
+function real(path: string): string {
 	try {
 		return realpathSync.native(path);
 	} catch {
-		return resolve(path);
+		const full = resolve(path);
+		const parent = dirname(full);
+		return parent === full ? full : join(real(parent), basename(full));
 	}
 }
 

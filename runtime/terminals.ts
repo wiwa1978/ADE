@@ -64,7 +64,7 @@ export class TerminalManager {
 		}
 		let cwd: string;
 		try {
-			cwd = realpathSync(requestedCwd);
+			cwd = realpathSync.native(requestedCwd);
 			if (!statSync(cwd).isDirectory()) throw new Error("Not a directory");
 		} catch {
 			throw inputError("The terminal workspace directory is unavailable.", 404);

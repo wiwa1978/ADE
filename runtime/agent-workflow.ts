@@ -33,7 +33,7 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	const secrets = new ProjectSecrets(stateDirectory);
 	/** The project a working directory belongs to: a session's worktree or a project checkout (or a folder inside one). */
 	const projectForCwd = (cwd: string): string | null => {
-		const real = (path: string) => { try { return realpathSync(path); } catch { return resolve(path); } };
+		const real = (path: string) => { try { return realpathSync.native(path); } catch { return resolve(path); } };
 		const target = real(cwd);
 		const inside = (root: string | null | undefined) => {
 			if (!root) return false;
