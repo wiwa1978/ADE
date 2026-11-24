@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { resolve, sep } from "node:path";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type {
   GitHubIssueInput,
@@ -43,6 +43,11 @@ async function defaultRun(
       stderr: e.stderr || e.message || "Command failed",
     };
   }
+}
+
+function isContainedPath(canonicalRoot: string, candidate: string): boolean {
+  const rel = relative(canonicalRoot, candidate);
+  return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
 }
 
 /**
@@ -97,15 +102,42 @@ export class LocalGitHubProvider implements GitHubProvider {
   }
 
   async readRepoFile(repository: string, _ref: string, filePath: string): Promise<string | null> {
-    const checkout = this.#resolveCheckoutPath(repository);
-    if (!checkout) return null;
-    const abs = resolve(checkout, filePath);
-    const rootWithSep = checkout.endsWith(sep) ? checkout : `${checkout}${sep}`;
-    if (abs !== checkout && !abs.startsWith(rootWithSep)) {
+    if (!filePath || filePath.includes("\0")) {
       throw new Error(`Blocked path traversal outside repo root: "${filePath}"`);
     }
-    if (!existsSync(abs)) return null;
-    return readFileSync(abs, "utf8");
+    const checkout = this.#resolveCheckoutPath(repository);
+    if (!checkout) return null;
+    const canonicalRoot = realpathSync(checkout);
+    const abs = resolve(canonicalRoot, filePath);
+    if (!isContainedPath(canonicalRoot, abs)) {
+      throw new Error(`Blocked path traversal outside repo root: "${filePath}"`);
+    }
+    const localRel = relative(canonicalRoot, abs);
+    const segments = localRel.split(sep).filter(Boolean);
+    if (segments.some((part) => part.toLowerCase() === ".git")) {
+      throw new Error(`Blocked access to .git metadata: "${filePath}"`);
+    }
+    let current = canonicalRoot;
+    for (const part of segments) {
+      current = join(current, part);
+      try {
+        if (lstatSync(current).isSymbolicLink()) {
+          throw new Error(`Blocked path traversal via symbolic link: "${filePath}"`);
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return null;
+        throw err;
+      }
+    }
+    const st = lstatSync(abs);
+    if (st.isSymbolicLink() || !st.isFile()) {
+      throw new Error(`Blocked path traversal via symbolic link: "${filePath}"`);
+    }
+    const realFile = realpathSync(abs);
+    if (!isContainedPath(canonicalRoot, realFile)) {
+      throw new Error(`Blocked path traversal outside repo root: "${filePath}"`);
+    }
+    return readFileSync(realFile, "utf8");
   }
 
   async commitAndPushBranch(params: {
@@ -114,6 +146,10 @@ export class LocalGitHubProvider implements GitHubProvider {
     commitMessage: string;
     remote?: string;
   }): Promise<{ committed: boolean; pushed: boolean; sha?: string }> {
+    const remote = params.remote ?? "origin";
+    if (remote.startsWith("-") || params.branch.startsWith("-")) {
+      throw new Error("Invalid git remote or branch name.");
+    }
     const status = await this.#run("git", ["status", "--porcelain"], { cwd: params.worktreePath });
     let committed = false;
     if (status.stdout.trim()) {
@@ -131,7 +167,7 @@ export class LocalGitHubProvider implements GitHubProvider {
     const shaRes = await this.#run("git", ["rev-parse", "HEAD"], { cwd: params.worktreePath });
     const pushRes = await this.#run(
       "git",
-      ["push", "-u", params.remote ?? "origin", params.branch],
+      ["push", "-u", "--", remote, params.branch],
       { cwd: params.worktreePath },
     );
     if (pushRes.exitCode !== 0) {

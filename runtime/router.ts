@@ -47,7 +47,7 @@ function compilePattern(pattern: string): { regex: RegExp; paramNames: string[] 
 		return segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 	});
 	return {
-		regex: new RegExp(`^${segments.join("/")}$`, "i"),
+		regex: new RegExp(`^${segments.join("/")}$`),
 		paramNames,
 	};
 }

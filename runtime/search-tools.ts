@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { promisify } from "node:util";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
@@ -29,11 +29,11 @@ function globToRegex(pattern: string): RegExp {
 	return new RegExp(`(^|/)${escaped}$`, "i");
 }
 
-function walkFiles(dir: string, maxFiles: number, acc: string[] = []): string[] {
+async function walkFiles(dir: string, maxFiles: number, acc: string[] = []): Promise<string[]> {
 	if (acc.length >= maxFiles) return acc;
 	let entries;
 	try {
-		entries = readdirSync(dir, { withFileTypes: true });
+		entries = await readdir(dir, { withFileTypes: true });
 	} catch {
 		return acc;
 	}
@@ -43,7 +43,7 @@ function walkFiles(dir: string, maxFiles: number, acc: string[] = []): string[] 
 		if (entry.isSymbolicLink()) continue;
 		if (entry.isDirectory()) {
 			if (SKIP_DIRS.has(entry.name)) continue;
-			walkFiles(join(dir, entry.name), maxFiles, acc);
+			await walkFiles(join(dir, entry.name), maxFiles, acc);
 		} else if (entry.isFile()) {
 			acc.push(join(dir, entry.name));
 		}
@@ -61,7 +61,8 @@ export async function runWorkspaceGrep(root: string, opts: {
 	const searchRoot = opts.path ? workspacePath(root, opts.path, { mustExist: true }) : root;
 	const maxResults = Math.min(Math.max(opts.maxResults ?? 60, 1), 200);
 
-	// Try ripgrep first if available
+	// Try ripgrep first if available. Always terminate options with "--" so a query like "--pre=..."
+	// can never be interpreted as an rg CLI flag.
 	try {
 		const args = [
 			"--line-number",
@@ -73,8 +74,12 @@ export async function runWorkspaceGrep(root: string, opts: {
 		];
 		if (!opts.caseSensitive) args.push("--ignore-case");
 		if (!opts.isRegex) args.push("--fixed-strings");
-		args.push(opts.query, searchRoot);
-		const { stdout } = await execFileAsync("rg", args, { maxBuffer: 2 * 1024 * 1024, timeout: 10_000 });
+		args.push("--", opts.query, searchRoot);
+		const { stdout } = await execFileAsync("rg", args, {
+			cwd: root,
+			maxBuffer: 2 * 1024 * 1024,
+			timeout: 10_000,
+		});
 		const lines = stdout.trim().split("\n").filter(Boolean);
 		const formatted = lines.slice(0, maxResults).map(line => {
 			const rel = line.startsWith(root) ? line.slice(root.length + 1) : line;
@@ -97,14 +102,15 @@ export async function runWorkspaceGrep(root: string, opts: {
 		throw new Error(`Invalid search pattern: ${err instanceof Error ? err.message : String(err)}`);
 	}
 
-	const files = statSync(searchRoot).isFile() ? [searchRoot] : walkFiles(searchRoot, 2500);
+	const rootStat = await stat(searchRoot);
+	const files = rootStat.isFile() ? [searchRoot] : await walkFiles(searchRoot, 2500);
 	const matches: string[] = [];
 	for (const file of files) {
 		if (matches.length >= maxResults) break;
 		try {
-			const stat = statSync(file);
-			if (stat.size > 1_500_000) continue;
-			const buf = readFileSync(file);
+			const fileStat = await stat(file);
+			if (fileStat.size > 1_500_000) continue;
+			const buf = await readFile(file);
 			if (isBinaryBuffer(buf)) continue;
 			const lines = buf.toString("utf8").split("\n");
 			const rel = relative(root, file).replace(/\\/g, "/");
@@ -128,10 +134,10 @@ export async function runWorkspaceGrep(root: string, opts: {
 	return matches.join("\n") + (matches.length >= maxResults ? `\n[Truncated at ${maxResults} matches]` : "");
 }
 
-export function runWorkspaceFind(root: string, opts: { pattern: string; path?: string; maxResults?: number }): string {
+export async function runWorkspaceFind(root: string, opts: { pattern: string; path?: string; maxResults?: number }): Promise<string> {
 	const searchRoot = opts.path ? workspacePath(root, opts.path, { mustExist: true }) : root;
 	const maxResults = Math.min(Math.max(opts.maxResults ?? 100, 1), 300);
-	const files = walkFiles(searchRoot, 5000);
+	const files = await walkFiles(searchRoot, 5000);
 	const regex = opts.pattern.includes("*") || opts.pattern.includes("?")
 		? globToRegex(opts.pattern)
 		: new RegExp(opts.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
@@ -148,8 +154,8 @@ export function runWorkspaceFind(root: string, opts: { pattern: string; path?: s
 }
 
 export function createSearchTools(root: string, identity: { dev: string; ino: string }) {
-	const verifyWorkspace = () => {
-		const info = statSync(root, { bigint: true });
+	const verifyWorkspace = async () => {
+		const info = await stat(root, { bigint: true });
 		if (String(info.dev) !== identity.dev || String(info.ino) !== identity.ino) {
 			throw new Error("The task workspace has changed or been replaced.");
 		}
@@ -167,7 +173,7 @@ export function createSearchTools(root: string, identity: { dev: string; ino: st
 		}),
 		replay: "safe",
 		async execute(args) {
-			verifyWorkspace();
+			await verifyWorkspace();
 			const result = await runWorkspaceGrep(root, args);
 			return { output: [{ type: "text", text: result }] };
 		},
@@ -183,8 +189,8 @@ export function createSearchTools(root: string, identity: { dev: string; ino: st
 		}),
 		replay: "safe",
 		async execute(args) {
-			verifyWorkspace();
-			const result = runWorkspaceFind(root, args);
+			await verifyWorkspace();
+			const result = await runWorkspaceFind(root, args);
 			return { output: [{ type: "text", text: result }] };
 		},
 	});

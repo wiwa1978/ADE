@@ -76,7 +76,7 @@ test("LocalGitHubProvider builds exact gh pr create and git commit/push argument
       ["git", ["add", "-A"]],
       ["git", ["-c", "core.hooksPath=/dev/null", "commit", "-m", "Fix #42"]],
       ["git", ["rev-parse", "HEAD"]],
-      ["git", ["push", "-u", "origin", "ade/fix-42"]],
+      ["git", ["push", "-u", "--", "origin", "ade/fix-42"]],
     ],
   );
 

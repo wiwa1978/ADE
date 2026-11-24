@@ -1,8 +1,8 @@
 // What agents see beyond the prompt: files the user points at with @, and the instruction files
 // (AGENTS.md, CLAUDE.md) that agents read at the start of every session.
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { lstatSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 import { badRequest } from "./http-error.ts";
 
@@ -18,11 +18,42 @@ export type InstructionFileName = (typeof instructionFiles)[number]["name"];
 
 const MAX_INSTRUCTIONS = 200_000;
 
+function isContained(canonicalRoot: string, candidate: string): boolean {
+	const rel = relative(canonicalRoot, candidate);
+	return rel !== "" && !isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`);
+}
+
+function inspectInstructionFile(repository: string, fileName: string): { path: string; exists: boolean; isSymlink: boolean } {
+	const canonicalRepo = realpathSync(repository);
+	const target = join(canonicalRepo, fileName);
+	try {
+		const st = lstatSync(target);
+		if (st.isSymbolicLink()) {
+			return { path: target, exists: false, isSymlink: true };
+		}
+		if (!st.isFile()) {
+			return { path: target, exists: false, isSymlink: false };
+		}
+		const realTarget = realpathSync(target);
+		if (!isContained(canonicalRepo, realTarget)) {
+			return { path: target, exists: false, isSymlink: true };
+		}
+		return { path: realTarget, exists: true, isSymlink: false };
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+			return { path: target, exists: false, isSymlink: false };
+		}
+		throw error;
+	}
+}
+
 export function readInstructions(repository: string) {
 	return instructionFiles.map(file => {
-		const path = join(repository, file.name);
-		const exists = existsSync(path);
-		return { ...file, exists, content: exists ? readFileSync(path, "utf8").slice(0, MAX_INSTRUCTIONS) : "" };
+		const info = inspectInstructionFile(repository, file.name);
+		if (info.isSymlink || !info.exists) {
+			return { ...file, exists: false, content: "" };
+		}
+		return { ...file, exists: true, content: readFileSync(info.path, "utf8").slice(0, MAX_INSTRUCTIONS) };
 	});
 }
 
@@ -30,7 +61,11 @@ export function writeInstructions(repository: string, name: unknown, content: un
 	const file = instructionFiles.find(item => item.name === name);
 	if (!file) throw badRequest(`Only ${instructionFiles.map(item => item.name).join(" and ")} can be edited here.`);
 	if (typeof content !== "string" || content.length > MAX_INSTRUCTIONS) throw badRequest("Instructions must be text under 200 KB.");
-	writeFileSync(join(repository, file.name), content.endsWith("\n") || !content ? content : `${content}\n`);
+	const info = inspectInstructionFile(repository, file.name);
+	if (info.isSymlink) {
+		throw badRequest(`${file.name} cannot be a symbolic link.`);
+	}
+	writeFileSync(info.path, content.endsWith("\n") || !content ? content : `${content}\n`);
 	return readInstructions(repository);
 }
 

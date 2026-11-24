@@ -7,7 +7,7 @@ import type { ApprovalPolicy, PendingApproval } from "../packages/protocol/index
 import type { RuntimeEventBus } from "./events.ts";
 import { runHostMigrations } from "./db/migrations.ts";
 import { badRequest, notFound } from "./http-error.ts";
-import { guardrailFor } from "./guardrails.ts";
+import { commandParts, guardrailFor } from "./guardrails.ts";
 
 export type { ApprovalPolicy, PendingApproval };
 
@@ -29,7 +29,6 @@ const SAFE_COMMAND_PREFIXES = [
 	"tail",
 	"wc",
 	"which",
-	"env",
 	"uname",
 	"date",
 	"whoami",
@@ -48,6 +47,34 @@ const SAFE_COMMAND_PREFIXES = [
 	"grep ",
 ];
 
+/** Shell metacharacters/operators that allow command chaining, redirection, subshells, or line breaks. */
+const SHELL_COMPOUND_OR_REDIRECT = /[\r\n\0;|&`<>]|\$\(/;
+
+/** Commands whose positional file arguments must stay within the workspace to be auto-approved. */
+const FILE_READING_COMMANDS = new Set(["cat", "head", "tail", "ls", "wc", "grep", "rg", "find"]);
+
+function hasExternalOrTraversalPath(command: string): boolean {
+	const tokens = command.trim().split(/\s+/).slice(1);
+	for (const raw of tokens) {
+		const tok = raw.replace(/^["']|["']$/g, "");
+		if (!tok) continue;
+		// Check values of --flag=value or standalone path arguments
+		const value = tok.startsWith("-") && tok.includes("=") ? tok.slice(tok.indexOf("=") + 1) : tok;
+		if (tok.startsWith("-") && !tok.includes("=")) continue;
+		if (
+			value.startsWith("/") ||
+			value.startsWith("~") ||
+			value.startsWith("\\") ||
+			/^[A-Za-z]:[\\/]/.test(value) ||
+			value === ".." ||
+			/(?:^|[\\/])\.\.(?:$|[\\/])/.test(value)
+		) {
+			return true;
+		}
+	}
+	return false;
+}
+
 function extractCommandPrefix(command: string): string {
 	const trimmed = command.trim();
 	const parts = trimmed.split(/\s+/).filter(Boolean);
@@ -58,13 +85,38 @@ function extractCommandPrefix(command: string): string {
 	return parts[0];
 }
 
-function isSafeReadOnlyCommand(command: string): boolean {
+export function isSafeReadOnlyCommand(command: string): boolean {
+	if (!command || /[\r\n\0;&|`$<>]/.test(command)) return false;
 	const trimmed = command.trim();
-	// Reject pipes, redirects, command substitution, chaining that could execute arbitrary writes
-	if (/[;&|`$<>]/.test(trimmed)) return false;
-	return SAFE_COMMAND_PREFIXES.some(prefix =>
+	if (!trimmed) return false;
+	const matchesSafePrefix = SAFE_COMMAND_PREFIXES.some(prefix =>
 		trimmed === prefix.trim() || trimmed.startsWith(prefix.endsWith(" ") ? prefix : `${prefix} `),
 	);
+	if (!matchesSafePrefix) return false;
+
+	const firstWord = trimmed.split(/\s+/, 1)[0];
+
+	// Block find flags that execute arbitrary commands or delete/write files
+	if (firstWord === "find" && /(?:^|\s)-(?:exec|execdir|ok|okdir|delete|fprint0?|fprintf|fls)(?:\s|$)/i.test(trimmed)) {
+		return false;
+	}
+
+	// Block ripgrep preprocessor hooks (--pre / --pre-glob)
+	if (firstWord === "rg" && /(?:^|\s)--pre(?:-glob)?(?:=|\s|$)/i.test(trimmed)) {
+		return false;
+	}
+
+	// Block git flags that write files or invoke external helpers (e.g. git diff --output=..., git -c ...)
+	if (firstWord === "git" && /(?:^|\s)(?:--output(?:=|\s|$)|--ext-diff(?:\s|$)|--exec-path(?:=|\s|$)|--config-env(?:=|\s|$)|-c(?:\s|$))/i.test(trimmed)) {
+		return false;
+	}
+
+	// Block reading/listing paths outside the workspace (absolute paths, ~, ..)
+	if (FILE_READING_COMMANDS.has(firstWord) && hasExternalOrTraversalPath(trimmed)) {
+		return false;
+	}
+
+	return true;
 }
 
 type PendingEntry = PendingApproval & {
@@ -133,8 +185,8 @@ export class ApprovalManager {
 		const rules = this.#db.prepare("SELECT prefix FROM approval_rules WHERE toolName=? AND effect='deny'").all(toolName) as { prefix: string }[];
 		if (!rules.length) return null;
 		const command = toolName === "run_command" && typeof args?.command === "string" ? args.command.trim() : "";
-		// Check each part of a compound command (a && b; c | d), so "git push" can't hide behind "true &&".
-		const parts = command ? command.split(/&&|\|\||;|\||\n/).map(part => part.trim()).filter(Boolean) : [""];
+		// Check each normalized part of a compound command (a && b; c | d; sh -c ...), so "git push" can't hide behind "true &&".
+		const parts = command ? commandParts(command) : [""];
 		for (const rule of rules) {
 			if (rule.prefix === "*") return rule.prefix;
 			if (parts.some(part => part === rule.prefix || part.startsWith(`${rule.prefix} `))) return rule.prefix;
@@ -150,6 +202,8 @@ export class ApprovalManager {
 		const rules = this.#db.prepare("SELECT prefix FROM approval_rules WHERE toolName=? AND effect='allow'").all(toolName) as { prefix: string }[];
 		if (!rules.length) return false;
 		if (!command) return rules.some(r => r.prefix === "*");
+		// Never let compound commands, redirections, subshells, or newlines piggyback on an allow-prefix rule.
+		if (SHELL_COMPOUND_OR_REDIRECT.test(command)) return false;
 		const trimmed = command.trim();
 		return rules.some(r => r.prefix === "*" || trimmed === r.prefix || trimmed.startsWith(`${r.prefix} `));
 	}
@@ -166,6 +220,14 @@ export class ApprovalManager {
 			const command = typeof args?.command === "string" ? args.command : "";
 			if (this.hasAllowRule("run_command", command)) return false;
 			if (currentPolicy === "auto-safe" && isSafeReadOnlyCommand(command)) return false;
+			return true;
+		}
+		if (toolName === "browser_eval" || toolName === "browser_open_external") {
+			if (this.hasAllowRule(toolName, "*")) return false;
+			return true;
+		}
+		if (toolName === "manage_process" && args?.action === "send_input") {
+			if (this.hasAllowRule("manage_process", "send_input")) return false;
 			return true;
 		}
 		if (toolName.startsWith("mcp_")) {
@@ -200,7 +262,11 @@ export class ApprovalManager {
 						}
 						const id = `${api.taskId}:${key}`;
 						const command = typeof args.command === "string" ? args.command : undefined;
-						const suggestedPrefix = command ? extractCommandPrefix(command) : "*";
+						const suggestedPrefix = command
+							? extractCommandPrefix(command)
+							: call.name === "manage_process" && args.action === "send_input"
+								? "send_input"
+								: "*";
 						const summary = command
 							? `Run command: ${command}`
 							: `Run tool ${call.name}`;

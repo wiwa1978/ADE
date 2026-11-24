@@ -114,7 +114,11 @@ export class LocalDockerSandbox implements SandboxProvider {
     }
 
     const id = `local_sbx_${++this.#seq}_${Date.now()}`;
-    const safeBranch = opts.workBranch.replace(/[^a-zA-Z0-9._/-]/g, "-");
+    const safeBranch = opts.workBranch.replace(/[^a-zA-Z0-9._/-]/g, "-").replace(/^-+/, "branch-");
+    const baseBranch = (opts.baseBranch || "HEAD").trim();
+    if (!baseBranch || baseBranch.startsWith("-")) {
+      throw new Error(`Invalid base branch: "${opts.baseBranch}"`);
+    }
     const worktreePath = join(this.#worktreesRoot, id);
 
     // Create isolated git worktree from baseBranch (or HEAD fallback)
@@ -125,14 +129,15 @@ export class LocalDockerSandbox implements SandboxProvider {
       "add",
       "-B",
       safeBranch,
+      "--",
       worktreePath,
-      opts.baseBranch || "HEAD",
+      baseBranch,
     ];
     let wtRes = await this.#runCommand("git", addArgs, { cwd: repoRoot });
-    if (wtRes.exitCode !== 0 && opts.baseBranch && opts.baseBranch !== "HEAD") {
+    if (wtRes.exitCode !== 0 && baseBranch !== "HEAD") {
       wtRes = await this.#runCommand(
         "git",
-        ["-c", "core.hooksPath=/dev/null", "worktree", "add", "-B", safeBranch, worktreePath, "HEAD"],
+        ["-c", "core.hooksPath=/dev/null", "worktree", "add", "-B", safeBranch, "--", worktreePath, "HEAD"],
         { cwd: repoRoot },
       );
     }
@@ -147,6 +152,9 @@ export class LocalDockerSandbox implements SandboxProvider {
         "run",
         "-d",
         "--rm",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges:true",
+        "--pids-limit=256",
         "--name",
         `ade-${id}`,
         "-w",
