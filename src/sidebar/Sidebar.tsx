@@ -7,6 +7,8 @@ import type { KeybindingMap } from "../keybindings"
 import type { AddProjectSource } from "../projects/AddProjectWizard"
 import { ProjectsHeaderControls } from "./ProjectsHeaderControls"
 import { loadSidebarPrefs, saveSidebarPrefs, type SidebarPrefs } from "./sidebar-prefs"
+import { ActiveThreadSpinner } from "./ActiveThreadSpinner"
+import { useI18n } from "../i18n/I18nContext"
 
 export type SidebarSelection =
   | { kind: "inbox" }
@@ -63,8 +65,17 @@ export type SidebarProps = {
   onOpenEnvironments: () => void
 }
 
+function isSessionWorking(session: Conversation, entry?: InboxEntry): boolean {
+  if (entry?.state === "needs-approval") return false
+  return session.status === "working" || entry?.state === "working"
+}
+
 function StateDot({ entry, session }: { entry?: InboxEntry; session: Conversation }) {
-  const state = entry?.state ?? (session.status === "working" ? "working" : "idle")
+  const state = entry?.state === "needs-approval"
+    ? "needs-approval"
+    : session.status === "working"
+      ? "working"
+      : (entry?.state ?? "idle")
   const info = sessionStateInfo[state]
   return <span className={`ade-state-dot is-${info.tone}`} title={info.label} aria-label={info.label} />
 }
@@ -77,11 +88,12 @@ function StateIcon({ state }: { state: InboxEntry["state"] }) {
 }
 
 function RowLabel({ session, props, unread }: { session: Conversation; props: SidebarProps; unread: boolean }) {
+  const { t } = useI18n()
   if (props.renamingId === session.id) {
     return <input
       className="ade-input-sm !h-6 flex-1"
       autoFocus
-      aria-label="Session name"
+      aria-label={t("sidebar.sessionNameAria")}
       value={props.renameText}
       onClick={event => event.stopPropagation()}
       onChange={event => props.onRenameChange(event.target.value)}
@@ -100,6 +112,7 @@ function SessionRow({ session, props, child }: { session: Conversation; props: S
   const selected = props.selection.kind === "session" && props.selection.sessionId === session.id
   const unread = props.unreadIds.includes(session.id) || Boolean(entry?.needsYou && !selected)
   const pr = entry?.pullRequest
+  const working = isSessionWorking(session, entry)
   const showState = entry && entry.state !== "idle" && entry.state !== "replied" && entry.state !== "working"
   return (
     <div
@@ -112,18 +125,20 @@ function SessionRow({ session, props, child }: { session: Conversation; props: S
         event.preventDefault()
         props.onContextMenu({ kind: "session", session, x: event.clientX, y: event.clientY })
       }}
-      title={entry ? `${sessionStateInfo[entry.state].label} — ${sessionStateInfo[entry.state].hint}` : undefined}
+      title={working ? `${sessionStateInfo.working.label} — ${sessionStateInfo.working.hint}` : entry ? `${sessionStateInfo[entry.state].label} — ${sessionStateInfo[entry.state].hint}` : undefined}
     >
       <StateDot entry={entry} session={session} />
       {props.pinnedIds.includes(session.id) ? <Pin className="size-3 shrink-0 opacity-60" aria-label="Pinned" /> : null}
       <RowLabel session={session} props={props} unread={unread} />
-      {pr ? <span className={`ade-row-tag is-${pr.state === "OPEN" ? (pr.checksSummary === "failure" ? "failed" : "ok") : pr.state === "MERGED" ? "merged" : "idle"}`}>#{pr.number}</span>
-        : showState ? <StateIcon state={entry.state} /> : null}
+      {pr ? <span className={`ade-row-tag is-${pr.state === "OPEN" ? (pr.checksSummary === "failure" ? "failed" : "ok") : pr.state === "MERGED" ? "merged" : "idle"}`}>#{pr.number}</span> : null}
+      {working ? <ActiveThreadSpinner className="ade-row-icon is-running" title={`${sessionStateInfo.working.label} — ${sessionStateInfo.working.hint}`} />
+        : !pr && showState ? <StateIcon state={entry.state} /> : null}
     </div>
   )
 }
 
 export function Sidebar(props: SidebarProps) {
+  const { t } = useI18n()
   const { selection } = props
   const [prefs, setPrefs] = useState<SidebarPrefs>(loadSidebarPrefs)
   const [filterText, setFilterText] = useState("")
@@ -179,9 +194,9 @@ export function Sidebar(props: SidebarProps) {
       return sessionMatchesFilter(s)
     })
     const buckets: { id: string; label: string; items: Conversation[] }[] = [
-      { id: "attention", label: "Needs attention", items: [] },
-      { id: "working", label: "Working", items: [] },
-      { id: "idle", label: "Idle", items: [] },
+      { id: "attention", label: t("sidebar.needsAttention"), items: [] },
+      { id: "working", label: t("sidebar.working"), items: [] },
+      { id: "idle", label: t("sidebar.idle"), items: [] },
     ]
     for (const s of relevant) {
       const entry = props.inbox[s.id]
@@ -193,7 +208,7 @@ export function Sidebar(props: SidebarProps) {
   })()
 
   return (
-    <aside className={`ade-sidebar ${prefs.compact ? "is-compact" : ""}`} style={{ width: `${props.width}px` }} aria-label="Workspace navigation">
+    <aside className={`ade-sidebar ${prefs.compact ? "is-compact" : ""}`} style={{ width: `${props.width}px` }} aria-label={t("sidebar.workspaceNavAria")}>
       <div className="ade-sidebar-top">
         <div className="ade-brand-row">
           <div className="ade-brand-badge">A</div>
@@ -223,13 +238,13 @@ export function Sidebar(props: SidebarProps) {
             <div className="ade-sidebar-filter-box">
               <input
                 type="text"
-                placeholder="Filter…"
-                aria-label="Filter projects and sessions"
+                placeholder={t("sidebar.filterPlaceholder")}
+                aria-label={t("sidebar.filterAria")}
                 value={filterText}
                 onChange={e => setFilterText(e.target.value)}
               />
               {filterText ? (
-                <button type="button" className="ade-sidebar-filter-clear" onClick={() => setFilterText("")} aria-label="Clear filter">
+                <button type="button" className="ade-sidebar-filter-clear" onClick={() => setFilterText("")} aria-label={t("sidebar.clearFilter")}>
                   <X className="size-3" />
                 </button>
               ) : null}
@@ -239,7 +254,7 @@ export function Sidebar(props: SidebarProps) {
           {prefs.groupBy === "status" ? (
             <div className="ade-nav-list">
               {statusGroups.length === 0 ? (
-                <div className="ade-sidebar-filter-empty">No agent activity matches these filters.</div>
+                <div className="ade-sidebar-filter-empty">{t("sidebar.noActivityMatch")}</div>
               ) : (
                 statusGroups.map(group => (
                   <div key={group.id} className="mb-1.5">
@@ -253,10 +268,10 @@ export function Sidebar(props: SidebarProps) {
             <div className="ade-nav-list">
               {props.projects.length === 0 ? (
                 <button type="button" className="ade-nav-empty" onClick={() => props.onAddProject("menu")}>
-                  <FolderGit2 className="size-3.5" /> Add your first project
+                  <FolderGit2 className="size-3.5" /> {t("sidebar.addFirstProject")}
                 </button>
               ) : filteredProjects.length === 0 ? (
-                <div className="ade-sidebar-filter-empty">No projects match these filters.</div>
+                <div className="ade-sidebar-filter-empty">{t("sidebar.noProjectsMatch")}</div>
               ) : null}
               {filteredProjects.map((project, idx) => {
                 const pinned = props.pinnedIds.includes(`project:${project.id}`)
@@ -284,22 +299,22 @@ export function Sidebar(props: SidebarProps) {
                         type="button"
                         className="ade-icon-btn !w-5 !h-5"
                         onClick={event => { event.stopPropagation(); props.onToggleProject(project.id) }}
-                        aria-label={expanded ? `Collapse ${project.name}` : `Expand ${project.name}`}
+                        aria-label={expanded ? t("sidebar.collapseProject", { name: project.name }) : t("sidebar.expandProject", { name: project.name })}
                         aria-expanded={expanded}
                       >
                         {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
                       </button>
                       <Folder className="size-3.5 shrink-0 opacity-75" />
                       <span className="ade-truncate flex-1">{project.name}</span>
-                      {pinned ? <Pin className="size-3 shrink-0 opacity-60" aria-label="Pinned" /> : null}
-                      {!expanded && attention > 0 ? <span className="ade-count-badge is-accent" title={`${attention} need you`}>{attention}</span>
-                        : !expanded && working > 0 ? <span className="ade-state-dot is-running" title={`${working} working`} /> : null}
+                      {pinned ? <Pin className="size-3 shrink-0 opacity-60" aria-label={t("common.pinned")} /> : null}
+                      {!expanded && attention > 0 ? <span className="ade-count-badge is-accent" title={t("sidebar.needYouCount", { count: attention })}>{attention}</span>
+                        : !expanded && working > 0 ? <ActiveThreadSpinner className="ade-row-icon is-running" title={t("sidebar.workingCount", { count: working })} /> : null}
                       <div className="ade-nav-row-actions">
                         <button
                           type="button"
                           className="ade-icon-btn !w-5 !h-5"
-                          title={`New session in ${project.name}`}
-                          aria-label={`New session in ${project.name}`}
+                          title={t("sidebar.newSessionIn", { name: project.name })}
+                          aria-label={t("sidebar.newSessionIn", { name: project.name })}
                           onClick={event => { event.stopPropagation(); props.onNewSession(project.id) }}
                         >
                           <Plus className="size-3" />
@@ -321,7 +336,7 @@ export function Sidebar(props: SidebarProps) {
                             }}
                           >
                             <Plus className="size-3 shrink-0" />
-                            <span className="ade-truncate">New session</span>
+                            <span className="ade-truncate">{t("sidebar.newSession")}</span>
                           </button>
                         ) : null}
                       </div>
@@ -338,15 +353,17 @@ export function Sidebar(props: SidebarProps) {
         {!prefs.hideChats ? (
         <div>
           <div className="ade-nav-section-head">
-            <span>Chats</span>
-            <button type="button" className="ade-icon-btn" title="New chat" aria-label="New chat" onClick={props.onNewChat}>
+            <span>{t("sidebar.chats")}</span>
+            <button type="button" className="ade-icon-btn" title={t("sidebar.newChat")} aria-label={t("sidebar.newChat")} onClick={props.onNewChat}>
               <Plus className="size-3.5" />
             </button>
           </div>
           <div className="ade-nav-list">
             {props.chats.map(session => {
+              const entry = props.inbox[session.id]
               const selected = props.selection.kind === "session" && props.selection.sessionId === session.id
               const unread = props.unreadIds.includes(session.id)
+              const working = isSessionWorking(session, entry)
               return (
                 <div
                   key={session.id}
@@ -360,9 +377,10 @@ export function Sidebar(props: SidebarProps) {
                     props.onContextMenu({ kind: "session", session, x: event.clientX, y: event.clientY })
                   }}
                 >
-                  {session.status === "working" ? <span className="ade-state-dot is-running" title="Working" /> : session.mode === "personal" ? <MessageCircle className="size-3.5 shrink-0 opacity-70" /> : <MessageSquare className="size-3.5 shrink-0 opacity-70" />}
+                  {session.mode === "personal" ? <MessageCircle className="size-3.5 shrink-0 opacity-70" /> : <MessageSquare className="size-3.5 shrink-0 opacity-70" />}
                   <RowLabel session={session} props={props} unread={unread} />
-                  {props.pinnedIds.includes(session.id) ? <Pin className="size-3 shrink-0 opacity-55" aria-label="Pinned" /> : null}
+                  {props.pinnedIds.includes(session.id) ? <Pin className="size-3 shrink-0 opacity-55" aria-label={t("common.pinned")} /> : null}
+                  {working ? <ActiveThreadSpinner className="ade-row-icon is-running" title={`${sessionStateInfo.working.label} — ${sessionStateInfo.working.hint}`} /> : null}
                 </div>
               )
             })}
@@ -374,7 +392,7 @@ export function Sidebar(props: SidebarProps) {
           <div className="ade-archived-section">
             <button type="button" className="ade-nav-row opacity-60 hover:opacity-100 !text-[11.5px]" aria-expanded={props.archivedExpanded} onClick={props.onToggleArchived}>
               <Archive className="size-3 shrink-0" />
-              <span className="flex-1">Archived ({props.archivedProjects.length + props.archivedSessions.length})</span>
+              <span className="flex-1">{t("sidebar.archivedCount", { count: props.archivedProjects.length + props.archivedSessions.length })}</span>
               {props.archivedExpanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
             </button>
             {props.archivedExpanded ? <>
@@ -382,7 +400,7 @@ export function Sidebar(props: SidebarProps) {
                 <div key={project.id} className="ade-nav-row ade-nav-row-child ade-archived-row">
                   <FolderGit2 className="size-3 shrink-0 opacity-60" />
                   <span className="ade-truncate flex-1 opacity-70">{project.name}</span>
-                  <button type="button" className="ade-archived-restore" aria-label={`Restore project ${project.name}`} onClick={() => props.onRestore(`project:${project.id}`)}>Restore</button>
+                  <button type="button" className="ade-archived-restore" aria-label={t("sidebar.restoreProject", { name: project.name })} onClick={() => props.onRestore(`project:${project.id}`)}>{t("common.restore")}</button>
                 </div>
               ))}
               {props.archivedSessions.map(session => {
@@ -393,7 +411,7 @@ export function Sidebar(props: SidebarProps) {
                     role="button"
                     tabIndex={0}
                     className="ade-nav-row ade-nav-row-child ade-archived-row"
-                    title={session.workspace?.removed ? "Worktree removed — restoring recreates it from its branch" : undefined}
+                    title={session.workspace?.removed ? t("sidebar.worktreeRemovedHint") : undefined}
                     onClick={() => props.onOpenSession(session)}
                     onKeyDown={event => { if (event.key === "Enter") props.onOpenSession(session) }}
                     onContextMenu={event => {
@@ -403,7 +421,7 @@ export function Sidebar(props: SidebarProps) {
                   >
                     {session.chatThread ? <MessageSquare className="size-3 shrink-0 opacity-60" /> : <GitBranch className="size-3 shrink-0 opacity-60" />}
                     <span className="ade-truncate flex-1 opacity-70">{session.label}{projectName ? <small className="opacity-60"> · {projectName}</small> : null}</span>
-                    <button type="button" className="ade-archived-restore" aria-label={`Restore ${session.label}`} onClick={event => { event.stopPropagation(); props.onRestore(session.id) }}>Restore</button>
+                    <button type="button" className="ade-archived-restore" aria-label={t("sidebar.restoreSession", { name: session.label })} onClick={event => { event.stopPropagation(); props.onRestore(session.id) }}>{t("common.restore")}</button>
                   </div>
                 )
               })}
@@ -413,11 +431,11 @@ export function Sidebar(props: SidebarProps) {
       </div>
 
       <div className="ade-sidebar-footer">
-        <button type="button" className="ade-host-status w-full text-left cursor-pointer" onClick={props.onOpenEnvironments} title="Switch environment">
+        <button type="button" className="ade-host-status w-full text-left cursor-pointer" onClick={props.onOpenEnvironments} title={t("sidebar.switchEnvironment")}>
           <span className={`ade-state-dot is-${props.runtimeOnline ? "ok" : "waiting"}`} />
           <Server className="size-3 shrink-0" />
           <span className="ade-truncate flex-1">{props.environmentName}</span>
-          {props.live ? <span className="ade-pill ade-pill-ok !text-[9.5px] !py-0">live</span> : null}
+          {props.live ? <span className="ade-pill ade-pill-ok !text-[9.5px] !py-0">{t("sidebar.live")}</span> : null}
         </button>
       </div>
     </aside>

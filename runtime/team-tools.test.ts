@@ -33,3 +33,23 @@ test("each agent acts as itself: the lead plans the board, members take tasks, p
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+test("swarm tools: team_overview and team_focus wire goal, threads, and live worker focus", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "ade-teamtools-swarm-"));
+	try {
+		const board = new TeamBoard(dir);
+		const ext = createTeamTools({ sessionId: "s", board, agents: async () => [{ id: "c-zod", name: "zod-protocol" }] });
+		const tool = (name: string) => (ext.tools ?? []).find(entry => entry.name === name) as unknown as { execute: (args: Record<string, unknown>, api: { conversationId: unknown }) => Promise<{ output: Array<{ text: string }> }> };
+		const call = async (name: string, args: Record<string, unknown>, conversationId: unknown) => (await tool(name).execute(args, { conversationId })).output[0].text;
+		const lead = ROOT_CONVERSATION_ID;
+
+		assert.match(await call("team_overview", { action: "set_goal", title: "ADE Audit", goalTitle: "Harden security", goalSummary: "Zod + runtime + UI" }, lead), /Harden security/);
+		assert.match(await call("team_overview", { action: "thread", title: "Zod safety", summary: "Validate all boundaries" }, lead), /Thread TH1 saved/);
+		assert.match(await call("team_tasks", { action: "add", title: "Add Zod schemas", owner: "zod-protocol", threadId: "TH1" }, lead), /Added T1/);
+		assert.match(await call("team_tasks", { action: "take", id: "T1" }, "c-zod"), /You have T1/);
+		assert.match(await call("team_focus", { text: "Check MobilePairingManager constructor signature" }, "c-zod"), /Focus set/);
+		assert.match(await call("team_overview", { action: "status" }, lead), /Zod safety \(0\/1\) · Now: Check MobilePairingManager/);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});

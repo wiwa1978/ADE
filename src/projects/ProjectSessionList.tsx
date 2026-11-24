@@ -2,6 +2,7 @@ import { useState } from "react"
 import { GitBranch, Play } from "lucide-react"
 import type { Conversation } from "../../app-types"
 import { relativeTime, sessionStateInfo, type InboxEntry } from "../session-state"
+import { ActiveThreadSpinner } from "../sidebar/ActiveThreadSpinner"
 
 /** The project's sessions as a scannable list: what each agent is doing and what it needs. */
 export function ProjectSessionList({
@@ -62,7 +63,11 @@ export function ProjectSessionList({
         <ul className="ade-session-rows">
           {sorted.map(session => {
             const entry = entries[session.id]
-            const state = entry?.state ?? (session.status === "working" ? "working" : "idle")
+            const state = entry?.state === "needs-approval"
+              ? "needs-approval"
+              : session.status === "working"
+                ? "working"
+                : (entry?.state ?? "idle")
             const info = sessionStateInfo[state]
             return (
               <li key={session.id}>
@@ -85,7 +90,10 @@ export function ProjectSessionList({
                       {entry?.pullRequest ? ` · PR #${entry.pullRequest.number}` : ""}
                     </small>
                   </span>
-                  <span className={`ade-row-tag is-${info.tone}`} title={info.hint}>{info.label}</span>
+                  <span className={`ade-row-tag is-${info.tone}`} title={info.hint}>
+                    {state === "working" ? <ActiveThreadSpinner size={12} decorative /> : null}
+                    {info.label}
+                  </span>
                   <span className="ade-inbox-time">{relativeTime(session.updatedAt)}</span>
                 </button>
               </li>

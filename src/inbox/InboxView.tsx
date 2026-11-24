@@ -2,7 +2,9 @@ import { Archive, ExternalLink, GitBranch, Inbox, Plus } from "lucide-react"
 import type { Conversation } from "../../app-types"
 import type { Project } from "../../ProjectsView"
 import { relativeTime, sessionStateInfo, type InboxEntry, type SessionState } from "../session-state"
+import { ActiveThreadSpinner } from "../sidebar/ActiveThreadSpinner"
 import { budgetState, formatCost, useUsage } from "../usage/usage-data"
+import { useI18n } from "../i18n/I18nContext"
 
 const urgency: SessionState[] = ["stage-approval", "needs-approval", "failed", "checks-failing", "replied", "ready-to-review", "pr-open", "working", "merged", "idle"]
 
@@ -31,6 +33,7 @@ export function InboxView({
   monthlyBudget?: number
   onOpenUsage?: () => void
 }) {
+  const { t } = useI18n()
   const { report } = useUsage()
   const budget = budgetState(report, monthlyBudget)
   const rows = sessions
@@ -52,7 +55,11 @@ export function InboxView({
       {items.length === 0 ? (empty ? <p className="ade-inbox-empty">{empty}</p> : null) : (
         <ul>
           {items.map(({ session, entry }) => {
-            const state = entry?.state ?? (session.status === "working" ? "working" : "idle")
+            const state: SessionState = entry?.state === "needs-approval"
+              ? "needs-approval"
+              : session.status === "working"
+                ? "working"
+                : (entry?.state ?? "idle")
             const info = sessionStateInfo[state]
             const project = projects.find(p => p.id === session.projectId)
             return (
@@ -62,22 +69,25 @@ export function InboxView({
                   <span className="ade-inbox-main">
                     <strong className="ade-truncate">{session.label}</strong>
                     <small className="ade-truncate">
-                      {project ? project.name : session.chatThread ? "Chat" : "No project"}
+                      {project ? project.name : session.chatThread ? t("inbox.chat") : t("inbox.noProject")}
                       {session.workspace?.branch ? <> · <GitBranch className="inline size-3" /> {session.workspace.branch}</> : null}
-                      {entry?.uncommitted ? ` · ${entry.uncommitted} uncommitted` : ""}
-                      {entry?.pendingApprovals ? ` · ${entry.pendingApprovals} waiting for approval` : ""}
+                      {entry?.uncommitted ? ` · ${t("inbox.uncommitted", { count: entry.uncommitted })}` : ""}
+                      {entry?.pendingApprovals ? ` · ${t("inbox.waitingApproval", { count: entry.pendingApprovals })}` : ""}
                     </small>
                   </span>
-                  <span className={`ade-row-tag is-${info.tone}`} title={info.hint}>{info.label}</span>
+                  <span className={`ade-row-tag is-${info.tone}`} title={info.hint}>
+                    {state === "working" ? <ActiveThreadSpinner size={12} decorative /> : null}
+                    {info.label}
+                  </span>
                   <span className="ade-inbox-time">{relativeTime(session.updatedAt)}</span>
                 </button>
                 {entry?.pullRequest ? (
-                  <button type="button" className="ade-icon-btn" title={`Open pull request #${entry.pullRequest.number} on GitHub`} aria-label={`Open pull request #${entry.pullRequest.number}`} onClick={() => onOpenExternal(entry.pullRequest!.url)}>
+                  <button type="button" className="ade-icon-btn" title={t("inbox.openPrTitle", { number: entry.pullRequest.number })} aria-label={t("inbox.openPrAria", { number: entry.pullRequest.number })} onClick={() => onOpenExternal(entry.pullRequest!.url)}>
                     <ExternalLink className="size-3.5" />
                   </button>
                 ) : null}
                 {state === "merged" ? (
-                  <button type="button" className="ade-icon-btn" title="Archive this session" aria-label={`Archive ${session.label}`} onClick={() => onArchive(session.id)}>
+                  <button type="button" className="ade-icon-btn" title={t("inbox.archiveSession")} aria-label={t("inbox.archiveSessionAria", { label: session.label })} onClick={() => onArchive(session.id)}>
                     <Archive className="size-3.5" />
                   </button>
                 ) : null}
@@ -93,38 +103,38 @@ export function InboxView({
     <main className="ade-inbox">
       <header className="ade-inbox-head">
         <div>
-          <h1><Inbox className="size-5" /> Inbox</h1>
-          <p>Every session across your projects, sorted by what needs you first.</p>
+          <h1><Inbox className="size-5" /> {t("inbox.title")}</h1>
+          <p>{t("inbox.subtitle")}</p>
         </div>
         <div className="flex gap-2">
           {merged.length > 0 ? (
             <button type="button" className="sf-btn-secondary" onClick={() => merged.forEach(row => onArchive(row.session.id))}>
-              <Archive className="size-3.5" /> Archive {merged.length} merged
+              <Archive className="size-3.5" /> {t("inbox.archiveMerged", { count: merged.length })}
             </button>
           ) : null}
-          <button type="button" className="sf-btn-primary" onClick={onNewSession}><Plus className="size-3.5" /> New session</button>
+          <button type="button" className="sf-btn-primary" onClick={onNewSession}><Plus className="size-3.5" /> {t("inbox.newSession")}</button>
         </div>
       </header>
       {budget ? (
         <div className={`ade-budget-banner ${budget.reached ? "is-error" : ""}`} role="status">
           <span>
             {budget.reached
-              ? `This month's agent spend (${formatCost(budget.spent)}) has reached your ${formatCost(budget.budget)} budget.`
-              : `This month's agent spend is at ${Math.round(budget.ratio * 100)}% of your ${formatCost(budget.budget)} budget (${formatCost(budget.spent)}).`}
+              ? t("inbox.budgetReached", { spent: formatCost(budget.spent), budget: formatCost(budget.budget) })
+              : t("inbox.budgetRatio", { percent: Math.round(budget.ratio * 100), budget: formatCost(budget.budget), spent: formatCost(budget.spent) })}
           </span>
-          {onOpenUsage ? <button type="button" className="ade-chip-btn" onClick={onOpenUsage}>See usage</button> : null}
+          {onOpenUsage ? <button type="button" className="ade-chip-btn" onClick={onOpenUsage}>{t("inbox.seeUsage")}</button> : null}
         </div>
       ) : null}
       {rows.length === 0 ? (
         <div className="ade-inbox-zero">
           <Inbox className="size-8 opacity-40" />
-          <p>No sessions yet. Start one to put an agent to work on a branch of its own.</p>
-          <button type="button" className="sf-btn-primary" onClick={onNewSession}><Plus className="size-3.5" /> New session</button>
+          <p>{t("inbox.emptyDesc")}</p>
+          <button type="button" className="sf-btn-primary" onClick={onNewSession}><Plus className="size-3.5" /> {t("inbox.newSession")}</button>
         </div>
       ) : <>
-        {group("Needs you", needsYou, "Nothing needs you right now.")}
-        {group("Working", working, "No agent is working.")}
-        {group("Everything else", rest)}
+        {group(t("inbox.needsYou"), needsYou, t("inbox.needsYouEmpty"))}
+        {group(t("inbox.working"), working, t("inbox.workingEmpty"))}
+        {group(t("inbox.everythingElse"), rest)}
       </>}
     </main>
   )

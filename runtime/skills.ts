@@ -59,6 +59,12 @@ const BUILTIN_COMMANDS: SlashCommandSummary[] = [
 		scope: "builtin",
 	},
 	{
+		name: "swarm",
+		description: "Run a coordinated multi-agent swarm with Goal, Threads, shared Board, and parallel workers",
+		prompt: "Coordinate this request in Swarm mode: 1) Call team_overview (action='set_goal') with a concise title, goalTitle, and goalSummary, and create 2–4 workstream threads via team_overview (action='thread'). 2) Add concrete tasks via team_tasks (linked to threadId with clear owners and dependencies). 3) Spawn parallel workers using spawn_subagent (background=true; mode='worktree' for independent code changes or 'readonly' for audits). 4) Keep live progress visible with team_focus, coordinate on team_post/team_read, verify changes, and synthesize the final result.",
+		scope: "builtin",
+	},
+	{
 		name: "browser",
 		description: "Open and inspect a web page or local dev server in the built-in browser",
 		prompt: "Use the built-in browser tools (browser_navigate, browser_snapshot, browser_screenshot) to inspect and verify the target page.",

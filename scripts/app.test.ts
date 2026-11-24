@@ -468,6 +468,34 @@ test("Team view shows members, the data flow between them and the latest flows",
   assert.ok(container.querySelector(".ade-flow-tabs"), "the part's page opens with tabs")
 })
 
+test("Swarm view shows Goal, live Running tasks, Threads, and switches to Board, Members, and Graph", async () => {
+  await act(async () => root.render(React.createElement(App)))
+  const taskRow = [...container.querySelectorAll('[role="button"]')].find(el => el.textContent?.includes("Build split-pane ADE"))
+  assert.ok(taskRow, "Missing Build split-pane ADE session in sidebar")
+  await act(async () => { (taskRow as HTMLElement).click() })
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+  await click("Swarm")
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+  const view = container.querySelector(".ade-swarm")
+  assert.ok(view, "the Swarm view opens")
+  const text = view.textContent ?? ""
+  assert.match(text, /GOAL/)
+  assert.match(text, /Running/)
+  assert.match(text, /Backend Worker/)
+  assert.match(text, /Running npm test/)
+  assert.match(text, /Threads/)
+  assert.match(text, /1 of 2\s*tasks done/)
+  // Switch through Board, Members, and Graph tabs
+  const tabBtn = (label: string) => [...view.querySelectorAll('[role="tab"]')].find(el => el.textContent?.includes(label)) as HTMLElement
+  await act(async () => { tabBtn("Board").click() })
+  assert.match(view.textContent ?? "", /Message board/)
+  await act(async () => { tabBtn("Members").click() })
+  assert.match(view.textContent ?? "", /coordinator/)
+  assert.match(view.textContent ?? "", /Backend Worker/)
+  await act(async () => { tabBtn("Graph").click() })
+  assert.ok(view.querySelector('svg[aria-label="Swarm coordination graph"]'), "Graph tab renders coordination SVG")
+})
+
 test("opens Built-in Browser pane and triggers external system browser launch", async () => {
   await act(async () => root.render(React.createElement(App)))
   // Session tools are in the activity bar on the far left.

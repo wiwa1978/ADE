@@ -10,6 +10,7 @@ import {
   GitPullRequest,
   Globe,
   LayoutGrid,
+  Network,
   PanelRightClose,
   Plus,
   Terminal,
@@ -23,6 +24,7 @@ import { AgentsView } from "../agents/AgentsView"
 import { useAgentsWork } from "../agents/agent-summary"
 import { FlowView } from "../flow/FlowView"
 import { useTeamState } from "../flow/team-state"
+import { SwarmView } from "../swarm/SwarmView"
 import { useSessionStages } from "../blueprints/session-stages"
 import type {
   GitHubIssue,
@@ -34,6 +36,7 @@ import type {
   SessionTaskItem,
   SubagentInfo,
   TimelineItem,
+  TimelineToolCall,
   WorkspaceGitSummary,
   WorkspaceTab,
 } from "../../app-types"
@@ -99,6 +102,7 @@ export function BesidePane({
   agentBusy = false,
   onAskAgent,
   timelineItems = [],
+  leadLiveTools = [],
   tasks = [],
   onRewind,
   diffMode = "working",
@@ -155,17 +159,18 @@ export function BesidePane({
   agentBusy?: boolean
   onAskAgent?: (text: string) => Promise<void>
   timelineItems?: TimelineItem[]
+  leadLiveTools?: TimelineToolCall[]
   tasks?: SessionTaskItem[]
   onRewind?: (content: string) => void
   diffMode?: "working" | "branch" | "history"
   onRunStatusChange?: (status: RunStatus) => void
   onOpenProjectSettings?: () => void
 }) {
-  const hold = useSessionHold(activeBesideTab?.kind === "progress" || activeBesideTab?.kind === "agents" || activeBesideTab?.kind === "team" ? session.id : null, agentBusy)
+  const hold = useSessionHold(activeBesideTab?.kind === "progress" || activeBesideTab?.kind === "agents" || activeBesideTab?.kind === "team" || activeBesideTab?.kind === "swarm" ? session.id : null, agentBusy)
   const { stages: progressStages } = useSessionStages((activeBesideTab?.kind === "progress" || activeBesideTab?.kind === "team") && session.blueprint ? session.id : null, `${JSON.stringify(session.blueprint ?? null)}:${agentBusy}`)
   const teamWork = useAgentsWork(activeBesideTab?.kind === "team" ? session.id : null, subagents.map(sub => `${sub.id}:${sub.status}`).join(","))
   const stageNames = new Map((progressStages?.stages ?? []).map(stage => [stage.id, stage.name]))
-  const { team: teamBoard, reload: reloadTeam } = useTeamState(activeBesideTab?.kind === "team" ? session.id : null)
+  const { team: teamBoard, reload: reloadTeam } = useTeamState(activeBesideTab?.kind === "team" || activeBesideTab?.kind === "swarm" ? session.id : null)
   const tabIcon = (tab: WorkspaceTab) => {
     switch (tab.kind) {
       case "subagent": {
@@ -184,6 +189,7 @@ export function BesidePane({
       case "issues": return <CircleDot className="size-3.5" />
       case "agents": return <Bot className="size-3.5" />
       case "team": return <Users className="size-3.5" />
+      case "swarm": return <Network className="size-3.5" />
       default: return <Columns2 className="size-3.5" />
     }
   }
@@ -240,6 +246,27 @@ export function BesidePane({
 
       <div className="ade-beside-content">
         {activeBesideTab.kind === "tools" ? <SidePanelMenu items={menuItems} /> : null}
+        {activeBesideTab.kind === "swarm" ? (
+          <SwarmView
+            session={session}
+            leadBusy={agentBusy}
+            leadItems={timelineItems}
+            leadLiveTools={leadLiveTools}
+            subagents={subagents}
+            subagentTimelines={subagentTimelines}
+            tasks={tasks}
+            queued={hold.queued.map(item => item.subagentId)}
+            team={teamBoard}
+            onTeamChanged={reloadTeam}
+            onOpenAgent={onOpenSubagent}
+            onMessageSubagent={onMessageSubagent}
+            onStopSubagent={onStopSubagent}
+            onAskAgent={onAskAgent}
+            onOpenFile={hasWorkspace ? onOpenFile : undefined}
+            onOpenBrowser={onOpenBrowser}
+            onOpenExternalBrowser={onOpenExternalBrowser}
+          />
+        ) : null}
         {activeBesideTab.kind === "team" ? (
           <FlowView
             session={session}

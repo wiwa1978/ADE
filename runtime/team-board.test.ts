@@ -96,3 +96,42 @@ test("state survives a restart; repeated reads fold into one event", () => {
 		t.cleanup();
 	}
 });
+
+test("swarm overview: goal, threads, live focus, and automatic thread status sync", () => {
+	const t = setup();
+	try {
+		assert.match(t.board.setSwarmOverview("s", "lead", {
+			title: "ADE Audit: Security, Zod & UI Refactor",
+			goalTitle: "Harden security, Zod types, and modular UI",
+			goalSummary: "Patch vulnerabilities, add Zod validation, optimize runtime, and modularize UI.",
+		}), /Harden security/);
+		const th1 = t.board.upsertThread("s", "lead", {
+			title: "End-to-end Zod type safety",
+			summary: "Every API boundary validates with Zod and strict TypeScript passes.",
+		});
+		assert.equal(th1, "TH1");
+		const task1 = t.board.addTask("s", "lead", { title: "Add Zod schemas", owner: "s1", threadId: th1 });
+		assert.equal(t.board.state("s").tasks[0].threadId, "TH1");
+
+		t.board.takeTask("s", "s1", task1);
+		assert.equal(t.board.state("s").threads[0].status, "moving");
+
+		t.board.setFocus("s", "s1", "Check MobilePairingManager constructor signature");
+		assert.equal(t.board.state("s").focus.s1.text, "Check MobilePairingManager constructor signature");
+		assert.equal(t.board.state("s").threads[0].focus, "Check MobilePairingManager constructor signature");
+		assert.match(t.board.describeOverview("s"), /End-to-end Zod type safety \(0\/1\) · Now: Check MobilePairingManager/);
+
+		t.board.finishTask("s", "s1", task1, "Zod schemas added");
+		assert.equal(t.board.state("s").threads[0].status, "done");
+
+		t.board.reviewTask("s", "lead", task1, "send_back", "Add missing route validator");
+		assert.equal(t.board.state("s").threads[0].status, "moving");
+
+		const reloaded = new TeamBoard(t.dir);
+		assert.equal(reloaded.state("s").title, "ADE Audit: Security, Zod & UI Refactor");
+		assert.equal(reloaded.state("s").goal?.title, "Harden security, Zod types, and modular UI");
+		assert.equal(reloaded.state("s").threads.length, 1);
+	} finally {
+		t.cleanup();
+	}
+});

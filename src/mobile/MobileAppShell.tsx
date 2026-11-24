@@ -39,6 +39,7 @@ import type {
 } from "../../app-types"
 import type { Project } from "../../ProjectsView"
 import { sessionStateInfo, type InboxEntry } from "../session-state"
+import { ActiveThreadSpinner } from "../sidebar/ActiveThreadSpinner"
 import { TimelineView } from "../timeline/TimelineView"
 import { ComposerDock } from "../composer/ComposerDock"
 import { ArtefactsBrowserPanel } from "../panels/ArtefactsBrowserPanel"
@@ -456,7 +457,8 @@ export function MobileAppShell({
                         <div className="ade-mob-session-body">
                           <div className="ade-mob-session-top">
                             <strong className="ade-truncate">{sess.label}</strong>
-                            {stateMeta ? <span className={`ade-pill ${entry?.needsYou ? "ade-pill-warn" : ""}`}>{stateMeta.label}</span> : null}
+                            {isWorking ? <ActiveThreadSpinner size={14} title="Working" />
+                              : stateMeta ? <span className={`ade-pill ${entry?.needsYou ? "ade-pill-warn" : ""}`}>{stateMeta.label}</span> : null}
                           </div>
                           <div className="ade-mob-session-sub ade-truncate">
                             {proj ? proj.name : "Chat"}
@@ -532,18 +534,22 @@ export function MobileAppShell({
                           </button>
                         ) : (
                           <div className="ade-mob-project-sessions">
-                            {projSessions.map(sess => (
-                              <button
-                                key={sess.id}
-                                type="button"
-                                className={`ade-mob-session-row ${sess.id === activeSession.id ? "is-active" : ""}`}
-                                onClick={() => openSessionChat(sess)}
-                              >
-                                <span className={`ade-mob-session-dot ${sess.status === "working" ? "is-working" : inboxEntries[sess.id]?.needsYou ? "is-attention" : "is-idle"}`} />
-                                <span className="ade-truncate flex-1">{sess.label}</span>
-                                <ChevronRight className="size-3.5 opacity-40 shrink-0" />
-                              </button>
-                            ))}
+                            {projSessions.map(sess => {
+                              const working = inboxEntries[sess.id]?.state !== "needs-approval" && (sess.status === "working" || inboxEntries[sess.id]?.state === "working")
+                              return (
+                                <button
+                                  key={sess.id}
+                                  type="button"
+                                  className={`ade-mob-session-row ${sess.id === activeSession.id ? "is-active" : ""}`}
+                                  onClick={() => openSessionChat(sess)}
+                                >
+                                  <span className={`ade-mob-session-dot ${working ? "is-working" : inboxEntries[sess.id]?.needsYou ? "is-attention" : "is-idle"}`} />
+                                  <span className="ade-truncate flex-1">{sess.label}</span>
+                                  {working ? <ActiveThreadSpinner size={14} title="Working" /> : null}
+                                  <ChevronRight className="size-3.5 opacity-40 shrink-0" />
+                                </button>
+                              )
+                            })}
                           </div>
                         )}
                       </div>
@@ -561,20 +567,24 @@ export function MobileAppShell({
                 </button>
               </div>
               <div className="ade-mob-card-list">
-                {chatList.map(chat => (
-                  <button
-                    key={chat.id}
-                    type="button"
-                    className={`ade-mob-session-card ${chat.id === activeSession.id ? "is-active" : ""}`}
-                    onClick={() => openSessionChat(chat)}
-                  >
-                    <MessageSquare className="size-4 opacity-70 shrink-0" />
-                    <div className="ade-mob-session-body">
-                      <strong className="ade-truncate">{chat.label}</strong>
-                    </div>
-                    <ChevronRight className="size-4 opacity-40 shrink-0" />
-                  </button>
-                ))}
+                {chatList.map(chat => {
+                  const working = inboxEntries[chat.id]?.state !== "needs-approval" && (chat.status === "working" || inboxEntries[chat.id]?.state === "working")
+                  return (
+                    <button
+                      key={chat.id}
+                      type="button"
+                      className={`ade-mob-session-card ${chat.id === activeSession.id ? "is-active" : ""}`}
+                      onClick={() => openSessionChat(chat)}
+                    >
+                      <MessageSquare className="size-4 opacity-70 shrink-0" />
+                      <div className="ade-mob-session-body">
+                        <strong className="ade-truncate">{chat.label}</strong>
+                      </div>
+                      {working ? <ActiveThreadSpinner size={14} title="Working" /> : null}
+                      <ChevronRight className="size-4 opacity-40 shrink-0" />
+                    </button>
+                  )
+                })}
               </div>
             </section>
           </div>

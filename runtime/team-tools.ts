@@ -2,7 +2,7 @@
 // agent in the session: each call acts as the conversation that made it (the main agent is "lead").
 import { defineExtension, defineTool, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable";
 import { arr, num, obj, opt, str } from "@earendil-works/pi-schema";
-import type { PostKind, TeamBoard } from "./team-board.ts";
+import type { PostKind, TeamBoard, ThreadStatus } from "./team-board.ts";
 
 export type TeamToolsOptions = {
 	sessionId: string;
@@ -39,7 +39,7 @@ export function createTeamTools(opts: TeamToolsOptions) {
 
 	const teamTasks = defineTool({
 		name: "team_tasks",
-		description: "The shared task board. action: list (default), add (title, optional detail, owner name, dependsOn task ids), take (id: take a ready task to work on it; one agent per task), done (id, result), and for the lead: send_back (id, note), drop (id), reopen (id).",
+		description: "The shared task board. action: list (default), add (title, optional detail, owner name, dependsOn task ids, threadId), take (id: take a ready task to work on it; one agent per task), done (id, result), and for the lead: send_back (id, note), drop (id), reopen (id).",
 		parameters: obj({
 			action: opt(str({ description: "list, add, take, done, send_back, drop or reopen" })),
 			id: opt(str({ description: "Task id, e.g. T3" })),
@@ -47,6 +47,7 @@ export function createTeamTools(opts: TeamToolsOptions) {
 			detail: opt(str()),
 			owner: opt(str({ description: "Who should do it (a subagent's name); empty = whoever takes it" })),
 			dependsOn: opt(arr(str(), { description: "Task ids this task waits for" })),
+			threadId: opt(str({ description: "Optional workstream thread id (e.g. TH1)" })),
 			result: opt(str({ description: "For done: what you did and where" })),
 			note: opt(str()),
 		}),
@@ -57,7 +58,7 @@ export function createTeamTools(opts: TeamToolsOptions) {
 			const action = args.action ?? "list";
 			if (action === "list") return reply(opts.board.describe(opts.sessionId, names));
 			if (action === "add") return attempt(() => {
-				const id = opts.board.addTask(opts.sessionId, agent, { title: args.title ?? "", detail: args.detail, owner: args.owner ? resolve(args.owner) : null, dependsOn: args.dependsOn });
+				const id = opts.board.addTask(opts.sessionId, agent, { title: args.title ?? "", detail: args.detail, owner: args.owner ? resolve(args.owner) : null, dependsOn: args.dependsOn, threadId: args.threadId ?? null });
 				return `Added ${id}.`;
 			});
 			if (!args.id) return reply("Give the task id.");
@@ -137,5 +138,48 @@ export function createTeamTools(opts: TeamToolsOptions) {
 		},
 	});
 
-	return defineExtension({ name: "ade-team", tools: [teamTasks, teamPlan, teamPost, teamRead, teamClaim] });
+	const teamOverview = defineTool({
+		name: "team_overview",
+		description: "Manage the Swarm Overview: action 'status' (default) shows the goal and threads; 'set_goal' sets the swarm title, goalTitle and goalSummary; 'thread' creates or updates a workstream thread (id, title, summary, status: open|moving|waiting|done|blocked, focus).",
+		parameters: obj({
+			action: opt(str({ description: "status, set_goal or thread" })),
+			title: opt(str({ description: "Swarm title (for set_goal) or thread title (for thread)" })),
+			goalTitle: opt(str({ description: "Main headline inside the Goal card" })),
+			goalSummary: opt(str({ description: "Short summary below the Goal headline" })),
+			id: opt(str({ description: "Thread id (e.g. TH1) when updating or naming a thread" })),
+			summary: opt(str({ description: "Short description of the thread's objective" })),
+			status: opt(str({ description: "Thread status: open, moving, waiting, done or blocked" })),
+			focus: opt(str({ description: "Current live step for this thread" })),
+		}),
+		replay: "safe",
+		execute: async (args, api) => {
+			const agent = who(api.conversationId);
+			const action = args.action ?? "status";
+			if (action === "status") return reply(opts.board.describeOverview(opts.sessionId));
+			if (action === "set_goal") return attempt(() => opts.board.setSwarmOverview(opts.sessionId, agent, { title: args.title, goalTitle: args.goalTitle, goalSummary: args.goalSummary }));
+			if (action === "thread") return attempt(() => {
+				const id = opts.board.upsertThread(opts.sessionId, agent, {
+					id: args.id,
+					title: args.title,
+					summary: args.summary,
+					status: args.status as ThreadStatus | undefined,
+					focus: args.focus,
+				});
+				return `Thread ${id} saved.`;
+			});
+			return reply(`Unknown action "${action}".`);
+		},
+	});
+
+	const teamFocus = defineTool({
+		name: "team_focus",
+		description: "Publish a short live status line (3-8 words) shown under your running task and thread in Swarm Overview.",
+		parameters: obj({
+			text: str({ description: "Concise present-tense activity, e.g. 'Check MobilePairingManager constructor signature'" }),
+		}),
+		replay: "safe",
+		execute: async (args, api) => attempt(() => opts.board.setFocus(opts.sessionId, who(api.conversationId), args.text)),
+	});
+
+	return defineExtension({ name: "ade-team", tools: [teamTasks, teamPlan, teamPost, teamRead, teamClaim, teamOverview, teamFocus] });
 }

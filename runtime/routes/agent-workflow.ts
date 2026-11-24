@@ -59,11 +59,60 @@ export function registerAgentWorkflowRoutes(
 		ctx.json(200, { ...view, switchedTo: blueprintId === VIBE_BLUEPRINT_ID ? "vibe" : blueprintId });
 	}, { originError: "Use ADE to change the way of working." });
 
-	// --- Team board: tasks, plans, posts, file claims and the flow events (the Team view) ---
+	// --- Team board: tasks, plans, posts, file claims, swarm overview and flow events (Team & Swarm views) ---
 	router.get("/api/sessions/:id/team", (ctx) => {
 		const state = host.team.state(ctx.params.id);
-		ctx.json(200, { tasks: state.tasks, posts: state.posts.slice(-200), claims: state.claims, events: state.events, requirePlans: state.requirePlans });
+		ctx.json(200, {
+			title: state.title,
+			goal: state.goal,
+			threads: state.threads,
+			focus: state.focus,
+			tasks: state.tasks,
+			posts: state.posts.slice(-200),
+			claims: state.claims,
+			events: state.events,
+			requirePlans: state.requirePlans,
+		});
 	});
+
+	// You can set or refine the Swarm title and goal directly from the Swarm Overview pane.
+	router.put("/api/sessions/:id/team/overview", async (ctx) => {
+		const body = await ctx.readBody() as { title?: unknown; goalTitle?: unknown; goalSummary?: unknown } | null;
+		const message = host.team.setSwarmOverview(ctx.params.id, "user", {
+			title: typeof body?.title === "string" ? body.title : undefined,
+			goalTitle: typeof body?.goalTitle === "string" ? body.goalTitle : undefined,
+			goalSummary: typeof body?.goalSummary === "string" ? body.goalSummary : undefined,
+		});
+		ctx.json(200, { message });
+	}, { originError: "Use ADE to update the swarm overview." });
+
+	// Create or update a workstream thread from the Swarm UI.
+	router.post("/api/sessions/:id/team/threads", async (ctx) => {
+		const body = await ctx.readBody() as { id?: unknown; title?: unknown; summary?: unknown; status?: unknown; focus?: unknown } | null;
+		const id = host.team.upsertThread(ctx.params.id, "user", {
+			id: typeof body?.id === "string" ? body.id : undefined,
+			title: typeof body?.title === "string" ? body.title : undefined,
+			summary: typeof body?.summary === "string" ? body.summary : undefined,
+			status: typeof body?.status === "string" ? body.status as "open" | "moving" | "waiting" | "done" | "blocked" : undefined,
+			focus: typeof body?.focus === "string" ? body.focus : undefined,
+		});
+		ctx.json(200, { id });
+	}, { originError: "Use ADE to update swarm threads." });
+
+	// Add a task on the shared swarm/team board from the UI.
+	router.post("/api/sessions/:id/team/tasks", async (ctx) => {
+		const body = await ctx.readBody() as { title?: unknown; detail?: unknown; owner?: unknown; dependsOn?: unknown; threadId?: unknown } | null;
+		if (typeof body?.title !== "string") throw badRequest("A task needs a title.");
+		const dependsOn = Array.isArray(body.dependsOn) ? body.dependsOn.filter((item): item is string => typeof item === "string") : [];
+		const id = host.team.addTask(ctx.params.id, "user", {
+			title: body.title,
+			detail: typeof body.detail === "string" ? body.detail : "",
+			owner: typeof body.owner === "string" && body.owner.trim() ? body.owner.trim() : null,
+			dependsOn,
+			threadId: typeof body.threadId === "string" && body.threadId.trim() ? body.threadId.trim() : null,
+		});
+		ctx.json(200, { id });
+	}, { originError: "Use ADE to add team tasks." });
 
 	// You decide on a plan (instead of, or before, the lead).
 	router.post("/api/sessions/:id/team/plans/:taskId", async (ctx) => {

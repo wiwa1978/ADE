@@ -194,6 +194,8 @@ export type WorkspaceTabKind =
   | "agents"
   /** Under the hood: members, the data flow and the latest flows. */
   | "team"
+  /** Coordinated swarm overview: Goal, live Running tasks, Threads, shared Board, Members, and Graph. */
+  | "swarm"
 
 export type WorkspaceTab = {
   id: string

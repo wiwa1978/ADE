@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Activity, Bot, CircleDot, Columns2, ListChecks, Users, FileDiff, FileText, FolderTree, GitPullRequest, Globe, Play, ScrollText, Terminal, Workflow, X } from "lucide-react"
+import { Activity, Bot, CircleDot, Columns2, ListChecks, Network, Users, FileDiff, FileText, FolderTree, GitPullRequest, Globe, Play, ScrollText, Terminal, Workflow, X } from "lucide-react"
 import type { SidePanelItem } from "./SidePanelMenu"
 import { publishSessionTools } from "../layout/session-tools"
 import { TerminalPanel } from "../../TerminalPanel"
@@ -33,6 +33,7 @@ import { tabsForNextSession } from "./side-panel-tabs"
 import { StagesPanel, WayOfWorkingSelect } from "../blueprints/StagesPanel"
 import { StageBar } from "../blueprints/StageBar"
 import { useSessionStages } from "../blueprints/session-stages"
+import { useI18n } from "../i18n/I18nContext"
 import { BesidePane } from "./BesidePane"
 import { ConversationLayout } from "./ConversationLayout"
 import { DEFAULT_KEYBINDINGS, formatShortcut, matchesChord, type KeybindingMap } from "../keybindings"
@@ -154,6 +155,7 @@ export function SplitWorkspace({
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>
   keybindings?: KeybindingMap
 }) {
+  const { t } = useI18n()
   const [besideTabs, setBesideTabs] = useState<WorkspaceTab[]>([])
   const [besideHidden, setBesideHidden] = useState(false)
   const [activeBesideId, setActiveBesideId] = useState<string | null>(null)
@@ -330,13 +332,17 @@ export function SplitWorkspace({
   const openTranscript = useCallback(() => openBeside({ id: "transcript", kind: "transcript", title: "Transcript" }), [openBeside])
   const openProgress = useCallback(() => openBeside({ id: "progress", kind: "progress", title: "Progress" }), [openBeside])
   const openAgents = useCallback(() => openBeside({ id: "agents", kind: "agents", title: "Agents" }), [openBeside])
+  const [narrowRatio, setNarrowRatio] = useState<number | null>(null)
+  const openSwarm = useCallback(() => {
+    openBeside({ id: "swarm", kind: "swarm", title: "Swarm" })
+    if (narrowRatio === null && splitRatio > 42) { setNarrowRatio(splitRatio); setSplitRatio(38) }
+  }, [openBeside, narrowRatio, splitRatio])
   // The Team view wants room: it opens wide, the chat keeps a narrow column ("Wider" in Agents switches back).
   const openTeam = () => {
     openBeside({ id: "team", kind: "team", title: "Team" })
     if (narrowRatio === null) { setNarrowRatio(splitRatio); setSplitRatio(30) }
   }
   // "Wider" in the Agents view gives the side panel most of the room (and back).
-  const [narrowRatio, setNarrowRatio] = useState<number | null>(null)
   const toggleAgentsWide = () => {
     if (narrowRatio !== null) { setSplitRatio(narrowRatio); setNarrowRatio(null) }
     else { setNarrowRatio(splitRatio); setSplitRatio(30) }
@@ -428,22 +434,23 @@ export function SplitWorkspace({
   // Everything the side panel can open, with live status (the panel's menu lists these).
   const is = (kind: WorkspaceTab["kind"]) => showBeside && activeBesideTab?.kind === kind
   const sidePanelItems: SidePanelItem[] = [
-    ...(hasWorkspace ? [{ id: "team", label: "Team", description: "Under the hood: who takes part, the data flow between them and the latest flows, live", icon: Users, onOpen: openTeam, live: isBusy || runningSubagentsCount > 0, active: is("team") }] : []),
-    ...(subagents.length ? [{ id: "agents", label: "Agents", description: "Every agent side by side: what each is doing, thinking and changed", icon: Bot, onOpen: openAgents, badge: runningSubagentsCount || undefined, live: runningSubagentsCount > 0, active: is("agents") || is("subagent") }] : []),
-    ...(subagents.length || progressCount.total > 1 ? [{ id: "progress", label: "Progress", description: "A table of every agent and task and how far each is", icon: ListChecks, onOpen: openProgress, badge: `${progressCount.done}/${progressCount.total}`, active: is("progress"), menuOnly: true }] : []),
-    ...(blueprint ? [{ id: "stages", label: "Stages", description: `${blueprint.name.replace(/\s*\(.*\)$/, "")}: where the work is and what waits for you`, icon: Workflow, onOpen: () => { closeBesideTab("tools"); openStagesDrawer() }, badge: `${blueprint.done}/${blueprint.total}`, attention: blueprint.stage?.status === "awaiting_approval", active: bottomTerminalOpen && activeDrawerTab === "stages" }] : []),
+    ...(hasWorkspace ? [{ id: "swarm", label: t("tool.swarm.label"), description: t("tool.swarm.desc"), icon: Network, onOpen: openSwarm, badge: runningSubagentsCount || undefined, live: isBusy || runningSubagentsCount > 0, active: is("swarm") }] : []),
+    ...(hasWorkspace ? [{ id: "team", label: t("tool.team.label"), description: t("tool.team.desc"), icon: Users, onOpen: openTeam, live: isBusy || runningSubagentsCount > 0, active: is("team") }] : []),
+    ...(subagents.length ? [{ id: "agents", label: t("tool.agents.label"), description: t("tool.agents.desc"), icon: Bot, onOpen: openAgents, badge: runningSubagentsCount || undefined, live: runningSubagentsCount > 0, active: is("agents") || is("subagent") }] : []),
+    ...(subagents.length || progressCount.total > 1 ? [{ id: "progress", label: t("tool.progress.label"), description: t("tool.progress.desc"), icon: ListChecks, onOpen: openProgress, badge: `${progressCount.done}/${progressCount.total}`, active: is("progress"), menuOnly: true }] : []),
+    ...(blueprint ? [{ id: "stages", label: t("tool.stages.label"), description: t("tool.stages.desc", { name: blueprint.name.replace(/\s*\(.*\)$/, "") }), icon: Workflow, onOpen: () => { closeBesideTab("tools"); openStagesDrawer() }, badge: `${blueprint.done}/${blueprint.total}`, attention: blueprint.stage?.status === "awaiting_approval", active: bottomTerminalOpen && activeDrawerTab === "stages" }] : []),
     ...(hasWorkspace ? [
-      { id: "files", label: "Files", description: "Browse and open the workspace's files", icon: FolderTree, onOpen: openFiles, active: is("files") },
-      { id: "changes", label: "Changes", description: "Review the agent's changes and the branch diff", icon: FileDiff, onOpen: () => openDiff(), badge: gitSummary.files.length || undefined, active: is("diff") },
-      { id: "run", label: "Run", description: "Start the app with the project's run script", icon: Play, onOpen: openRun, live: runStatus?.run === "running", active: is("run") },
-      ...(session.projectId ? [{ id: "issues", label: "Issues", description: "The project's open GitHub issues; start a session on one", icon: CircleDot, onOpen: openIssues, active: is("issues") }] : []),
-      ...(session.workspace?.kind !== "none" ? [{ id: "pr", label: pullRequest ? `Pull request #${pullRequest.number}` : "Pull request", description: "Push, open and merge a pull request", icon: GitPullRequest, onOpen: openPullRequest, active: is("pr") }] : []),
+      { id: "files", label: t("tool.files.label"), description: t("tool.files.desc"), icon: FolderTree, onOpen: openFiles, active: is("files") },
+      { id: "changes", label: t("tool.changes.label"), description: t("tool.changes.desc"), icon: FileDiff, onOpen: () => openDiff(), badge: gitSummary.files.length || undefined, active: is("diff") },
+      { id: "run", label: t("tool.run.label"), description: t("tool.run.desc"), icon: Play, onOpen: openRun, live: runStatus?.run === "running", active: is("run") },
+      ...(session.projectId ? [{ id: "issues", label: t("tool.issues.label"), description: t("tool.issues.desc"), icon: CircleDot, onOpen: openIssues, active: is("issues") }] : []),
+      ...(session.workspace?.kind !== "none" ? [{ id: "pr", label: pullRequest ? t("tool.pr.labelNumber", { number: pullRequest.number }) : t("tool.pr.label"), description: t("tool.pr.desc"), icon: GitPullRequest, onOpen: openPullRequest, active: is("pr") }] : []),
     ] : []),
-    { id: "terminal", label: "Terminal", description: `A shell in the workspace (${keybindings.toggleTerminal ? formatShortcut(keybindings.toggleTerminal) : "⌘J"} opens it in the drawer)`, icon: Terminal, onOpen: () => openTerminal(false), active: is("terminal") },
-    { id: "browser", label: "Browser", description: "The built-in browser the agent can drive", icon: Globe, onOpen: () => openBrowser(), live: browserState.agentDriving, active: is("browser") },
-    ...(artifacts.length || hasWorkspace ? [{ id: "artifacts", label: "Artefacts", description: "Session artefacts: files, plans and images", icon: FileText, onOpen: () => openArtifact(), badge: artifacts.length || undefined, active: is("artifact") }] : []),
-    { id: "transcript", label: "Transcript", description: "Step through what the agent did, or export the session", icon: ScrollText, onOpen: openTranscript, active: is("transcript") },
-    ...(runningProcessesCount ? [{ id: "processes", label: "Processes", description: "Commands the agent left running", icon: Activity, onOpen: openProcesses, badge: runningProcessesCount, live: true, active: is("processes") }] : []),
+    { id: "terminal", label: t("tool.terminal.label"), description: t("tool.terminal.desc", { shortcut: keybindings.toggleTerminal ? formatShortcut(keybindings.toggleTerminal) : "⌘J" }), icon: Terminal, onOpen: () => openTerminal(false), active: is("terminal") },
+    { id: "browser", label: t("tool.browser.label"), description: t("tool.browser.desc"), icon: Globe, onOpen: () => openBrowser(), live: browserState.agentDriving, active: is("browser") },
+    ...(artifacts.length || hasWorkspace ? [{ id: "artifacts", label: t("tool.artifacts.label"), description: t("tool.artifacts.desc"), icon: FileText, onOpen: () => openArtifact(), badge: artifacts.length || undefined, active: is("artifact") }] : []),
+    { id: "transcript", label: t("tool.transcript.label"), description: t("tool.transcript.desc"), icon: ScrollText, onOpen: openTranscript, active: is("transcript") },
+    ...(runningProcessesCount ? [{ id: "processes", label: t("tool.processes.label"), description: t("tool.processes.desc"), icon: Activity, onOpen: openProcesses, badge: runningProcessesCount, live: true, active: is("processes") }] : []),
   ]
   // The activity bar on the far left shows the same tools; clicking the open one hides it again.
   useEffect(() => {
@@ -520,7 +527,10 @@ export function SplitWorkspace({
           onRemoveAttachment={onRemoveAttachment}
           skillsCatalog={skillsCatalog}
           hasWorkspace={hasWorkspace}
-          onSubmit={onSendMessage}
+          onSubmit={text => {
+            if (hasWorkspace && /^\s*\/swarm\b/i.test(text)) openSwarm()
+            onSendMessage(text)
+          }}
           onSteer={onSteerSession}
           onAbort={onAbortSession}
           onCompact={onCompactSession}
@@ -587,6 +597,7 @@ export function SplitWorkspace({
               agentBusy={isBusy}
               onAskAgent={onAskAgent}
               timelineItems={timeline?.items ?? []}
+              leadLiveTools={timeline?.liveTools ?? []}
               tasks={tasks}
               onRewind={hasWorkspace ? content => void rewindTo(content) : undefined}
               diffMode={diffMode}

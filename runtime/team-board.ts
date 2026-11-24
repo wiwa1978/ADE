@@ -12,6 +12,24 @@ import type { RuntimeEventBus } from "./events.ts";
 export type Party = string;
 
 export type TaskStatus = "todo" | "in_progress" | "done" | "dropped";
+export type ThreadStatus = "open" | "moving" | "waiting" | "done" | "blocked";
+export type SwarmGoal = {
+	title: string;
+	summary: string;
+	updatedAt: number;
+};
+export type TeamThread = {
+	id: string;
+	title: string;
+	summary: string;
+	status: ThreadStatus;
+	focus: string;
+	updatedAt: number;
+};
+export type AgentFocus = {
+	text: string;
+	at: number;
+};
 export type TeamTask = {
 	id: string;
 	title: string;
@@ -20,6 +38,7 @@ export type TeamTask = {
 	createdBy: Party;
 	status: TaskStatus;
 	dependsOn: string[];
+	threadId?: string | null;
 	plan: { text: string; status: "waiting" | "approved" | "returned"; note: string; at: number } | null;
 	/** Sent back by a reviewer or the lead: what to fix. */
 	returnedNote: string;
@@ -37,6 +56,10 @@ export type TeamEvent = { seq: number; at: number; part: TeamPart; action: strin
 
 export type TeamState = {
 	version: 1;
+	title: string;
+	goal: SwarmGoal | null;
+	threads: TeamThread[];
+	focus: Record<Party, AgentFocus>;
 	tasks: TeamTask[];
 	posts: TeamPost[];
 	claims: FileClaim[];
@@ -46,12 +69,13 @@ export type TeamState = {
 	/** Members show a plan and wait for approval before they work on a task. */
 	requirePlans: boolean;
 	nextTask: number;
+	nextThread: number;
 	nextSeq: number;
 };
 
 const MAX_EVENTS = 400;
 const FOLD_MS = 90_000;
-const empty = (): TeamState => ({ version: 1, tasks: [], posts: [], claims: [], events: [], readSeq: {}, requirePlans: false, nextTask: 1, nextSeq: 1 });
+const empty = (): TeamState => ({ version: 1, title: "", goal: null, threads: [], focus: {}, tasks: [], posts: [], claims: [], events: [], readSeq: {}, requirePlans: false, nextTask: 1, nextThread: 1, nextSeq: 1 });
 const clip = (text: string, max = 160) => {
 	const value = text.replace(/\s+/g, " ").trim();
 	return value.length > max ? `${value.slice(0, max - 1)}…` : value;
@@ -133,18 +157,127 @@ export class TeamBoard {
 		return result;
 	}
 
+	#thread(state: TeamState, id: string) {
+		const thread = state.threads.find(entry => entry.id.toLowerCase() === String(id).trim().toLowerCase());
+		if (!thread) throw notFound(`There is no thread ${id}. Threads: ${state.threads.map(entry => entry.id).join(", ") || "none yet"}.`);
+		return thread;
+	}
+
+	#syncThreadFromTasks(state: TeamState, threadId: string | null | undefined) {
+		if (!threadId) return;
+		const thread = state.threads.find(entry => entry.id === threadId);
+		if (!thread) return;
+		const related = state.tasks.filter(task => task.threadId === threadId && task.status !== "dropped");
+		if (!related.length) return;
+		const now = this.#now();
+		if (related.every(task => task.status === "done")) {
+			thread.status = "done";
+			thread.updatedAt = now;
+		} else if (related.some(task => task.status === "in_progress")) {
+			thread.status = "moving";
+			thread.updatedAt = now;
+		} else if (thread.status === "done") {
+			thread.status = "open";
+			thread.updatedAt = now;
+		}
+	}
+
 	setRequirePlans(sessionId: string, on: boolean) {
 		this.#change(sessionId, state => { state.requirePlans = on; return ""; });
 	}
 
-	addTask(sessionId: string, by: Party, input: { title: string; detail?: string; owner?: Party | null; dependsOn?: string[] }) {
+	setSwarmOverview(sessionId: string, by: Party, input: { title?: string; goalTitle?: string; goalSummary?: string }) {
+		return this.#change(sessionId, state => {
+			const now = this.#now();
+			if (typeof input.title === "string") state.title = clip(input.title, 160);
+			const nextTitle = typeof input.goalTitle === "string" ? clip(input.goalTitle, 200) : state.goal?.title ?? "";
+			const nextSummary = typeof input.goalSummary === "string" ? clip(input.goalSummary, 400) : state.goal?.summary ?? "";
+			if (nextTitle || nextSummary) {
+				state.goal = { title: nextTitle || state.title || "Swarm Goal", summary: nextSummary, updatedAt: now };
+			}
+			const label = state.goal?.title || state.title || "Swarm overview";
+			this.#log(state, { part: "board", action: "overview", direction: "in", from: by, to: ["all"], subject: "goal", text: `goal: ${clip(label, 140)}` });
+			return `Swarm overview updated: ${label}.`;
+		});
+	}
+
+	upsertThread(sessionId: string, by: Party, input: { id?: string; title?: string; summary?: string; status?: ThreadStatus; focus?: string }) {
+		return this.#change(sessionId, state => {
+			const now = this.#now();
+			const rawId = input.id?.trim();
+			const existing = rawId ? state.threads.find(entry => entry.id.toLowerCase() === rawId.toLowerCase()) : undefined;
+			const validStatus = (value?: string): ThreadStatus | undefined =>
+				value === "open" || value === "moving" || value === "waiting" || value === "done" || value === "blocked" ? value : undefined;
+			if (existing) {
+				if (typeof input.title === "string" && input.title.trim()) existing.title = clip(input.title, 160);
+				if (typeof input.summary === "string") existing.summary = clip(input.summary, 320);
+				const status = validStatus(input.status);
+				if (status) existing.status = status;
+				if (typeof input.focus === "string") existing.focus = clip(input.focus, 160);
+				existing.updatedAt = now;
+				return existing.id;
+			}
+			const title = clip(input.title ?? "", 160);
+			if (!title) throw badRequest("A thread needs a title.");
+			const id = rawId && /^[\w-]{1,40}$/.test(rawId) ? rawId : `TH${state.nextThread++}`;
+			state.threads.push({
+				id,
+				title,
+				summary: clip(input.summary ?? "", 320),
+				status: validStatus(input.status) ?? "open",
+				focus: clip(input.focus ?? "", 160),
+				updatedAt: now,
+			});
+			this.#log(state, { part: "board", action: "thread", direction: "in", from: by, to: ["all"], subject: id, text: `thread ${id}: ${title}` });
+			return id;
+		});
+	}
+
+	setFocus(sessionId: string, agent: Party, text: string) {
+		const focus = clip(text ?? "", 160);
+		if (!focus) throw badRequest("Describe what you are focusing on.");
+		return this.#change(sessionId, state => {
+			const now = this.#now();
+			state.focus[agent] = { text: focus, at: now };
+			for (const task of state.tasks) {
+				if (task.owner === agent && task.status === "in_progress" && task.threadId) {
+					const thread = state.threads.find(entry => entry.id === task.threadId);
+					if (thread) {
+						thread.focus = focus;
+						if (thread.status === "open" || thread.status === "waiting") thread.status = "moving";
+						thread.updatedAt = now;
+					}
+				}
+			}
+			return `Focus set: ${focus}`;
+		});
+	}
+
+	describeOverview(sessionId: string) {
+		const state = this.state(sessionId);
+		const lines: string[] = [];
+		if (state.title) lines.push(`Title: ${state.title}`);
+		if (state.goal) lines.push(`Goal: ${state.goal.title}${state.goal.summary ? ` — ${state.goal.summary}` : ""}`);
+		if (state.threads.length) {
+			lines.push("Threads:");
+			for (const thread of state.threads) {
+				const tasks = state.tasks.filter(task => task.threadId === thread.id && task.status !== "dropped");
+				const done = tasks.filter(task => task.status === "done").length;
+				lines.push(`- ${thread.id} [${thread.status}] ${thread.title} (${done}/${tasks.length})${thread.focus ? ` · Now: ${thread.focus}` : ""}`);
+			}
+		}
+		return lines.length ? lines.join("\n") : "No swarm goal or threads set yet.";
+	}
+
+	addTask(sessionId: string, by: Party, input: { title: string; detail?: string; owner?: Party | null; dependsOn?: string[]; threadId?: string | null }) {
 		const title = clip(input.title ?? "", 200);
 		if (!title) throw badRequest("A task needs a title.");
 		return this.#change(sessionId, state => {
 			const dependsOn = (input.dependsOn ?? []).map(dep => this.#task(state, dep).id);
+			const threadId = input.threadId?.trim() ? this.#thread(state, input.threadId).id : null;
 			const id = `T${state.nextTask++}`;
 			const now = this.#now();
-			state.tasks.push({ id, title, detail: (input.detail ?? "").slice(0, 4000), owner: input.owner ?? null, createdBy: by, status: "todo", dependsOn, plan: null, returnedNote: "", result: "", updatedAt: now, history: [{ at: now, by, action: "added" }] });
+			state.tasks.push({ id, title, detail: (input.detail ?? "").slice(0, 4000), owner: input.owner ?? null, createdBy: by, status: "todo", dependsOn, threadId, plan: null, returnedNote: "", result: "", updatedAt: now, history: [{ at: now, by, action: "added" }] });
 			this.#log(state, { part: "tasks", action: "add", direction: "in", from: by, to: [], subject: id, text: `${id} ${title}${dependsOn.length ? ` (waits for ${dependsOn.join(", ")})` : ""}` });
 			if (input.owner) this.#log(state, { part: "tasks", action: "assign", direction: "out", from: "tasks", to: [input.owner], subject: id, text: `${id} assigned` });
 			return id;
@@ -163,6 +296,7 @@ export class TeamBoard {
 			task.status = "in_progress";
 			task.updatedAt = this.#now();
 			task.history.push({ at: task.updatedAt, by: agent, action: "took" });
+			this.#syncThreadFromTasks(state, task.threadId);
 			this.#log(state, { part: "tasks", action: "claim", direction: "in", from: agent, to: [], subject: task.id, text: `took ${task.id}: ${task.title}` });
 			return state.requirePlans ? `You have ${task.id}. Submit your plan with team_plan before you change anything; the lead approves it.` : `You have ${task.id}.`;
 		});
@@ -178,6 +312,7 @@ export class TeamBoard {
 			task.returnedNote = "";
 			task.updatedAt = this.#now();
 			task.history.push({ at: task.updatedAt, by: agent, action: "done", note: task.result });
+			this.#syncThreadFromTasks(state, task.threadId);
 			this.#log(state, { part: "tasks", action: "done", direction: "in", from: agent, to: [], subject: task.id, text: `${task.id} done${task.result ? `: ${clip(task.result, 120)}` : ""}` });
 			// Its file claims are released; tasks waiting for it may start.
 			const released = state.claims.filter(claim => claim.agent === agent);
@@ -211,6 +346,7 @@ export class TeamBoard {
 			}
 			task.updatedAt = now;
 			task.history.push({ at: now, by, action, note });
+			this.#syncThreadFromTasks(state, task.threadId);
 			return `${task.id} is ${task.status.replace("_", " ")}.`;
 		});
 	}
@@ -330,4 +466,4 @@ export class TeamBoard {
 }
 
 /** Told to agents that have the team tools. */
-export const TEAM_INSTRUCTIONS = "This session has a shared team board. Use team_tasks to see, add and take tasks (one agent per task; a task can wait for others) and to mark them done; team_post to ask, report findings or answer on the team board, and team_read to see what's new for you (posts, plan decisions, tasks sent back); team_claim before editing files, so two agents never edit the same file. When plans are required, submit yours with team_plan and wait for approval before changing files.";
+export const TEAM_INSTRUCTIONS = "This session has a shared team & swarm board. Use team_overview to set the swarm title, goal, and workstream threads; team_tasks to see, add (optionally linked to a threadId) and take tasks (one agent per task; a task can wait for others) and to mark them done; team_focus to publish your short live status line; team_post to ask, report findings or answer on the team board, and team_read to see what's new for you (posts, plan decisions, tasks sent back); team_claim before editing files, so two agents never edit the same file. When plans are required, submit yours with team_plan and wait for approval before changing files.";
