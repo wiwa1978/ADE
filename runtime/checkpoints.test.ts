@@ -12,6 +12,8 @@ test("checkpoints rewind files, new files, and commits, and a rewind can be undo
 	const repo = mkdtempSync(join(tmpdir(), "ade-checkpoints-"));
 	try {
 		git(repo, "init", "-b", "main");
+		// Windows checkouts turn \n into \r\n by default; this test is about the content, not line endings.
+		git(repo, "config", "core.autocrlf", "false");
 		writeFileSync(join(repo, "a.txt"), "one\n");
 		writeFileSync(join(repo, ".gitignore"), "ignored/\n");
 		git(repo, "add", ".");

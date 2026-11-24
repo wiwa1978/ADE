@@ -59,7 +59,7 @@ test("terminal sessions spawn a user-operated shell in the selected workspace an
 		spawn: ((shell: string, args: string[], options: { cwd?: string }) => { spawned.push({ shell, args, options }); return pty as unknown as IPty; }) as never,
 	});
 	const created = manager.create({ cwd, cols: 90, rows: 30 });
-	assert.equal(spawned[0].shell, "/bin/zsh");
+	assert.equal(spawned[0].shell, process.platform === "win32" ? "powershell.exe" : "/bin/zsh");
 	assert.deepEqual(spawned[0].args, []);
 	assert.equal(spawned[0].options.cwd, realpathSync(cwd));
 	assert.equal(created.cwd, realpathSync(cwd));
@@ -82,7 +82,8 @@ test("terminal sessions spawn a user-operated shell in the selected workspace an
 	manager.closeAll();
 });
 
-test("the system PTY executes input from the terminal session", async () => {
+// ConPTY needs a console window, which the Windows CI runner doesn't have.
+test("the system PTY executes input from the terminal session", { skip: process.platform === "win32" ? "ConPTY needs a console" : false }, async () => {
 	const cwd = temporaryDirectory();
 	const manager = new TerminalManager();
 	let id: string | undefined;

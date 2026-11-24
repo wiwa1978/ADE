@@ -217,7 +217,7 @@ test("sandboxed agents may write the worktree's Git metadata in the main reposit
 	try {
 		const dirs = gitWritableDirs(f.workspace);
 		assert.equal(dirs.length, 1);
-		assert.equal(realpathSync(dirs[0]), realpathSync(join(f.repo, ".git")));
+		assert.equal(realpathSync.native(dirs[0]), realpathSync.native(join(f.repo, ".git")));
 		assert.deepEqual(gitWritableDirs(f.repo), [], "a normal checkout needs nothing extra");
 		const args = engineArgs("codex", "hi", null, "auto-safe", null, dirs);
 		assert.deepEqual(args.slice(args.indexOf("--add-dir"), args.indexOf("--add-dir") + 2), ["--add-dir", dirs[0]]);

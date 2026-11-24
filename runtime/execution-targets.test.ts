@@ -63,8 +63,10 @@ test("Docker: a container per session with its worktree, Git metadata and agent 
 		await targets.ensure("s1", { workspace: f.workspace, repository: f.repo });
 
 		const run = calls.find(args => args[0] === "run")!;
-		const mounts = run.flatMap((arg, index) => (arg === "-v" ? [run[index + 1].split(":")[0]] : [])).filter(path => path.startsWith(f.root));
-		assert.deepEqual(mounts.sort(), [join(f.repo, ".git"), f.worktrees].sort(), "the worktree sits inside the worktree folder, so it isn't mounted twice");
+		// ADE mounts real paths (on Windows the temp folder has a short 8.3 name, e.g. RUNNER~1).
+		const root = realpathSync.native(f.root);
+		const mounts = run.flatMap((arg, index) => (arg === "-v" ? [run[index + 1].split(":")[0]] : [])).filter(path => path.startsWith(root));
+		assert.deepEqual(mounts.sort(), [join(realpathSync.native(f.repo), ".git"), realpathSync.native(f.worktrees)].sort(), "the worktree sits inside the worktree folder, so it isn't mounted twice");
 		assert.ok(run.includes("IS_SANDBOX=1") && run.some(arg => arg.startsWith("HOME=")), "agent CLIs find their sign-in and may skip prompts in the container");
 		assert.equal(run.at(-3), DEFAULT_DOCKER_IMAGE);
 		const record = targets.session("s1");
@@ -135,7 +137,10 @@ test("WSL2: Windows paths and environment are translated, and it's only offered 
 	}
 });
 
-test("SSH: the worktree is synced up, the command runs remotely with secrets on stdin, and results sync back", async () => {
+// SSH and Boat.dev targets need ssh and rsync, which ADE doesn't offer on Windows (use WSL2 there).
+const notWindows = { skip: process.platform === "win32" ? "ssh and rsync aren't available on Windows" : false };
+
+test("SSH: the worktree is synced up, the command runs remotely with secrets on stdin, and results sync back", notWindows, async () => {
 	const f = fixture();
 	// A stand-in for ssh that runs the remote command on this computer with HOME set to a "remote" folder.
 	const remoteHome = join(f.root, "remote-home");
@@ -175,7 +180,7 @@ test("SSH: the worktree is synced up, the command runs remotely with secrets on 
 	}
 });
 
-test("Boat.dev: a VM is created, its key authorized and host key pinned, and it's deleted on archive", async () => {
+test("Boat.dev: a VM is created, its key authorized and host key pinned, and it's deleted on archive", notWindows, async () => {
 	const f = fixture();
 	const calls: string[] = [];
 	let state = "provisioning";

@@ -19,6 +19,8 @@ import {
 function createTempRepo(): string {
 	const dir = mkdtempSync(join(tmpdir(), "ade-ws-files-"));
 	execFileSync("git", ["init", "-b", "main"], { cwd: dir });
+	// Windows checkouts turn \n into \r\n by default; these tests are about content, not line endings.
+	execFileSync("git", ["config", "core.autocrlf", "false"], { cwd: dir });
 	execFileSync("git", ["config", "user.email", "ade-test@example.com"], { cwd: dir });
 	execFileSync("git", ["config", "user.name", "ADE Test"], { cwd: dir });
 	writeFileSync(join(dir, "hello.txt"), "line 1\nline 2\n", "utf8");
