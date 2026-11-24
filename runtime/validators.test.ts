@@ -419,7 +419,7 @@ test("api.ts request supports Zod schema validation, 204 No Content, non-JSON 50
 		);
 
 		const empty = await request("/no-content", { method: "DELETE" }, endpoint);
-		assert.equal(empty, undefined);
+		assert.deepEqual(empty, {});
 
 		await assert.rejects(
 			() => request("/gateway-error", { method: "POST" }, endpoint),

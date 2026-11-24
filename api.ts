@@ -80,7 +80,7 @@ export async function request<T>(
     }
     if (isNoContent || !text.trim()) {
       if (schema) return schema.parse(undefined);
-      return (isNoContent ? undefined : {}) as T;
+      return {} as T;
     }
     if (payload === undefined) {
       throw new Error("ADE's runtime sent an answer the app couldn't read. Try again in a moment.");
