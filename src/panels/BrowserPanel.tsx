@@ -22,6 +22,43 @@ const QUICK_BOOKMARKS = [
   { label: "GitHub", url: "https://github.com" },
 ]
 
+function parseHttpUrl(raw: string): URL | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)
+  if (hasScheme && !/^https?:\/\//i.test(trimmed)) return null
+  const candidate = hasScheme
+    ? trimmed
+    : trimmed.startsWith("localhost") || trimmed.startsWith("127.0.0.1") || trimmed.startsWith("[::1]")
+      ? `http://${trimmed}`
+      : `https://${trimmed}`
+  try {
+    const parsed = new URL(candidate)
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function isOwnOrigin(parsed: URL): boolean {
+  return typeof window !== "undefined" && Boolean(window.location?.origin) && parsed.origin === window.location.origin
+}
+
+function validateIframeUrl(raw: string): { url: string; error: string } {
+  const parsed = parseHttpUrl(raw)
+  if (!parsed) {
+    return { url: "", error: "Only valid http:// and https:// URLs can be loaded." }
+  }
+  if (isOwnOrigin(parsed)) {
+    return {
+      url: "",
+      error: "ADE cannot be embedded inside its own iframe preview. Use Chrome mode or open externally instead.",
+    }
+  }
+  return { url: parsed.toString(), error: "" }
+}
+
 export function BrowserPanel({
   browserState,
   initialUrl,
@@ -34,10 +71,23 @@ export function BrowserPanel({
   onOpenExternal: (url: string) => Promise<void>
 }) {
   const [mode, setMode] = useState<"cdp" | "iframe">(() => (browserState.available ? "cdp" : "iframe"))
-  const [urlInput, setUrlInput] = useState(initialUrl || (browserState.url !== "about:blank" ? browserState.url : "http://localhost:3000"))
-  const [iframeUrl, setIframeUrl] = useState(initialUrl || "")
+  const [urlInput, setUrlInput] = useState(() => {
+    if (initialUrl) {
+      const parsed = parseHttpUrl(initialUrl)
+      if (parsed) return parsed.toString()
+    }
+    return browserState.url !== "about:blank" ? browserState.url : "http://localhost:3000"
+  })
+  const [iframeUrl, setIframeUrl] = useState(() => {
+    if (!initialUrl) return ""
+    return validateIframeUrl(initialUrl).url
+  })
+  const [iframeNonce, setIframeNonce] = useState(0)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState("")
+  const [error, setError] = useState(() => {
+    if (!initialUrl || browserState.available) return ""
+    return validateIframeUrl(initialUrl).error
+  })
   const canvasImgRef = useRef<HTMLImageElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
   const lastSentSizeRef = useRef<{ width: number; height: number } | null>(null)
@@ -89,25 +139,32 @@ export function BrowserPanel({
   useEffect(() => {
     if (initialUrl && !didAutoNavigate.current) {
       didAutoNavigate.current = true
-      setUrlInput(initialUrl)
+      const parsed = parseHttpUrl(initialUrl)
+      if (!parsed) {
+        setError("Only valid http:// and https:// URLs can be loaded.")
+        return
+      }
+      const normalized = parsed.toString()
+      setUrlInput(normalized)
       if (mode === "cdp" && browserState.available) {
-        void navigateCdp(initialUrl)
+        void navigateCdp(normalized)
       } else {
-        setIframeUrl(initialUrl)
+        const checked = validateIframeUrl(normalized)
+        setError(checked.error)
+        setIframeUrl(checked.url)
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialUrl])
 
-  const normalizeUrl = (raw: string) => {
-    const trimmed = raw.trim()
-    if (!trimmed) return ""
-    return /^https?:\/\//i.test(trimmed) ? trimmed : (trimmed.startsWith("localhost") || trimmed.startsWith("127.0.0.1") ? `http://${trimmed}` : `https://${trimmed}`)
-  }
+  const normalizeUrl = (raw: string) => parseHttpUrl(raw)?.toString() ?? ""
 
   const navigateCdp = async (target: string) => {
     const normalized = normalizeUrl(target)
-    if (!normalized) return
+    if (!normalized) {
+      setError("Only valid http:// and https:// URLs can be loaded.")
+      return
+    }
     setBusy(true)
     setError("")
     try {
@@ -126,10 +183,16 @@ export function BrowserPanel({
 
   const handleGo = async (target = urlInput) => {
     const normalized = normalizeUrl(target)
-    if (!normalized) return
+    if (!normalized) {
+      setError("Only valid http:// and https:// URLs can be loaded.")
+      return
+    }
     setUrlInput(normalized)
     if (mode === "iframe") {
-      setIframeUrl(normalized)
+      const checked = validateIframeUrl(normalized)
+      setError(checked.error)
+      setIframeUrl(checked.url)
+      if (checked.url) setIframeNonce(n => n + 1)
       return
     }
     await navigateCdp(normalized)
@@ -219,6 +282,7 @@ export function BrowserPanel({
   }
 
   const activeUrl = mode === "iframe" ? (iframeUrl || urlInput) : (browserState.url !== "about:blank" ? browserState.url : urlInput)
+  const safeIframeUrl = iframeUrl ? validateIframeUrl(iframeUrl).url : ""
 
   const setViewport = (preset: BrowserViewport["preset"]) => {
     if (preset === "desktop" && stageRef.current) {
@@ -248,8 +312,14 @@ export function BrowserPanel({
             type="button"
             className="ade-icon-btn"
             onClick={() => {
-              if (mode === "iframe") setIframeUrl(u => u ? `${u}` : urlInput)
-              else void runAction("/api/browser/reload")
+              if (mode === "iframe") {
+                const checked = validateIframeUrl(iframeUrl || urlInput)
+                setError(checked.error)
+                setIframeUrl(checked.url)
+                if (checked.url) setIframeNonce(n => n + 1)
+              } else {
+                void runAction("/api/browser/reload")
+              }
             }}
             title="Reload"
           >
@@ -308,7 +378,14 @@ export function BrowserPanel({
           <button
             type="button"
             className="ade-btn ade-btn-xs"
-            onClick={() => void onOpenExternal(normalizeUrl(activeUrl || "https://example.com"))}
+            onClick={() => {
+              const target = normalizeUrl(activeUrl || "https://example.com")
+              if (!target) {
+                setError("Only valid http:// and https:// URLs can be opened.")
+                return
+              }
+              void onOpenExternal(target)
+            }}
             title="Open current URL in your external default browser"
           >
             <ExternalLink className="size-3.5" /> External
@@ -329,13 +406,14 @@ export function BrowserPanel({
 
       <div ref={stageRef} className="ade-browser-stage" tabIndex={0} onKeyDown={handleViewportKeyDown}>
         {mode === "iframe" ? (
-          iframeUrl ? (
+          safeIframeUrl ? (
             <iframe
-              key={iframeUrl}
-              src={iframeUrl}
+              key={`${safeIframeUrl}:${iframeNonce}`}
+              src={safeIframeUrl}
               title="ADE Local Preview"
               className="ade-browser-iframe"
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+              referrerPolicy="no-referrer"
             />
           ) : (
             <div className="ade-browser-empty">
