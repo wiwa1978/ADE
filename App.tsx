@@ -20,6 +20,8 @@ import { AppMainColumn } from "./src/layout/AppMainColumn"
 import { AppOverlays } from "./src/layout/AppOverlays"
 import type { AddProjectSource } from "./src/projects/AddProjectWizard"
 import { isEditableTarget, matchesChord, resolveKeybindings } from "./src/keybindings"
+import { MobileAuthGate, type MobileSessionState } from "./src/mobile/MobileAuthGate"
+import { request } from "./api"
 
 type LastView = { screen?: Screen; activeSessionId?: string; selectedProjectId?: string | null; expandedProjects?: string[] }
 
@@ -75,6 +77,37 @@ function AppInner() {
   const [externalOpenRequest, setExternalOpenRequest] = useState<WorkspaceTab | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameText, setRenameText] = useState("")
+  const [mobileSession, setMobileSession] = useState<MobileSessionState | null>(null)
+  const [pairedToastDismissed, setPairedToastDismissed] = useState(false)
+  const [urlFlags] = useState(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search)
+      return { paired: sp.get("paired") === "1", pairError: sp.get("pairError") }
+    } catch {
+      return { paired: false, pairError: null as string | null }
+    }
+  })
+
+  useEffect(() => {
+    let cancelled = false
+    void request<MobileSessionState>("/api/mobile/session")
+      .then(res => {
+        if (cancelled) return
+        if (typeof res?.mobileBridge === "boolean") setMobileSession(res)
+        if (urlFlags.paired && typeof window !== "undefined") {
+          try {
+            const cleaned = new URL(window.location.href)
+            cleaned.searchParams.delete("paired")
+            cleaned.searchParams.delete("pairError")
+            window.history.replaceState({}, "", cleaned.pathname + cleaned.search + cleaned.hash)
+          } catch {
+            // Ignore history restrictions.
+          }
+        }
+      })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [urlFlags.paired])
 
   const previousScreen = useRef<Screen>("work")
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
@@ -343,8 +376,24 @@ function AppInner() {
             : screen === "work" ? { kind: "session", sessionId: sess.activeSession.id }
               : { kind: "other" }
 
+  if (mobileSession?.mobileBridge && !mobileSession.paired) {
+    return (
+      <MobileAuthGate
+        hostName={mobileSession.hostName}
+        pairError={urlFlags.pairError}
+        onPaired={() => window.location.replace("/?paired=1")}
+      />
+    )
+  }
+
   return (
     <div className="ade-app-shell">
+      {mobileSession?.mobileBridge && mobileSession.paired && urlFlags.paired && !pairedToastDismissed ? (
+        <div className="ade-mobile-paired-toast" role="status">
+          <span>Connected to <strong>{mobileSession.hostName}</strong>{mobileSession.device?.name ? ` · ${mobileSession.device.name}` : ""}</span>
+          <button type="button" className="ade-chip-btn" onClick={() => setPairedToastDismissed(true)}>Done</button>
+        </div>
+      ) : null}
       {/* Settings take over the window (they have their own navigation and a Back button). */}
       {screen === "settings" ? null : (
         <AppSidebar
@@ -398,6 +447,7 @@ function AppInner() {
           onToggleArchive={(id, archivedNow) => void sess.toggleArchive(id, archivedNow)}
           onOpenContextMenu={setContextMenu}
           onOpenSettings={() => { previousScreen.current = screen; setScreen("settings") }}
+          onOpenMobilePairing={mobileSession?.mobileBridge ? undefined : () => openSettingsSection("mobile", false)}
           onOpenEnvironmentPalette={() => setEnvPaletteOpen(true)}
         />
       )}

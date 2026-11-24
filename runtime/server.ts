@@ -28,7 +28,9 @@ import { registerApprovalRoutes } from "./routes/approvals.ts";
 import { registerMcpRoutes } from "./routes/mcp.ts";
 import { registerSystemRoutes } from "./routes/system.ts";
 import { registerAgentWorkflowRoutes } from "./routes/agent-workflow.ts";
+import { registerMobileRoutes } from "./routes/mobile.ts";
 import { createAgentWorkflow } from "./agent-workflow.ts";
+import { MobilePairingManager } from "./mobile-pairing.ts";
 
 function json(response: ServerResponse, status: number, value: unknown) {
 	response.writeHead(status, {
@@ -125,11 +127,12 @@ export function createRuntimeRouters(deps: RouteDeps): { envRouter: Router; main
 	registerBrowserRoutes(mainRouter, deps);
 	registerApprovalRoutes(mainRouter, deps);
 	registerMcpRoutes(mainRouter, deps);
+	registerMobileRoutes(mainRouter, deps);
 
 	return { envRouter, mainRouter };
 }
 
-export function createRuntimeServer({ host, worktreeManager, environments, terminals, githubRepositories = createGitHubRepositories(), sessionGit = createSessionGit(), origins = [
+export function createRuntimeServer({ host, worktreeManager, environments, terminals, mobilePairing, githubRepositories = createGitHubRepositories(), sessionGit = createSessionGit(), origins = [
 	`http://127.0.0.1:${process.env.ADE_UI_PORT ?? 1420}`,
 	`http://localhost:${process.env.ADE_UI_PORT ?? 1420}`,
 	"http://tauri.localhost",
@@ -141,6 +144,7 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 	worktreeManager: WorktreeManager;
 	environments?: EnvironmentManager;
 	terminals?: TerminalManager;
+	mobilePairing?: MobilePairingManager;
 	githubRepositories?: ReturnType<typeof createGitHubRepositories>;
 	sessionGit?: ReturnType<typeof createSessionGit>;
 	origins?: readonly (string | undefined)[];
@@ -202,6 +206,13 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 		limitGuard,
 		usageWaiter,
 		scheduler,
+		mobilePairing,
+	});
+
+	mobilePairing?.attachRuntime({
+		mainRouter,
+		readBody,
+		requireWorkspace: (sessionId: string) => requireWorkspace(host, sessionId),
 	});
 
 	const server = createServer((request, response) => {
@@ -299,6 +310,7 @@ export async function startRuntime({ stateDirectory = process.env.ADE_STATE_DIR 
 	let worktreeManager: WorktreeManager | undefined;
 	let environments: EnvironmentManager | undefined;
 	let terminals: TerminalManager | undefined;
+	let mobilePairing: MobilePairingManager | undefined;
 	try {
 		host = suppliedHost ?? new LocalAgentHost({ stateDirectory: directory });
 		worktreeManager = new WorktreeManager(directory);
@@ -307,22 +319,26 @@ export async function startRuntime({ stateDirectory = process.env.ADE_STATE_DIR 
 		// Reconnect to the server chosen last time (for "ADE runs on my server" setups).
 		void environments.restoreLastActive();
 		terminals = new TerminalManager();
-		const server = createRuntimeServer({ host, worktreeManager, environments, terminals });
+		mobilePairing = new MobilePairingManager({ stateDirectory: directory });
+		const server = createRuntimeServer({ host, worktreeManager, environments, terminals, mobilePairing });
 		await new Promise<void>((resolveListen, reject) => {
 			server.once("error", reject);
 			server.listen(port, "127.0.0.1", resolveListen);
 		});
+		void mobilePairing.restoreIfEnabled();
 		const recovery = host.recover(worktreeManager);
 		const address = server.address() as AddressInfo;
 		const activeHost = host;
 		const activeTerminals = terminals;
 		const activeEnvironments = environments;
 		const activeWorktrees = worktreeManager;
+		const activeMobilePairing = mobilePairing;
 		return {
 			host: activeHost,
 			server,
 			url: `http://127.0.0.1:${address.port}`,
 			async close() {
+				await activeMobilePairing.close();
 				activeTerminals.closeAll();
 				const closed = new Promise<void>((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
 				// Long-lived event streams (SSE) and keep-alive sockets would otherwise block shutdown forever.
@@ -339,6 +355,11 @@ export async function startRuntime({ stateDirectory = process.env.ADE_STATE_DIR 
 			},
 		};
 	} catch (error) {
+		try {
+			if (mobilePairing) await mobilePairing.close();
+		} catch {
+			// Ignore bridge cleanup failures during startup unwind.
+		}
 		try {
 			if (host) await host.close();
 		} finally {

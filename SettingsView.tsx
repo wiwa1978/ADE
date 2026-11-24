@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react"
 import {
-  ArrowLeft, Bell, Blocks, Bot, Workflow, Check, Gauge, GitPullRequest, Palette, Search, Server, Settings2, Sparkles, Terminal, X, type LucideIcon,
+  ArrowLeft, Bell, Blocks, Bot, Workflow, Check, Gauge, GitPullRequest, Palette, Search, Server, Settings2, Smartphone, Sparkles, Terminal, X, type LucideIcon,
 } from "lucide-react"
 import { EnvironmentSettings } from "./EnvironmentSettings"
 import { colorPalettes, lookPresets, paletteVariables, type Theme } from "./appearance-palettes"
@@ -17,11 +17,12 @@ import { FontPicker } from "./src/appearance/FontPicker"
 import { SubagentSettings } from "./src/subagents/SubagentSettings"
 import { ProvidersPanel } from "./src/settings/ProvidersPanel"
 import { KeybindingsSection } from "./src/settings/KeybindingsSection"
+import { MobilePairingSection } from "./src/settings/MobilePairingSection"
 import { OvernightSettings } from "./src/subagents/OvernightSettings"
 
 /** Settings categories. Every category here changes something real; nothing is a placeholder. */
 export type SettingsCategory =
-  | "general" | "appearance" | "models" | "agents" | "usage" | "subagents" | "integrations" | "github" | "terminal" | "notifications" | "environments"
+  | "general" | "appearance" | "models" | "agents" | "usage" | "subagents" | "integrations" | "github" | "terminal" | "notifications" | "environments" | "mobile"
 
 type SettingsItem = { id: SettingsCategory; label: string; icon: LucideIcon; description: string; keywords: string }
 
@@ -60,6 +61,7 @@ const groups: { label: string; items: SettingsItem[] }[] = [
     label: "Hosts",
     items: [
       { id: "environments", label: "Environments", icon: Server, description: "This computer and SSH hosts, diagnostics, and version information.", keywords: "ssh remote host diagnostics worktrees about version" },
+      { id: "mobile", label: "Phone & Mobile", icon: Smartphone, description: "Pair iPhone or Android via QR code to continue your work remotely.", keywords: "iphone android phone mobile qr code pair remote tailscale tunnel pwa" },
     ],
   },
 ]
@@ -517,7 +519,8 @@ export function SettingsView({
   const usage = <UsageSettings budget={settings.monthlyBudget} onBudgetChange={value => update({ monthlyBudget: value })} projects={projects} sessionLabels={sessionLabels} />
   const integrations = <IntegrationsSettings />
   const subagents = <SubagentSettings modelCatalog={modelCatalog} />
-  const content = { general, appearance, models, agents, usage, subagents, integrations, github, terminal, notifications, environments }[selectedCategory]
+  const mobile = <MobilePairingSection />
+  const content = { general, appearance, models, agents, usage, subagents, integrations, github, terminal, notifications, environments, mobile }[selectedCategory]
 
   return <main className="st-layout">
     <aside className="st-nav" aria-label="Settings navigation">

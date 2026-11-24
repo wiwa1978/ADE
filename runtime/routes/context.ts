@@ -56,6 +56,8 @@ export type RouteDeps = {
 	viewSessions: () => Conversation[];
 	/** Copy configured files into a new worktree and start the project's setup script. */
 	prepareWorktree: (session: Conversation) => void;
+	/** Phone pairing & remote mobile bridge manager. */
+	mobilePairing?: import("../mobile-pairing.ts").MobilePairingManager;
 };
 
 export function requireWorkspace(host: LocalAgentHost, sessionId: string): string {

@@ -256,6 +256,64 @@ beforeEach(() => {
       payload = { artifact: artifactRecords[0] }
     } else if (url.includes("/tasks")) {
       payload = { tasks: [{ id: "1", title: "Split panes", status: "done" }, { id: "2", title: "Browser pane", status: "in_progress" }] }
+    } else if (url.startsWith("/api/mobile/session") && method === "GET") {
+      payload = { mobileBridge: false, hostName: "Wims-MacBook-Pro", paired: true, device: null }
+    } else if (url.startsWith("/api/mobile/status") && method === "GET") {
+      payload = {
+        enabled: false,
+        running: false,
+        port: 4320,
+        hostName: "Wims-MacBook-Pro",
+        mode: "lan",
+        lanIps: ["192.168.1.42"],
+        tailscaleIp: "100.88.12.5",
+        tunnelUrl: null,
+        tunnelRunning: false,
+        tunnelError: "",
+        cloudflaredAvailable: true,
+        customUrl: "",
+        activeBaseUrl: "http://192.168.1.42:4320",
+        bridgeError: "",
+        challenge: null,
+        devices: [],
+      }
+    } else if ((url === "/api/mobile/enable" || url === "/api/mobile/pair") && method === "POST") {
+      const mode = (body?.mode as string) || "lan"
+      const base = mode === "tailscale" ? "http://100.88.12.5:4320" : "http://192.168.1.42:4320"
+      payload = {
+        enabled: body?.enabled ?? true,
+        running: body?.enabled ?? true,
+        port: 4320,
+        hostName: "Wims-MacBook-Pro",
+        mode,
+        lanIps: ["192.168.1.42"],
+        tailscaleIp: "100.88.12.5",
+        tunnelUrl: null,
+        tunnelRunning: false,
+        tunnelError: "",
+        cloudflaredAvailable: true,
+        customUrl: "",
+        activeBaseUrl: base,
+        bridgeError: "",
+        challenge: body?.enabled === false ? null : {
+          code: "qr-secret-code-1234567890abcdef",
+          shortCode: "482-915",
+          qrUrl: `${base}/pair?code=qr-secret-code-1234567890abcdef`,
+          expiresAt: Date.now() + 300_000,
+        },
+        devices: [
+          {
+            id: "dev-iphone-1",
+            name: "iPhone · Safari",
+            platform: "ios",
+            pairedAt: Date.now() - 60_000,
+            lastSeenAt: Date.now() - 5_000,
+            lastIp: "192.168.1.77",
+            userAgent: "iPhone Safari",
+            revokedAt: null,
+          },
+        ],
+      }
     } else if (url.startsWith("/api/skills")) {
       payload = {
         skills: [{ name: "demo-skill", description: "Demo", path: "/tmp/SKILL.md", scope: "workspace" }],
@@ -678,4 +736,29 @@ test("Right-sidebar artefacts viewer previews txt/py/md/jpg, chat file links ope
   assert.match(projRightPanel.textContent ?? "", /poem\.txt/)
   assert.match(projRightPanel.textContent ?? "", /chart\.jpg/)
   assert.ok(requests.some(r => r.url === "/api/projects/proj-1/artifacts"), "Expected GET /api/projects/proj-1/artifacts")
+})
+
+test("Phone & Mobile QR pairing opens from activity bar, generates scannable SVG QR code, switches to Tailscale, and shows paired devices", async () => {
+  await act(async () => root.render(React.createElement(App)))
+
+  // Click Pair phone icon in activity bar
+  const pairBtn = container.querySelector('button[aria-label="Pair phone"]')
+  assert.ok(pairBtn, "Expected Pair phone button in activity bar")
+  await act(async () => { (pairBtn as HTMLElement).click() })
+
+  assert.match(container.textContent ?? "", /Phone & Mobile/)
+  assert.match(container.textContent ?? "", /Enable phone pairing/)
+
+  // Enable phone pairing -> QR SVG + manual 6-digit code + paired iPhone appear
+  await click("Enable phone pairing")
+  const qrSvg = container.querySelector('svg[role="img"][aria-label*="QR code"]')
+  assert.ok(qrSvg, "Expected scannable SVG QR code to render")
+  assert.ok(qrSvg.querySelector("path")?.getAttribute("d")?.length, "Expected non-empty QR SVG path")
+  assert.match(container.textContent ?? "", /482-915/)
+  assert.match(container.textContent ?? "", /iPhone · Safari/)
+  assert.match(container.textContent ?? "", /192\.168\.1\.42:4320/)
+
+  // Switch to Tailscale mode -> bridge address updates
+  await click("Tailscale")
+  assert.match(container.textContent ?? "", /100\.88\.12\.5:4320/)
 })

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { FolderPlus, Inbox, PanelLeft, Search, Settings2 } from "lucide-react"
+import { FolderPlus, Inbox, PanelLeft, Search, Settings2, Smartphone } from "lucide-react"
 import type { Conversation, RuntimeHealth } from "../../app-types"
 import type { Project } from "../../ProjectsView"
 import type { FactoryRunDetail } from "../factory/types"
@@ -49,6 +49,7 @@ type AppSidebarProps = {
   onToggleArchive: (id: string, archivedNow?: boolean) => void
   onOpenContextMenu: (target: ContextMenuTarget) => void
   onOpenSettings: () => void
+  onOpenMobilePairing?: () => void
   onOpenEnvironmentPalette: () => void
 }
 
@@ -119,7 +120,12 @@ export function AppSidebar(props: AppSidebarProps) {
           </RailButton>
         )
       })}
-      <RailButton tip={setTip} label="Settings" description="Models, agents, appearance and more" shortcut={settingsBadge} active={props.selection.kind === "settings"} onClick={props.onOpenSettings} className="mt-auto">
+      {props.onOpenMobilePairing ? (
+        <RailButton tip={setTip} label="Pair phone" description="Connect iPhone or Android via QR code" onClick={props.onOpenMobilePairing} className="mt-auto">
+          <Smartphone className="size-[18px]" />
+        </RailButton>
+      ) : null}
+      <RailButton tip={setTip} label="Settings" description="Models, agents, appearance and more" shortcut={settingsBadge} active={props.selection.kind === "settings"} onClick={props.onOpenSettings} className={props.onOpenMobilePairing ? undefined : "mt-auto"}>
         <Settings2 className="size-[18px]" />
       </RailButton>
       {tip ? (
@@ -135,11 +141,18 @@ export function AppSidebar(props: AppSidebarProps) {
     </nav>
   )
 
+  const closeIfMobile = () => {
+    if (typeof matchMedia === "function" && !matchMedia("(min-width: 720px)").matches) {
+      setSidebarOpen(false)
+    }
+  }
+
   if (!sidebarOpen) return rail
 
   return (
     <>
       {rail}
+      <div className="ade-mobile-sidebar-backdrop" aria-hidden="true" onClick={() => setSidebarOpen(false)} />
       <Sidebar
         width={sidebarWidth}
         selection={props.selection}
@@ -163,26 +176,26 @@ export function AppSidebar(props: AppSidebarProps) {
         live={props.sseConnected}
         keybindings={kb}
         onCollapse={() => setSidebarOpen(false)}
-        onNewSession={props.onOpenNewSession}
-        onCreateWorktree={props.onOpenCreateWorktree}
-        onSearch={props.onOpenCommandCenter}
-        onOpenInbox={props.onOpenInbox}
-        onAddProject={props.onOpenAddProject}
+        onNewSession={projectId => { closeIfMobile(); props.onOpenNewSession(projectId) }}
+        onCreateWorktree={props.onOpenCreateWorktree ? () => { closeIfMobile(); props.onOpenCreateWorktree?.() } : undefined}
+        onSearch={() => { closeIfMobile(); props.onOpenCommandCenter() }}
+        onOpenInbox={() => { closeIfMobile(); props.onOpenInbox() }}
+        onAddProject={src => { closeIfMobile(); props.onOpenAddProject(src) }}
         onMarkAllRead={props.onMarkAllRead}
         onClearCompleted={props.onClearCompleted}
-        onOpenProject={props.onOpenProject}
+        onOpenProject={id => { closeIfMobile(); props.onOpenProject(id) }}
         onToggleProject={props.onToggleExpandProject}
-        onOpenSession={props.onOpenSession}
-        onOpenFactoryRun={props.onOpenFactoryRun}
-        onNewChat={() => props.onCreateChatThread("coding")}
+        onOpenSession={s => { closeIfMobile(); props.onOpenSession(s) }}
+        onOpenFactoryRun={(pid, rid) => { closeIfMobile(); props.onOpenFactoryRun(pid, rid) }}
+        onNewChat={() => { closeIfMobile(); props.onCreateChatThread("coding") }}
         onContextMenu={props.onOpenContextMenu}
         onRenameChange={props.onChangeRenameText}
         onRenameSubmit={sess => void props.onSubmitRename(sess)}
         onRenameCancel={props.onCancelRename}
         onToggleArchived={() => setArchivedExpanded(v => !v)}
         onRestore={id => props.onToggleArchive(id, true)}
-        onOpenSettings={props.onOpenSettings}
-        onOpenEnvironments={props.onOpenEnvironmentPalette}
+        onOpenSettings={() => { closeIfMobile(); props.onOpenSettings() }}
+        onOpenEnvironments={() => { closeIfMobile(); props.onOpenEnvironmentPalette() }}
       />
       <div
         className="ade-split-divider"

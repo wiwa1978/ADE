@@ -1,9 +1,17 @@
 {
-  "name": "ADE Software Factory",
+  "name": "ADE — Remote Agent Workspace",
   "short_name": "ADE",
-  "description": "Single-Captain Software Factory — GitHub Issue to Merge-Ready PR",
+  "description": "Continue coding sessions, approve actions, and view artefacts from iPhone or Android.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#121110",
-  "theme_color": "#e07a5f"
+  "theme_color": "#121110",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
 }
