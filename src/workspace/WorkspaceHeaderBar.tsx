@@ -10,6 +10,7 @@ import type {
   WorkspaceTab,
 } from "../../app-types"
 import type { PullRequestInfo } from "../panels/PullRequestPanel"
+import { useI18n } from "../i18n/I18nContext"
 
 export function WorkspaceHeaderBar({
   session,
@@ -60,45 +61,45 @@ export function WorkspaceHeaderBar({
   /** For parallel attempts: open the comparison. */
   onOpenAttempts?: (group: string) => void
 }) {
+  const { t } = useI18n()
   const hold = useSessionHold(session.workspace ? session.id : null, isBusy)
   return (
     <header className="ade-workspace-header">
       <div className="ade-workspace-header-left">
         {projectName ? (
           <>
-            <button type="button" className="ade-breadcrumb" onClick={onOpenProject} title={`Open ${projectName}`}>{projectName}</button>
+            <button type="button" className="ade-breadcrumb" onClick={onOpenProject} title={t("workspace.openProject", { name: projectName })}>{projectName}</button>
             <span className="ade-breadcrumb-sep" aria-hidden="true">/</span>
           </>
         ) : null}
         <h2 className="ade-workspace-title ade-truncate" title={session.label}>{session.label}</h2>
         {stateLabel ? <span className={`ade-row-tag is-${stateLabel.tone}`} title={stateLabel.hint}>{stateLabel.label}</span>
-          : isBusy ? <span className="ade-row-tag is-running">Working</span>
-            : approvals.length > 0 ? <span className="ade-row-tag is-waiting">Needs approval</span> : null}
+          : isBusy ? <span className="ade-row-tag is-running">{t("session.state.working.label")}</span>
+            : approvals.length > 0 ? <span className="ade-row-tag is-waiting">{t("session.state.needsApproval.label")}</span> : null}
         {!isBusy && hold.usageWait ? (
-          <span className="ade-row-tag is-waiting" title={hold.usageWait.reason}>{hold.usageWait.fallback ? `Usage limit · on ${hold.usageWait.fallback}` : `Usage limit · continues ${clock(hold.usageWait.until)}`}</span>
+          <span className="ade-row-tag is-waiting" title={hold.usageWait.reason}>{hold.usageWait.fallback ? t("workspace.usageLimitFallback", { fallback: hold.usageWait.fallback }) : t("workspace.usageLimitContinues", { time: clock(hold.usageWait.until) })}</span>
         ) : !isBusy && hold.stop ? (
-          <span className="ade-row-tag is-failed" title={`${hold.stop.reason} Continue the session to go on; change limits in Settings → Agents & permissions.`}>{hold.stop.kind === "day" ? "Stopped: daily limit" : hold.stop.kind === "cost" ? "Stopped: cost limit" : "Stopped: time limit"}</span>
+          <span className="ade-row-tag is-failed" title={hold.stop.reason}>{hold.stop.kind === "day" ? t("workspace.stoppedDaily") : hold.stop.kind === "cost" ? t("workspace.stoppedCost") : t("workspace.stoppedTime")}</span>
         ) : null}
-        {hold.queued.length ? <span className="ade-row-tag is-idle" title="Claude Code and Codex subagents start as this machine has room">{hold.queued.length} queued</span> : null}
+        {hold.queued.length ? <span className="ade-row-tag is-idle">{t("workspace.queuedCount", { count: hold.queued.length })}</span> : null}
         {session.attemptGroup && onOpenAttempts ? (
-          <button type="button" className="ade-row-tag is-review" onClick={() => onOpenAttempts(session.attemptGroup!)} title="This session is one of several attempts at the same task">
-            {session.label.match(/ · ([A-D])$/) ? `Attempt ${session.label.match(/ · ([A-D])$/)![1]} · ` : ""}Compare
+          <button type="button" className="ade-row-tag is-review" onClick={() => onOpenAttempts(session.attemptGroup!)}>
+            {session.label.match(/ · ([A-D])$/) ? t("workspace.attemptPrefix", { letter: session.label.match(/ · ([A-D])$/)![1] }) : ""}{t("workspace.compare")}
           </button>
         ) : null}
         {runStatus?.docker ? (
-          <button type="button" className={`ade-row-tag is-${runStatus.docker === "running" ? "review" : runStatus.docker === "failed" ? "failed" : runStatus.docker === "preparing" ? "running" : "idle"}`} onClick={onOpenRun}
-            title="This session's commands, terminals, scripts and agents don't run on this computer. Open Run to manage where they run.">
+          <button type="button" className={`ade-row-tag is-${runStatus.docker === "running" ? "review" : runStatus.docker === "failed" ? "failed" : runStatus.docker === "preparing" ? "running" : "idle"}`} onClick={onOpenRun}>
             {(() => {
               const name = runStatus.target === "ssh" ? "SSH" : runStatus.target === "boat" ? "Boat.dev" : runStatus.target === "wsl" ? "WSL2" : "Docker"
-              return runStatus.docker === "preparing" ? `${name}: starting…` : runStatus.docker === "failed" ? `${name} unavailable` : runStatus.docker === "running" ? name : `${name}: stopped`
+              return runStatus.docker === "preparing" ? `${name}: ${t("common.loading")}` : runStatus.docker === "failed" ? `${name}: ${t("common.unavailable")}` : runStatus.docker === "running" ? name : `${name}: ${t("common.disabled")}`
             })()}
           </button>
         ) : null}
-        {runStatus?.setup === "running" ? <button type="button" className="ade-row-tag is-running" onClick={onOpenRun} title="The project's setup script is running in this worktree">Setting up…</button>
-          : runStatus?.setup === "failed" ? <button type="button" className="ade-row-tag is-failed" onClick={onOpenRun} title="The setup script failed; open Run to see its output">Setup failed</button> : null}
-        {runStatus?.check === "running" ? <button type="button" className="ade-row-tag is-running" onClick={onOpenRun} title="The project's check runs after each agent turn">Checking…</button>
-          : runStatus?.check === "failed" ? <button type="button" className="ade-row-tag is-failed" onClick={onOpenRun} title="The project's check failed after the last turn; open Run to see why">Check failed</button>
-            : runStatus?.check === "succeeded" ? <button type="button" className="ade-row-tag is-ok" onClick={onOpenRun} title="The project's check passed after the last turn">Check passed</button> : null}
+        {runStatus?.setup === "running" ? <button type="button" className="ade-row-tag is-running" onClick={onOpenRun}>{t("workspace.settingUp")}</button>
+          : runStatus?.setup === "failed" ? <button type="button" className="ade-row-tag is-failed" onClick={onOpenRun}>{t("workspace.setupFailed")}</button> : null}
+        {runStatus?.check === "running" ? <button type="button" className="ade-row-tag is-running" onClick={onOpenRun}>{t("workspace.checking")}</button>
+          : runStatus?.check === "failed" ? <button type="button" className="ade-row-tag is-failed" onClick={onOpenRun}>{t("workspace.checkFailed")}</button>
+            : runStatus?.check === "succeeded" ? <button type="button" className="ade-row-tag is-ok" onClick={onOpenRun}>{t("workspace.checkPassed")}</button> : null}
         {session.workspace?.branch ? (
           <span className="ade-pill ade-mono"><GitBranch className="size-3" /> {session.workspace.branch}</span>
         ) : null}

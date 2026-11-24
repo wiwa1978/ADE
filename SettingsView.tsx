@@ -1,7 +1,7 @@
 import { EuOnlySettings } from "./src/settings/EuOnlySettings"
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react"
 import {
-  ArrowLeft, Bell, Blocks, Bot, Workflow, Check, Gauge, GitPullRequest, Palette, Pipette, Search, Server, Settings2, Smartphone, Sparkles, Terminal, X, type LucideIcon,
+  ArrowLeft, Bell, Blocks, Bot, Workflow, Check, Gauge, GitPullRequest, Globe, Palette, Pipette, Search, Server, Settings2, Smartphone, Sparkles, Terminal, X, type LucideIcon,
 } from "lucide-react"
 import { EnvironmentSettings } from "./EnvironmentSettings"
 import {
@@ -22,62 +22,67 @@ import { ProvidersPanel } from "./src/settings/ProvidersPanel"
 import { KeybindingsSection } from "./src/settings/KeybindingsSection"
 import { MobilePairingSection } from "./src/settings/MobilePairingSection"
 import { OvernightSettings } from "./src/subagents/OvernightSettings"
+import {
+  CURRENCY_OPTIONS, DATE_FORMAT_OPTIONS, SUPPORTED_LANGUAGES, TIME_FORMAT_OPTIONS,
+  type DateFormatPreference, type LanguageCode, type TimeFormatPreference, type TranslationKey,
+} from "./src/i18n"
+import { formatDateOnly } from "./src/i18n/formatting"
+import { useI18n } from "./src/i18n/I18nContext"
 
 /** Settings categories. Every category here changes something real; nothing is a placeholder. */
 export type SettingsCategory =
-  | "general" | "appearance" | "models" | "agents" | "usage" | "subagents" | "integrations" | "github" | "terminal" | "notifications" | "environments" | "mobile"
+  | "general" | "appearance" | "localization" | "models" | "agents" | "usage" | "subagents" | "integrations" | "github" | "terminal" | "notifications" | "environments" | "mobile"
 
-type SettingsItem = { id: SettingsCategory; label: string; icon: LucideIcon; description: string; keywords: string }
+type SettingsItemSpec = { id: SettingsCategory; labelKey: TranslationKey; icon: LucideIcon; descKey: TranslationKey; keywords: string }
 
-const groups: { label: string; items: SettingsItem[] }[] = [
+const groupSpecs: { labelKey: TranslationKey; items: SettingsItemSpec[] }[] = [
   {
-    label: "Workspace",
+    labelKey: "settings.group.workspace",
     items: [
-      { id: "general", label: "General", icon: Settings2, description: "Session defaults, archiving, startup, and keyboard shortcuts.", keywords: "worktree checkout branch archive startup restore shortcuts keybindings keyboard hotkeys" },
-      { id: "terminal", label: "Terminal", icon: Terminal, description: "The interactive terminal in coding sessions.", keywords: "shell font scrollback auto start" },
-      { id: "notifications", label: "Notifications", icon: Bell, description: "Desktop notifications when agents need you.", keywords: "alert finished approval desktop" },
-      { id: "integrations", label: "Integrations", icon: Blocks, description: "Slack notifications and Linear issues.", keywords: "slack linear webhook notify issues jira" },
+      { id: "general", labelKey: "settings.cat.general.label", icon: Settings2, descKey: "settings.cat.general.desc", keywords: "worktree checkout branch archive startup restore shortcuts keybindings keyboard hotkeys algemeen sneltoetsen archiveren" },
+      { id: "terminal", labelKey: "settings.cat.terminal.label", icon: Terminal, descKey: "settings.cat.terminal.desc", keywords: "shell font scrollback auto start lettergrootte" },
+      { id: "notifications", labelKey: "settings.cat.notifications.label", icon: Bell, descKey: "settings.cat.notifications.desc", keywords: "alert finished approval desktop meldingen notificaties" },
+      { id: "integrations", labelKey: "settings.cat.integrations.label", icon: Blocks, descKey: "settings.cat.integrations.desc", keywords: "slack linear webhook notify issues jira integraties" },
     ],
   },
   {
-    label: "AI",
+    labelKey: "settings.group.ai",
     items: [
-      { id: "models", label: "Providers", icon: Sparkles, description: "Model providers, CLI agents, API keys, and runtime settings.", keywords: "openai anthropic claude copilot codex pi cursor opencode radius ollama compatible api key provider reasoning models" },
-      { id: "agents", label: "Agents & permissions", icon: Bot, description: "Ask or Autopilot, limits for unattended work, MCP servers, and skills.", keywords: "approval policy autopilot ask mcp skills rules permissions browser chrome limit cost budget overnight usage limit fallback queue concurrent" },
-      { id: "subagents", label: "Subagents", icon: Workflow, description: "What subagents run on (Pi, Claude Code, Codex) and who picks.", keywords: "harness claude code codex pi durable subagent model delegate" },
-      { id: "usage", label: "Usage", icon: Gauge, description: "Tokens and cost per project and session, and a monthly budget.", keywords: "cost spend tokens budget billing price money" },
+      { id: "models", labelKey: "settings.cat.models.label", icon: Sparkles, descKey: "settings.cat.models.desc", keywords: "openai anthropic claude copilot codex pi cursor opencode radius ollama compatible api key provider reasoning models" },
+      { id: "agents", labelKey: "settings.cat.agents.label", icon: Bot, descKey: "settings.cat.agents.desc", keywords: "approval policy autopilot ask mcp skills rules permissions browser chrome limit cost budget overnight usage limit fallback queue concurrent rechten goedkeuringen" },
+      { id: "subagents", labelKey: "settings.cat.subagents.label", icon: Workflow, descKey: "settings.cat.subagents.desc", keywords: "harness claude code codex pi durable subagent model delegate" },
+      { id: "usage", labelKey: "settings.cat.usage.label", icon: Gauge, descKey: "settings.cat.usage.desc", keywords: "cost spend tokens budget billing price money verbruik kosten" },
     ],
   },
   {
-    label: "Source control",
+    labelKey: "settings.group.sourceControl",
     items: [
-      { id: "github", label: "Git & GitHub", icon: GitPullRequest, description: "GitHub account and pull request defaults.", keywords: "gh cli pull request draft account" },
+      { id: "github", labelKey: "settings.cat.github.label", icon: GitPullRequest, descKey: "settings.cat.github.desc", keywords: "gh cli pull request draft account" },
     ],
   },
   {
-    label: "Interface",
+    labelKey: "settings.group.interface",
     items: [
-      { id: "appearance", label: "Appearance", icon: Palette, description: "Theme, accent color, palette, fonts, and layout.", keywords: "dark light theme accent color icon tint palette font size width syntax" },
+      { id: "appearance", labelKey: "settings.cat.appearance.label", icon: Palette, descKey: "settings.cat.appearance.desc", keywords: "dark light theme accent color icon tint palette font size width syntax weergave thema kleur lettertype" },
+      { id: "localization", labelKey: "settings.cat.localization.label", icon: Globe, descKey: "settings.cat.localization.desc", keywords: "language locale localization region translation english dutch nederlands engels taal lokalisatie regio vertaling date format time clock 12-hour 24-hour currency money euro dollar datum tijd klok valuta munteenheid" },
     ],
   },
   {
-    label: "Hosts",
+    labelKey: "settings.group.hosts",
     items: [
-      { id: "environments", label: "Environments", icon: Server, description: "This computer and SSH hosts, diagnostics, and version information.", keywords: "ssh remote host diagnostics worktrees about version" },
-      { id: "mobile", label: "Phone & Mobile", icon: Smartphone, description: "Pair iPhone or Android via QR code to continue your work remotely.", keywords: "iphone android phone mobile qr code pair remote tailscale tunnel pwa" },
+      { id: "environments", labelKey: "settings.cat.environments.label", icon: Server, descKey: "settings.cat.environments.desc", keywords: "ssh remote host diagnostics worktrees about version omgevingen diagnostiek" },
+      { id: "mobile", labelKey: "settings.cat.mobile.label", icon: Smartphone, descKey: "settings.cat.mobile.desc", keywords: "iphone android phone mobile qr code pair remote tailscale tunnel pwa telefoon mobiel koppelen" },
     ],
   },
 ]
-const allItems = groups.flatMap(group => group.items)
 
-const reasoningLevels = [
-  { id: "none", label: "None" },
-  { id: "low", label: "Low" },
-  { id: "medium", label: "Medium" },
-  { id: "high", label: "High" },
-  { id: "xhigh", label: "Extra high" },
-  { id: "max", label: "Max" },
-]
+const reasoningLevelIds = ["none", "low", "medium", "high", "xhigh", "max"] as const
+const SAMPLE_LOCALE_DATE = new Date(2026, 10, 24, 14, 30)
+
+/** "Euro" for EUR, in the display language. */
+function currencyName(code: string, locale: string) {
+  try { return new Intl.DisplayNames([locale], { type: "currency" }).of(code) ?? code } catch { return code }
+}
 
 type SettingsViewProps = {
   settings: Settings
@@ -171,6 +176,7 @@ export function SettingsView({
   skillsCatalog, onRefreshMcp, onChangeApprovalPolicy, onDeleteApprovalRule, onAddApprovalRule, initialCategory, autoOpenAddEnvironment = false,
   projects, sessionLabels = {},
 }: SettingsViewProps) {
+  const { t, meta, locale, preferences, formatNumber, formatDay, formatDateTime, formatCurrency } = useI18n()
   const [selectedCategory, setSelectedCategory] = useState<SettingsCategory>(initialCategory ?? "general")
   const [query, setQuery] = useState("")
   // Text and layout settings are edited as a draft and applied together (Apply or Enter).
@@ -210,6 +216,21 @@ export function SettingsView({
     githubConnection, githubStatusError, githubCliError, githubActionError, githubConnectionBusy, changeGitHubConnection,
     authBusy, modelCredentialBusy,
   } = connections
+  const groups = useMemo(() => groupSpecs.map(group => ({
+    label: t(group.labelKey),
+    items: group.items.map(item => ({
+      id: item.id,
+      label: t(item.labelKey),
+      icon: item.icon,
+      description: t(item.descKey),
+      keywords: item.keywords,
+    })),
+  })), [t])
+  const allItems = useMemo(() => groups.flatMap(group => group.items), [groups])
+  const reasoningLevels = useMemo(() => reasoningLevelIds.map(id => ({
+    id,
+    label: t(`settings.reasoning.${id}` as TranslationKey),
+  })), [t])
   const selected = allItems.find(item => item.id === selectedCategory) ?? allItems[0]
   const disabled = sending || credentialChangesBlocked || authBusy || githubConnectionBusy || Boolean(modelCredentialBusy)
 
@@ -219,7 +240,7 @@ export function SettingsView({
     return groups
       .map(group => ({ ...group, items: group.items.filter(item => `${item.label} ${item.description} ${item.keywords}`.toLowerCase().includes(q)) }))
       .filter(group => group.items.length)
-  }, [query])
+  }, [groups, query])
 
   const saveCompatible = async (event: FormEvent) => {
     event.preventDefault()
@@ -231,10 +252,10 @@ export function SettingsView({
         body: JSON.stringify({ action: "configure-compatible", url: compatibleDraft.url, model: compatibleDraft.model }),
       })
       setCompatible(result.compatible)
-      setCompatibleMessage("Saved")
+      setCompatibleMessage(t("common.saved"))
       onModelsChanged?.()
     } catch (cause) {
-      setCompatibleMessage(cause instanceof Error ? cause.message : "Could not save the endpoint.")
+      setCompatibleMessage(cause instanceof Error ? cause.message : t("settings.compatible.saveError"))
     } finally {
       setCompatibleBusy(false)
     }
@@ -242,23 +263,23 @@ export function SettingsView({
 
   // --- General ---
   const general = <>
-    <Section title="New sessions">
-      <Row title="Default workspace" description="Used when a project has a local checkout. Worktree sessions get their own branch, like ade/fix-login-1a2b3c4d.">
+    <Section title={t("settings.general.newSessions")}>
+      <Row title={t("settings.general.defaultWorkspace")} description={t("settings.general.defaultWorkspaceDesc")}>
         <select className="st-select" value={settings.defaultWorkspaceKind} onChange={event => update({ defaultWorkspaceKind: event.target.value as Settings["defaultWorkspaceKind"] })}>
-          <option value="worktree">Worktree</option>
-          <option value="checkout">Project folder</option>
-          <option value="none">Chat only</option>
+          <option value="worktree">{t("settings.general.workspaceWorktree")}</option>
+          <option value="checkout">{t("settings.general.workspaceCheckout")}</option>
+          <option value="none">{t("settings.general.workspaceNone")}</option>
         </select>
       </Row>
     </Section>
-    <Section title="Archiving">
-      <Row title="Remove the worktree when archiving" description="Frees disk space. The branch and conversation are kept; restoring recreates the worktree. Worktrees with uncommitted changes are never removed.">
-        <Switch label="Remove the worktree when archiving" checked={settings.archiveRemovesWorktree} onChange={value => update({ archiveRemovesWorktree: value })} />
+    <Section title={t("settings.general.archiving")}>
+      <Row title={t("settings.general.archiveRemovesWorktree")} description={t("settings.general.archiveRemovesWorktreeDesc")}>
+        <Switch label={t("settings.general.archiveRemovesWorktree")} checked={settings.archiveRemovesWorktree} onChange={value => update({ archiveRemovesWorktree: value })} />
       </Row>
     </Section>
-    <Section title="Startup">
-      <Row title="Reopen the last view" description="After a reload or restart, return to the project or session you had open.">
-        <Switch label="Reopen the last view" checked={settings.restoreLastView} onChange={value => update({ restoreLastView: value })} />
+    <Section title={t("settings.general.startup")}>
+      <Row title={t("settings.general.restoreLastView")} description={t("settings.general.restoreLastViewDesc")}>
+        <Switch label={t("settings.general.restoreLastView")} checked={settings.restoreLastView} onChange={value => update({ restoreLastView: value })} />
       </Row>
     </Section>
     <KeybindingsSection
@@ -267,6 +288,61 @@ export function SettingsView({
       onChangeOverrides={next => update({ keybindings: next })}
       onChangeCustomBindings={next => update({ customKeybindings: next })}
     />
+  </>
+
+  // --- Localization ---
+  const localization = <>
+    <Section title={t("settings.localization.languageSection")} description={t("settings.localization.moreLanguagesNote")}>
+      <Row title={t("settings.localization.displayLanguage")} description={t("settings.localization.displayLanguageDesc")} htmlFor="st-language-select">
+        <select
+          id="st-language-select"
+          className="st-select"
+          aria-label={t("settings.localization.displayLanguage")}
+          value={settings.language}
+          onChange={event => update({ language: event.target.value as LanguageCode })}
+        >
+          {SUPPORTED_LANGUAGES.map(lang => (
+            <option key={lang.code} value={lang.code}>
+              {lang.nativeName === lang.name ? lang.nativeName : `${lang.nativeName} (${lang.name})`}
+            </option>
+          ))}
+        </select>
+      </Row>
+    </Section>
+    <Section title={t("settings.localization.regionalSection")}>
+      <Row title={t("settings.localization.activeLocale")} description={t("settings.localization.activeLocaleDesc")}>
+        <span className="st-value">{meta.nativeName} ({meta.bcp47})</span>
+      </Row>
+      <Row title={t("settings.localization.sampleNumber")}>
+        <span className="st-value">{formatNumber(1234567.89)}</span>
+      </Row>
+    </Section>
+    <Section title={t("settings.localization.formatsSection")}>
+      <Row title={t("settings.localization.dateFormat")} description={t("settings.localization.dateFormatDesc")} htmlFor="st-date-format">
+        <select id="st-date-format" className="st-select" value={settings.dateFormat} onChange={event => update({ dateFormat: event.target.value as DateFormatPreference })}>
+          {DATE_FORMAT_OPTIONS.map(option => (
+            <option key={option.id} value={option.id}>{option.id === "auto" ? t("settings.localization.dateFormatAuto") : `${option.pattern} (${formatDateOnly(SAMPLE_LOCALE_DATE, locale, { ...preferences, dateFormat: option.id })})`}</option>
+          ))}
+        </select>
+      </Row>
+      <Row title={t("settings.localization.timeFormat")} description={t("settings.localization.timeFormatDesc")} htmlFor="st-time-format">
+        <select id="st-time-format" className="st-select" value={settings.timeFormat} onChange={event => update({ timeFormat: event.target.value as TimeFormatPreference })}>
+          {TIME_FORMAT_OPTIONS.map(option => (
+            <option key={option} value={option}>{option === "auto" ? t("settings.localization.timeFormatAuto") : option === "24h" ? t("settings.localization.time24h") : t("settings.localization.time12h")}</option>
+          ))}
+        </select>
+      </Row>
+      <Row title={t("settings.localization.currency")} description={t("settings.localization.currencyDesc")} htmlFor="st-currency">
+        <select id="st-currency" className="st-select" value={settings.currency} onChange={event => update({ currency: event.target.value })}>
+          {(CURRENCY_OPTIONS.includes(settings.currency) ? CURRENCY_OPTIONS : [settings.currency, ...CURRENCY_OPTIONS]).map(code => (
+            <option key={code} value={code}>{code} · {currencyName(code, locale)}</option>
+          ))}
+        </select>
+      </Row>
+      <Row title={t("settings.localization.previewDate")}><span className="st-value">{formatDay(SAMPLE_LOCALE_DATE)}</span></Row>
+      <Row title={t("settings.localization.previewTime")}><span className="st-value">{formatDateTime(SAMPLE_LOCALE_DATE)}</span></Row>
+      <Row title={t("settings.localization.previewMoney")}><span className="st-value">{formatCurrency(1234.5)}</span></Row>
+    </Section>
   </>
 
   // --- Appearance ---
@@ -295,8 +371,8 @@ export function SettingsView({
     return (
       <select className="st-select is-narrow" aria-label={label} value={sizes.includes(textDraft[key]) ? textDraft[key] : ""}
         onChange={event => setTextDraft(current => ({ ...current, [key]: event.target.value }))}>
-        {sizes.includes(textDraft[key]) ? null : <option value="" disabled>Choose</option>}
-        {sizes.map(size => <option key={size} value={size}>{size} px{key === "interfaceSize" && size === "14" ? " (default)" : ""}</option>)}
+        {sizes.includes(textDraft[key]) ? null : <option value="" disabled>{t("common.choose")}</option>}
+        {sizes.map(size => <option key={size} value={size}>{key === "interfaceSize" && size === "14" ? t("settings.appearance.sizeDefault", { size }) : t("settings.appearance.sizePx", { size })}</option>)}
       </select>
     )
   }
@@ -312,28 +388,29 @@ export function SettingsView({
   const isCustomAccent = Boolean(settings.accentColor) && !accentPresets.some(preset => preset.id === settings.accentColor)
   const activePreset = lookPresets.find(preset => preset.palette === settings.palette && preset.interfaceFont === settings.interfaceFont && preset.codeFont === settings.codeFont
     && preset.interfaceSize === settings.interfaceSize && preset.contentSize === settings.contentSize && preset.codeSize === settings.codeSize && preset.contentWidth === settings.contentWidth)
+  const resolvedModeLabel = resolved === "dark" ? t("settings.appearance.mode.dark").toLowerCase() : t("settings.appearance.mode.light").toLowerCase()
   const appearance = <>
-    <Section title="Theme">
-      <Row title="Mode" description={settings.theme === "system" ? `Following your system (${resolved}).` : undefined}>
-        <div className="st-segmented" role="radiogroup" aria-label="Mode">
-          {(["light", "system", "dark"] as const).map(value => <button type="button" role="radio" key={value} aria-checked={settings.theme === value} className={settings.theme === value ? "is-active" : ""} onClick={() => update({ theme: value })}>{value[0].toUpperCase() + value.slice(1)}</button>)}
+    <Section title={t("settings.appearance.theme")}>
+      <Row title={t("settings.appearance.mode")} description={settings.theme === "system" ? t("settings.appearance.followingSystem", { resolved: resolvedModeLabel }) : undefined}>
+        <div className="st-segmented" role="radiogroup" aria-label={t("settings.appearance.mode")}>
+          {(["light", "system", "dark"] as const).map(value => <button type="button" role="radio" key={value} aria-checked={settings.theme === value} className={settings.theme === value ? "is-active" : ""} onClick={() => update({ theme: value })}>{t(`settings.appearance.mode.${value}` as TranslationKey)}</button>)}
         </div>
       </Row>
       <Row
-        title="Accent color"
-        description="Tints icons, active navigation, selections, and controls across the app. Choose Default to keep the palette's neutral look."
+        title={t("settings.appearance.accentColor")}
+        description={t("settings.appearance.accentColorDesc")}
         stacked
       >
-        <div className="st-accent-picker" role="group" aria-label="Accent color">
+        <div className="st-accent-picker" role="group" aria-label={t("settings.appearance.accentColor")}>
           <button
             type="button"
             className={`st-accent-none ${!settings.accentColor ? "is-active" : ""}`}
             aria-pressed={!settings.accentColor}
-            title="Use the palette default (neutral icons)"
+            title={t("settings.appearance.accentDefaultTitle")}
             onClick={() => update({ accentColor: "" })}
           >
             <span className="st-accent-none-dot" aria-hidden="true" />
-            <span>Default</span>
+            <span>{t("common.default")}</span>
           </button>
           <div className="st-accent-swatches">
             {accentPresets.map(preset => {
@@ -357,12 +434,12 @@ export function SettingsView({
             <label
               className={`st-accent-swatch st-accent-custom ${isCustomAccent ? "is-active" : ""}`}
               style={isCustomAccent && activeAccentHex ? { backgroundColor: activeAccentHex, color: contrastForegroundHex(activeAccentHex) } : undefined}
-              title={isCustomAccent ? `Custom (${settings.accentColor.toUpperCase()})` : "Custom color"}
+              title={isCustomAccent ? t("settings.appearance.customWithHex", { hex: settings.accentColor.toUpperCase() }) : t("settings.appearance.customColor")}
             >
               <input
                 type="color"
                 className="st-accent-color-input"
-                aria-label="Custom accent color"
+                aria-label={t("settings.appearance.customAccentAria")}
                 value={activeAccentHex ?? "#3b82f6"}
                 onChange={event => {
                   const hex = normalizeHexColor(event.target.value)
@@ -373,12 +450,12 @@ export function SettingsView({
             </label>
           </div>
           <span className="st-accent-current">
-            <strong>{accentDisplayName(settings.accentColor)}</strong>
+            <strong>{settings.accentColor ? accentDisplayName(settings.accentColor) : t("common.default")}</strong>
             {activeAccentHex ? <code>{activeAccentHex.toUpperCase()}</code> : null}
           </span>
         </div>
       </Row>
-      <Row title="Look" description="A palette, fonts, sizes and width in one click, in the style of familiar tools. Fine-tune below." stacked>
+      <Row title={t("settings.appearance.look")} description={t("settings.appearance.lookDesc")} stacked>
         <div className="st-looks">
           {lookPresets.map(preset => (
             <button type="button" key={preset.id} className={`st-look ${activePreset?.id === preset.id ? "is-active" : ""}`} aria-pressed={activePreset?.id === preset.id} title={preset.description}
@@ -389,7 +466,7 @@ export function SettingsView({
           ))}
         </div>
       </Row>
-      <Row title="Color palette" description="Nine quiet themes tuned for both light and dark mode." stacked>
+      <Row title={t("settings.appearance.colorPalette")} description={t("settings.appearance.colorPaletteDesc")} stacked>
         <div className="st-palettes">
           {colorPalettes.map(palette => {
             const variables = paletteVariables(palette.id, resolved)
@@ -431,10 +508,10 @@ export function SettingsView({
         </div>
       </Row>
     </Section>
-    <Section title="Text">
-      <Row title="Interface font" description="Google Fonts load automatically when online; offline falls back to the system font.">
+    <Section title={t("settings.appearance.text")}>
+      <Row title={t("settings.appearance.interfaceFont")} description={t("settings.appearance.interfaceFontDesc")}>
         <FontPicker
-          label="Interface font"
+          label={t("settings.appearance.interfaceFont")}
           value={textDraft.interfaceFont}
           options={INTERFACE_FONT_OPTIONS}
           previewGroup="interface"
@@ -444,11 +521,11 @@ export function SettingsView({
           onCommit={applyText}
         />
       </Row>
-      <Row title="Interface size" description="Scales the whole app, like zooming.">{sizeSelect("Interface size", "interfaceSize")}</Row>
-      <Row title="Chat text size" description="Messages in the conversation.">{sizeSelect("Chat text size", "contentSize")}</Row>
-      <Row title="Code font" description="Code blocks, diffs, and the terminal.">
+      <Row title={t("settings.appearance.interfaceSize")} description={t("settings.appearance.interfaceSizeDesc")}>{sizeSelect(t("settings.appearance.interfaceSize"), "interfaceSize")}</Row>
+      <Row title={t("settings.appearance.chatTextSize")} description={t("settings.appearance.chatTextSizeDesc")}>{sizeSelect(t("settings.appearance.chatTextSize"), "contentSize")}</Row>
+      <Row title={t("settings.appearance.codeFont")} description={t("settings.appearance.codeFontDesc")}>
         <FontPicker
-          label="Code font"
+          label={t("settings.appearance.codeFont")}
           value={textDraft.codeFont}
           options={CODE_FONT_OPTIONS}
           previewGroup="code"
@@ -458,19 +535,19 @@ export function SettingsView({
           onCommit={applyText}
         />
       </Row>
-      <Row title="Code size">{sizeSelect("Code size", "codeSize")}</Row>
+      <Row title={t("settings.appearance.codeSize")}>{sizeSelect(t("settings.appearance.codeSize"), "codeSize")}</Row>
     </Section>
-    <Section title="Layout">
-      <Row title="Conversation width" description="Maximum width of chat on wide screens.">{numberField("Conversation width", "contentWidth")}</Row>
-      <Row title="Syntax colors">
-        <select className="st-select" aria-label="Syntax colors" value={settings.highlightTheme} onChange={event => update({ highlightTheme: event.target.value as "auto" | "github" | "monochrome" })}><option value="auto">Automatic</option><option value="github">GitHub</option><option value="monochrome">Monochrome</option></select>
+    <Section title={t("settings.appearance.layout")}>
+      <Row title={t("settings.appearance.conversationWidth")} description={t("settings.appearance.conversationWidthDesc")}>{numberField(t("settings.appearance.conversationWidth"), "contentWidth")}</Row>
+      <Row title={t("settings.appearance.syntaxColors")}>
+        <select className="st-select" aria-label={t("settings.appearance.syntaxColors")} value={settings.highlightTheme} onChange={event => update({ highlightTheme: event.target.value as "auto" | "github" | "monochrome" })}><option value="auto">{t("settings.appearance.syntaxAuto")}</option><option value="github">{t("settings.appearance.syntaxGithub")}</option><option value="monochrome">{t("settings.appearance.syntaxMonochrome")}</option></select>
       </Row>
     </Section>
     {textDirty ? (
       <div className="st-apply-bar" role="status">
-        <span>{textErrors.length ? `Check the highlighted ${textErrors.length === 1 ? "value" : "values"}: interface ${textLimits.interfaceSize.join("–")}, chat ${textLimits.contentSize.join("–")}, code ${textLimits.codeSize.join("–")}, width ${textLimits.contentWidth.join("–")} px.` : "Text and layout changes aren’t applied yet."}</span>
-        <button type="button" className="st-button is-quiet" onClick={() => setTextDraft(textFromSettings(settings))}>Revert</button>
-        <button type="button" className="st-button is-primary" disabled={textErrors.length > 0} onClick={applyText}>Apply</button>
+        <span>{textErrors.length ? t("settings.appearance.invalidValues", { countLabel: textErrors.length === 1 ? t("settings.appearance.valueSingular") : t("settings.appearance.valuePlural"), iface: textLimits.interfaceSize.join("–"), chat: textLimits.contentSize.join("–"), code: textLimits.codeSize.join("–"), width: textLimits.contentWidth.join("–") }) : t("settings.appearance.unappliedText")}</span>
+        <button type="button" className="st-button is-quiet" onClick={() => setTextDraft(textFromSettings(settings))}>{t("common.revert")}</button>
+        <button type="button" className="st-button is-primary" disabled={textErrors.length > 0} onClick={applyText}>{t("common.apply")}</button>
       </div>
     ) : null}
   </>
@@ -503,14 +580,14 @@ export function SettingsView({
 
   // --- Agents & permissions ---
   const agents = <>
-    <Section title="Capabilities" description="Sessions with a workspace can read and edit files, search, and run commands in their branch, start subagents, and drive the built-in browser.">
-      <Row title="Built-in browser">{browserState?.available ? <Status tone="ok">Chrome found</Status> : <Status tone="warn">Chrome not found — set ADE_CHROME_PATH</Status>}</Row>
-      <Row title="Skills found"><span className="st-value">{skillsCatalog?.skills.length ?? 0}</span></Row>
-      <Row title="Rules files"><span className="st-value">{skillsCatalog?.rules.length ?? 0}</span></Row>
-      <Row title="Slash commands"><span className="st-value">{skillsCatalog?.commands.length ?? 0}</span></Row>
+    <Section title={t("settings.agents.capabilities")} description={t("settings.agents.capabilitiesDesc")}>
+      <Row title={t("settings.agents.builtinBrowser")}>{browserState?.available ? <Status tone="ok">{t("settings.agents.chromeFound")}</Status> : <Status tone="warn">{t("settings.agents.chromeNotFound")}</Status>}</Row>
+      <Row title={t("settings.agents.skillsFound")}><span className="st-value">{skillsCatalog?.skills.length ?? 0}</span></Row>
+      <Row title={t("settings.agents.rulesFiles")}><span className="st-value">{skillsCatalog?.rules.length ?? 0}</span></Row>
+      <Row title={t("settings.agents.slashCommands")}><span className="st-value">{skillsCatalog?.commands.length ?? 0}</span></Row>
     </Section>
     {onChangeApprovalPolicy && onDeleteApprovalRule && onRefreshMcp ? (
-      <Section title="Approvals and MCP servers" plain>
+      <Section title={t("settings.agents.approvalsAndMcp")} plain>
         <div className="st-embedded">
           <McpAndSecuritySettings mcpServers={mcpServers} approvalPolicy={approvalPolicy} approvalRules={approvalRules} onRefreshMcp={onRefreshMcp} onChangeApprovalPolicy={onChangeApprovalPolicy} onDeleteApprovalRule={onDeleteApprovalRule} onAddApprovalRule={onAddApprovalRule} />
         </div>
@@ -521,31 +598,31 @@ export function SettingsView({
 
   // --- Git & GitHub ---
   const github = <>
-    <Section title="GitHub account" description="Issues, pushes, and pull requests go through the GitHub CLI (gh) on this host, with that account’s permissions. ADE never stores a token.">
-      <Row title={githubConnection?.login ? `Connected as ${githubConnection.login}` : "GitHub CLI"} description={githubStatusError || (!githubConnection?.login ? (githubCliError || "Sign in first with gh auth login --hostname github.com --web") : "Disconnecting here doesn’t sign out of the GitHub CLI.")}>
-        {githubConnection?.login ? <Status tone="ok">Connected</Status> : <Status tone="off">Not connected</Status>}
-        <button type="button" className="st-button" disabled={githubConnectionBusy || !githubConnection || Boolean(githubStatusError)} onClick={() => void changeGitHubConnection("connect")}>{githubConnectionBusy ? "Working…" : githubConnection?.login ? "Check" : "Connect"}</button>
-        {githubConnection?.login ? <button type="button" className="st-button is-quiet" disabled={githubConnectionBusy} onClick={() => void changeGitHubConnection("disconnect")}>Disconnect</button> : null}
+    <Section title={t("settings.github.account")} description={t("settings.github.accountDesc")}>
+      <Row title={githubConnection?.login ? t("settings.github.connectedAs", { login: githubConnection.login }) : t("settings.github.cli")} description={githubStatusError || (!githubConnection?.login ? (githubCliError || t("settings.github.signInHint")) : t("settings.github.disconnectHint"))}>
+        {githubConnection?.login ? <Status tone="ok">{t("common.connected")}</Status> : <Status tone="off">{t("common.notConnected")}</Status>}
+        <button type="button" className="st-button" disabled={githubConnectionBusy || !githubConnection || Boolean(githubStatusError)} onClick={() => void changeGitHubConnection("connect")}>{githubConnectionBusy ? t("common.working") : githubConnection?.login ? t("common.check") : t("common.connect")}</button>
+        {githubConnection?.login ? <button type="button" className="st-button is-quiet" disabled={githubConnectionBusy} onClick={() => void changeGitHubConnection("disconnect")}>{t("common.disconnect")}</button> : null}
       </Row>
       {githubActionError ? <Row title={<span className="st-error">{githubActionError}</span>} /> : null}
     </Section>
-    <Section title="Pull requests">
-      <Row title="Open as draft" description="You can still choose for each pull request.">
-        <Switch label="Open pull requests as drafts" checked={settings.prDraft} onChange={value => update({ prDraft: value })} />
+    <Section title={t("settings.github.pullRequests")}>
+      <Row title={t("settings.github.openAsDraft")} description={t("settings.github.openAsDraftDesc")}>
+        <Switch label={t("settings.github.openAsDraftAria")} checked={settings.prDraft} onChange={value => update({ prDraft: value })} />
       </Row>
     </Section>
   </>
 
   // --- Terminal ---
-  const terminal = <Section title="Terminal" description="Commands run as this host’s user. Agents run their own commands separately, subject to approvals.">
-    <Row title="Start a shell automatically" description="Opening the Terminal panel starts a shell in the session’s workspace.">
-      <Switch label="Start a shell automatically" checked={settings.terminalAutoStart} onChange={value => update({ terminalAutoStart: value })} />
+  const terminal = <Section title={t("settings.terminal.title")} description={t("settings.terminal.desc")}>
+    <Row title={t("settings.terminal.autoStart")} description={t("settings.terminal.autoStartDesc")}>
+      <Switch label={t("settings.terminal.autoStart")} checked={settings.terminalAutoStart} onChange={value => update({ terminalAutoStart: value })} />
     </Row>
-    <Row title="Font size">
-      <select className="st-select" aria-label="Terminal font size" value={settings.terminalFontSize} onChange={event => update({ terminalFontSize: Number(event.target.value) })}>{[11, 12, 13, 14, 15, 16, 18, 20].map(size => <option key={size} value={size}>{size}px</option>)}</select>
+    <Row title={t("settings.terminal.fontSize")}>
+      <select className="st-select" aria-label={t("settings.terminal.fontSizeAria")} value={settings.terminalFontSize} onChange={event => update({ terminalFontSize: Number(event.target.value) })}>{[11, 12, 13, 14, 15, 16, 18, 20].map(size => <option key={size} value={size}>{size}px</option>)}</select>
     </Row>
-    <Row title="Scrollback">
-      <select className="st-select" aria-label="Terminal scrollback" value={settings.terminalScrollback} onChange={event => update({ terminalScrollback: Number(event.target.value) })}>{[1000, 5000, 10000, 20000].map(lines => <option key={lines} value={lines}>{lines.toLocaleString()} lines</option>)}</select>
+    <Row title={t("settings.terminal.scrollback")}>
+      <select className="st-select" aria-label={t("settings.terminal.scrollbackAria")} value={settings.terminalScrollback} onChange={event => update({ terminalScrollback: Number(event.target.value) })}>{[1000, 5000, 10000, 20000].map(lines => <option key={lines} value={lines}>{t("common.linesCount", { count: formatNumber(lines) })}</option>)}</select>
     </Row>
   </Section>
 
@@ -554,29 +631,29 @@ export function SettingsView({
     if (typeof Notification === "undefined") return
     setPermission(await Notification.requestPermission())
   }
-  const notifications = <Section title="Desktop notifications" description="Shown only when ADE isn’t the window you’re using.">
-    <Row title="Permission" description={permission === "denied" ? "Blocked. Allow notifications for ADE in your system settings." : permission === "unsupported" ? "This window can’t show notifications." : undefined}>
-      {permission === "granted" ? <><Status tone="ok">Allowed</Status><button type="button" className="st-button is-quiet" onClick={() => new Notification("ADE", { body: "Notifications are working." })}>Send test</button></>
-        : permission === "default" ? <button type="button" className="st-button" onClick={() => void requestPermission()}>Allow</button>
-          : <Status tone="off">{permission === "denied" ? "Blocked" : "Unavailable"}</Status>}
+  const notifications = <Section title={t("settings.notifications.title")} description={t("settings.notifications.desc")}>
+    <Row title={t("settings.notifications.permission")} description={permission === "denied" ? t("settings.notifications.blockedDesc") : permission === "unsupported" ? t("settings.notifications.unsupportedDesc") : undefined}>
+      {permission === "granted" ? <><Status tone="ok">{t("common.allowed")}</Status><button type="button" className="st-button is-quiet" onClick={() => new Notification("ADE", { body: t("settings.notifications.testBody") })}>{t("settings.notifications.sendTest")}</button></>
+        : permission === "default" ? <button type="button" className="st-button" onClick={() => void requestPermission()}>{t("common.allow")}</button>
+          : <Status tone="off">{permission === "denied" ? t("common.blocked") : t("common.unavailable")}</Status>}
     </Row>
-    <Row title="When an agent finishes"><Switch label="Notify when an agent finishes" checked={settings.notifyOnFinish} disabled={permission !== "granted"} onChange={value => update({ notifyOnFinish: value })} /></Row>
-    <Row title="When an agent needs approval"><Switch label="Notify when an agent needs approval" checked={settings.notifyOnApproval} disabled={permission !== "granted"} onChange={value => update({ notifyOnApproval: value })} /></Row>
+    <Row title={t("settings.notifications.onFinish")}><Switch label={t("settings.notifications.onFinishAria")} checked={settings.notifyOnFinish} disabled={permission !== "granted"} onChange={value => update({ notifyOnFinish: value })} /></Row>
+    <Row title={t("settings.notifications.onApproval")}><Switch label={t("settings.notifications.onApprovalAria")} checked={settings.notifyOnApproval} disabled={permission !== "granted"} onChange={value => update({ notifyOnApproval: value })} /></Row>
   </Section>
 
   // --- Environments ---
   const environments = <>
-    <Section title="Hosts" plain>
+    <Section title={t("settings.environments.hosts")} plain>
       <div className="st-embedded"><EnvironmentSettings onEnvironmentChanged={onEnvironmentChanged} disabled={disabled} autoOpenAdd={autoOpenAddEnvironment} /></div>
     </Section>
-    <Section title="Diagnostics">
-      <Row title="Active environment"><span className="st-value">{activeEnvironmentName}</span></Row>
-      <Row title="Runtime">{runtime?.online ? <Status tone="ok">Online</Status> : <Status tone="error">{runtimeError || "Waiting"}</Status>}</Row>
-      <Row title="MCP servers connected"><span className="st-value">{mcpServers.filter(server => server.status === "connected").length}</span></Row>
-      <Row title="Git worktrees" description="Inspect worktrees registered for a repository."><button type="button" className="st-button" onClick={onWorktreeDiagnostics}>Inspect</button></Row>
+    <Section title={t("settings.environments.diagnostics")}>
+      <Row title={t("settings.environments.activeEnv")}><span className="st-value">{activeEnvironmentName}</span></Row>
+      <Row title={t("settings.environments.runtime")}>{runtime?.online ? <Status tone="ok">{t("common.online")}</Status> : <Status tone="error">{runtimeError || t("common.waiting")}</Status>}</Row>
+      <Row title={t("settings.environments.mcpConnected")}><span className="st-value">{mcpServers.filter(server => server.status === "connected").length}</span></Row>
+      <Row title={t("settings.environments.gitWorktrees")} description={t("settings.environments.gitWorktreesDesc")}><button type="button" className="st-button" onClick={onWorktreeDiagnostics}>{t("common.inspect")}</button></Row>
     </Section>
-    <Section title="About">
-      <Row title="ADE" description="Projects, isolated agent sessions on their own branches, review, and pull requests in one app." />
+    <Section title={t("settings.environments.about")}>
+      <Row title="ADE" description={t("settings.environments.aboutDesc")} />
     </Section>
   </>
 
@@ -584,11 +661,11 @@ export function SettingsView({
   const integrations = <IntegrationsSettings />
   const subagents = <SubagentSettings modelCatalog={modelCatalog} />
   const mobile = <MobilePairingSection />
-  const content = { general, appearance, models, agents, usage, subagents, integrations, github, terminal, notifications, environments, mobile }[selectedCategory]
+  const content = { general, appearance, localization, models, agents, usage, subagents, integrations, github, terminal, notifications, environments, mobile }[selectedCategory]
 
   return <main className="st-layout">
-    <aside className="st-nav" aria-label="Settings navigation">
-      <button type="button" className="st-back" onClick={onBack}><ArrowLeft size={14} /> Back to app</button>
+    <aside className="st-nav" aria-label={t("settings.navAria")}>
+      <button type="button" className="st-back" onClick={onBack}><ArrowLeft size={14} /> {t("settings.backToApp")}</button>
       <div className="st-search">
         <Search size={13} aria-hidden="true" />
         <input
@@ -598,10 +675,10 @@ export function SettingsView({
             if (event.key === "Enter" && visibleGroups[0]?.items[0]) setSelectedCategory(visibleGroups[0].items[0].id)
             if (event.key === "Escape") setQuery("")
           }}
-          placeholder="Search settings"
-          aria-label="Search settings"
+          placeholder={t("settings.searchPlaceholder")}
+          aria-label={t("settings.searchPlaceholder")}
         />
-        {query ? <button type="button" aria-label="Clear search" onClick={() => setQuery("")}><X size={12} /></button> : null}
+        {query ? <button type="button" aria-label={t("common.clearSearch")} onClick={() => setQuery("")}><X size={12} /></button> : null}
       </div>
       <nav className="st-nav-groups">
         {visibleGroups.map(group => <div key={group.label} className="st-nav-group">
@@ -611,12 +688,12 @@ export function SettingsView({
             return <button type="button" key={item.id} className={`st-nav-item ${selectedCategory === item.id ? "is-active" : ""}`} aria-current={selectedCategory === item.id ? "page" : undefined} onClick={() => setSelectedCategory(item.id)}><Icon size={15} /><span>{item.label}</span></button>
           })}
         </div>)}
-        {!visibleGroups.length ? <p className="st-nav-empty">No settings match “{query}”.</p> : null}
+        {!visibleGroups.length ? <p className="st-nav-empty">{t("settings.searchEmpty", { query })}</p> : null}
       </nav>
       <div className="st-nav-host"><span className={`st-dot ${runtime?.online ? "is-ok" : "is-off"}`} />{activeEnvironmentName}</div>
     </aside>
     <section className="st-main">
-      <header className="st-topbar"><span>Settings</span><span aria-hidden="true">/</span><strong>{selected.label}</strong></header>
+      <header className="st-topbar"><span>{t("settings.title")}</span><span aria-hidden="true">/</span><strong>{selected.label}</strong></header>
       <div className="st-scroll">
         <div className={`st-content ${selectedCategory === "models" ? "is-wide" : ""}`}>
           <h1>{selected.label}</h1>

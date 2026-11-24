@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react"
 import { AlertTriangle, CheckCircle2, Loader2, QrCode, ShieldCheck, Smartphone } from "lucide-react"
 import { request } from "../../api"
+import { useI18n } from "../i18n/I18nContext"
 
 export type MobileSessionState = {
   mobileBridge: boolean
@@ -23,12 +24,13 @@ export function MobileAuthGate({
   pairError?: string | null
   onPaired: () => void
 }) {
+  const { t } = useI18n()
   const [code, setCode] = useState("")
   const [deviceName, setDeviceName] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(
     pairError === "expired"
-      ? "That QR code has already been used or expired. Scan a fresh QR code or enter the 6-digit code shown in ADE."
+      ? t("mobile.auth.expiredError")
       : "",
   )
 
@@ -46,21 +48,21 @@ export function MobileAuthGate({
       })
       onPaired()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not pair this device.")
+      setError(err instanceof Error ? err.message : t("mobile.auth.pairError"))
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <main className="ade-mobile-gate" aria-label="Pair device with ADE">
+    <main className="ade-mobile-gate" aria-label={t("mobile.auth.aria")}>
       <div className="ade-mobile-gate-card">
         <div className="ade-mobile-gate-icon">
           <Smartphone className="size-6" />
         </div>
-        <h1>Pair with {hostName || "ADE"}</h1>
+        <h1>{t("mobile.auth.title", { host: hostName || "ADE" })}</h1>
         <p className="ade-mobile-gate-sub">
-          Open <strong>Settings → Phone &amp; Mobile</strong> in ADE on your computer and scan the QR code, or enter the 6-digit code below.
+          {t("mobile.auth.subtitle")}
         </p>
 
         {error ? (
@@ -72,7 +74,7 @@ export function MobileAuthGate({
 
         <form className="ade-mobile-gate-form" onSubmit={e => void handleSubmit(e)}>
           <label className="ade-mobile-gate-label">
-            <span>6-digit pairing code</span>
+            <span>{t("mobile.auth.codeLabel")}</span>
             <input
               type="text"
               inputMode="numeric"
@@ -81,29 +83,29 @@ export function MobileAuthGate({
               value={code}
               onChange={e => setCode(e.target.value)}
               className="ade-mobile-gate-input ade-mono"
-              aria-label="6-digit pairing code"
+              aria-label={t("mobile.auth.codeLabel")}
             />
           </label>
           <label className="ade-mobile-gate-label">
-            <span>Device name (optional)</span>
+            <span>{t("mobile.auth.deviceNameLabel")}</span>
             <input
               type="text"
-              placeholder="e.g. Wim's iPhone"
+              placeholder={t("mobile.auth.deviceNamePlaceholder")}
               value={deviceName}
               onChange={e => setDeviceName(e.target.value)}
               className="ade-mobile-gate-input"
-              aria-label="Device name"
+              aria-label={t("mobile.auth.deviceNameAria")}
             />
           </label>
           <button type="submit" className="ade-btn ade-btn-primary ade-mobile-gate-btn" disabled={submitting || !code.trim()}>
             {submitting ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
-            {submitting ? "Pairing…" : "Connect this device"}
+            {submitting ? t("mobile.auth.connecting") : t("mobile.auth.connect")}
           </button>
         </form>
 
         <div className="ade-mobile-gate-footer">
-          <span><QrCode className="size-3.5" /> Single-use 5 min codes</span>
-          <span><ShieldCheck className="size-3.5" /> Revocable anytime</span>
+          <span><QrCode className="size-3.5" /> {t("mobile.auth.singleUse")}</span>
+          <span><ShieldCheck className="size-3.5" /> {t("mobile.auth.revocable")}</span>
         </div>
       </div>
     </main>

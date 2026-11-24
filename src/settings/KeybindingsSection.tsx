@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Plus, RotateCcw, Trash2 } from "lucide-react"
+import { useI18n } from "../i18n/I18nContext"
+import type { TranslationKey } from "../i18n"
 import {
   BUILTIN_KEYBINDINGS,
   CUSTOM_ACTION_OPTIONS,
@@ -29,6 +31,7 @@ export function KeybindingsSection({
   onChangeOverrides: (next: Record<string, string>) => void
   onChangeCustomBindings: (next: CustomKeybinding[]) => void
 }) {
+  const { t } = useI18n()
   const [recording, setRecording] = useState<RecordingTarget>(null)
   const [adding, setAdding] = useState(false)
   const [draftAction, setDraftAction] = useState<CustomKeybindingAction>("panel:diff")
@@ -133,9 +136,9 @@ export function KeybindingsSection({
     <section className="st-section">
       <div className="st-kb-section-head">
         <div>
-          <h2>Keyboard shortcuts</h2>
+          <h2>{t("settings.kb.title")}</h2>
           <p className="st-section-desc">
-            Click any shortcut to record a new key combination. Press Backspace while recording to unbind, or Esc to cancel. Changes update badges across the app immediately.
+            {t("settings.kb.desc")}
           </p>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
@@ -144,9 +147,9 @@ export function KeybindingsSection({
               type="button"
               className="st-button is-quiet"
               onClick={() => onChangeOverrides({})}
-              title="Reset all built-in shortcuts to defaults"
+              title={t("settings.kb.resetAllTitle")}
             >
-              <RotateCcw className="size-3.5 inline mr-1" /> Reset all
+              <RotateCcw className="size-3.5 inline mr-1" /> {t("common.resetAll")}
             </button>
           ) : null}
           <button
@@ -154,7 +157,7 @@ export function KeybindingsSection({
             className="st-button"
             onClick={() => setAdding(v => !v)}
           >
-            <Plus className="size-3.5 inline mr-1" /> Add shortcut
+            <Plus className="size-3.5 inline mr-1" /> {t("settings.kb.addShortcut")}
           </button>
         </div>
       </div>
@@ -164,8 +167,8 @@ export function KeybindingsSection({
         <div className="st-card st-kb-creator">
           <div className="st-row">
             <div className="st-row-text">
-              <label htmlFor="kb-custom-action">Action</label>
-              <p>What this custom shortcut should trigger.</p>
+              <label htmlFor="kb-custom-action">{t("settings.kb.action")}</label>
+              <p>{t("settings.kb.actionDesc")}</p>
             </div>
             <div className="st-row-control">
               <select
@@ -175,7 +178,7 @@ export function KeybindingsSection({
                 onChange={e => setDraftAction(e.target.value as CustomKeybindingAction)}
               >
                 {CUSTOM_ACTION_OPTIONS.map(opt => (
-                  <option key={opt.action} value={opt.action}>{opt.label}</option>
+                  <option key={opt.action} value={opt.action}>{t(`kb.custom.${opt.action}` as TranslationKey)}</option>
                 ))}
               </select>
             </div>
@@ -184,8 +187,8 @@ export function KeybindingsSection({
           {selectedActionMeta.needsArg ? (
             <div className="st-row">
               <div className="st-row-text">
-                <label htmlFor="kb-custom-arg">Slash command</label>
-                <p>Inserted and sent in the active session.</p>
+                <label htmlFor="kb-custom-arg">{t("settings.kb.slashCommand")}</label>
+                <p>{t("settings.kb.slashCommandDesc")}</p>
               </div>
               <div className="st-row-control">
                 <input
@@ -201,7 +204,8 @@ export function KeybindingsSection({
 
           <div className="st-row">
             <div className="st-row-text">
-              <label htmlFor="kb-custom-label">Label <small className="opacity-60">(optional)</small></label>
+              <label htmlFor="kb-custom-label">{t("settings.kb.label")}</label>
+              <p>{t("settings.kb.labelDesc")}</p>
             </div>
             <div className="st-row-control">
               <input
@@ -216,23 +220,23 @@ export function KeybindingsSection({
 
           <div className="st-row">
             <div className="st-row-text">
-              <label>Shortcut keys</label>
-              <p>Click the button and press your key combination.</p>
+              <label>{t("settings.kb.shortcut")}</label>
+              <p>{t("settings.kb.shortcutDesc")}</p>
             </div>
             <div className="st-row-control">
               <button
                 type="button"
                 className={`st-kbd-btn ${recording?.kind === "draft" ? "is-recording" : ""}`}
-                aria-label="Record custom shortcut"
+                aria-label={t("settings.kb.recordCustomShortcut")}
                 onClick={() => setRecording(r => (r?.kind === "draft" ? null : { kind: "draft" }))}
               >
-                {recording?.kind === "draft" ? "Press keys…" : formatShortcut(draftChord)}
+                {recording?.kind === "draft" ? t("settings.kb.pressKeys") : formatShortcut(draftChord)}
               </button>
               <button type="button" className="st-button is-quiet" onClick={() => { setAdding(false); setRecording(null) }}>
-                Cancel
+                {t("common.cancel")}
               </button>
               <button type="button" className="st-button is-primary" disabled={!draftChord.trim()} onClick={addCustomBinding}>
-                Add
+                {t("common.add")}
               </button>
             </div>
           </div>
@@ -245,14 +249,16 @@ export function KeybindingsSection({
           const chord = resolved[spec.id]
           const modified = chord !== spec.defaultChord
           const isRec = recording?.kind === "builtin" && recording.id === spec.id
+          const specLabel = t(`kb.builtin.${spec.id}.label` as TranslationKey)
+          const specDesc = t(`kb.builtin.${spec.id}.desc` as TranslationKey)
           const conflict = conflictFor(chord, spec.label)
           return (
             <div key={spec.id} className="st-row">
               <div className="st-row-text">
-                <span className="st-row-title">{spec.label}</span>
+                <span className="st-row-title">{specLabel}</span>
                 <p>
-                  {spec.description}
-                  {conflict ? <span className="st-kb-conflict"> · Conflicts with {conflict}</span> : null}
+                  {specDesc}
+                  {conflict ? <span className="st-kb-conflict"> · {t("settings.kb.conflictWith", { name: conflict })}</span> : null}
                 </p>
               </div>
               <div className="st-row-control">
@@ -260,8 +266,8 @@ export function KeybindingsSection({
                   <button
                     type="button"
                     className="st-prov-icon-btn"
-                    title={`Reset to ${formatShortcut(spec.defaultChord)}`}
-                    aria-label={`Reset ${spec.label} shortcut`}
+                    title={t("settings.kb.resetToDefault")}
+                    aria-label={t("settings.kb.resetToDefault")}
                     onClick={() => {
                       const next = { ...overrides }
                       delete next[spec.id]
@@ -274,10 +280,10 @@ export function KeybindingsSection({
                 <button
                   type="button"
                   className={`st-kbd-btn ${isRec ? "is-recording" : ""} ${!chord ? "is-unbound" : ""}`}
-                  aria-label={`Change shortcut for ${spec.label}`}
+                  aria-label={t("settings.kb.changeShortcutFor", { label: specLabel })}
                   onClick={() => setRecording(isRec ? null : { kind: "builtin", id: spec.id })}
                 >
-                  {isRec ? "Press keys…" : formatShortcut(chord)}
+                  {isRec ? t("settings.kb.pressKeys") : formatShortcut(chord)}
                 </button>
               </div>
             </div>
@@ -293,27 +299,27 @@ export function KeybindingsSection({
             <div key={item.id} className="st-row">
               <div className="st-row-text">
                 <span className="st-row-title">
-                  {item.label} <span className="st-kb-custom-tag">Custom</span>
+                  {item.label} <span className="st-kb-custom-tag">{t("common.custom")}</span>
                 </span>
                 <p>
-                  {item.action === "slash" && item.arg ? `Runs ${item.arg}` : actionLabel}
-                  {conflict ? <span className="st-kb-conflict"> · Conflicts with {conflict}</span> : null}
+                  {item.action === "slash" && item.arg ? `${t("common.run")} ${item.arg}` : actionLabel}
+                  {conflict ? <span className="st-kb-conflict"> · {t("settings.kb.conflictWith", { name: conflict })}</span> : null}
                 </p>
               </div>
               <div className="st-row-control">
                 <button
                   type="button"
                   className={`st-kbd-btn ${isRec ? "is-recording" : ""} ${!item.chord ? "is-unbound" : ""}`}
-                  aria-label={`Change shortcut for ${item.label}`}
+                  aria-label={t("settings.kb.changeShortcutFor", { label: item.label })}
                   onClick={() => setRecording(isRec ? null : { kind: "custom", id: item.id })}
                 >
-                  {isRec ? "Press keys…" : formatShortcut(item.chord)}
+                  {isRec ? t("settings.kb.pressKeys") : formatShortcut(item.chord)}
                 </button>
                 <button
                   type="button"
                   className="st-prov-icon-btn"
-                  title={`Remove ${item.label}`}
-                  aria-label={`Remove ${item.label}`}
+                  title={t("settings.kb.deleteShortcut")}
+                  aria-label={t("settings.kb.deleteShortcut")}
                   onClick={() => onChangeCustomBindings(customBindings.filter(c => c.id !== item.id))}
                 >
                   <Trash2 className="size-3.5" />

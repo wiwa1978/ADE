@@ -1,6 +1,7 @@
 import { ChevronRight } from "lucide-react"
 import type { Conversation } from "../../app-types"
 import type { Project } from "../../ProjectsView"
+import { useI18n } from "../i18n/I18nContext"
 
 export type SubmenuKind = "open-in" | "copy" | "split" | null
 
@@ -60,19 +61,20 @@ export function ProjectContextMenuItems({
   onToggleArchiveProject: (project: Project) => void
   onDeleteProject: (project: Project) => void
 }) {
+  const { t } = useI18n()
   return (
     <>
       <button type="button" className="ade-ctx-item" role="menuitem" onMouseEnter={() => onSetSubmenu(null)} onClick={() => { onNewProjectStream(project); onClose() }}>
-        <span>New session</span>
+        <span>{t("context.newSession")}</span>
         <span className="ade-ctx-shortcut">N</span>
       </button>
 
       <button type="button" className="ade-ctx-item" role="menuitem" onMouseEnter={() => onSetSubmenu(null)} onClick={() => { onShowProjectArtifacts(project); onClose() }}>
-        <span>Show all project artefacts</span>
+        <span>{t("context.showProjectArtifacts")}</span>
       </button>
 
       <button type="button" className="ade-ctx-item" role="menuitem" onMouseEnter={() => onSetSubmenu(null)} onClick={() => { onTogglePinProject(project); onClose() }}>
-        <span>{pinned ? "Unpin" : "Pin"}</span>
+        <span>{pinned ? t("context.unpin") : t("context.pin")}</span>
         {pinShortcut ? <span className="ade-ctx-shortcut">{pinShortcut}</span> : null}
       </button>
 
@@ -83,11 +85,11 @@ export function ProjectContextMenuItems({
         onMouseEnter={() => onSetSubmenu("open-in")}
         onClick={() => onSetSubmenu(s => (s === "open-in" ? null : "open-in"))}
       >
-        <span>Open in</span>
+        <span>{t("context.openIn")}</span>
         <ChevronRight className="size-3.5 opacity-60" />
         {submenu === "open-in" ? (
           <div className={`ade-ctx-submenu ${flipSub ? "align-left" : ""}`} onClick={e => e.stopPropagation()}>
-            <div className="ade-ctx-section-label">Open in</div>
+            <div className="ade-ctx-section-label">{t("context.openIn")}</div>
             {EXTERNAL_APPS.map(([app, label, num]) => (
               <button key={app} type="button" className="ade-ctx-item" onClick={() => { onOpenExternalApp(app, project.repository); onClose() }}>
                 <span>{label}</span>
@@ -99,19 +101,19 @@ export function ProjectContextMenuItems({
       </div>
 
       <button type="button" className="ade-ctx-item" role="menuitem" onClick={() => { onOpenProjectSettings(project); onClose() }}>
-        <span>Project settings</span>
+        <span>{t("context.openSettings")}</span>
         <span className="ade-ctx-shortcut">S</span>
       </button>
 
       <div className="ade-ctx-divider" />
 
       <button type="button" className="ade-ctx-item" role="menuitem" onClick={() => { onToggleArchiveProject(project); onClose() }}>
-        <span>{archived ? "Restore" : "Archive"}</span>
+        <span>{archived ? t("context.restore") : t("context.archive")}</span>
         <span className="ade-ctx-shortcut">A</span>
       </button>
 
       <button type="button" className="ade-ctx-item is-danger" role="menuitem" onClick={() => { onDeleteProject(project); onClose() }}>
-        <span>Delete</span>
+        <span>{t("context.delete")}</span>
         <span className="ade-ctx-shortcut">D</span>
       </button>
     </>
@@ -159,6 +161,7 @@ export function SessionContextMenuItems({
   onStopSession: (session: Conversation) => void
   onDeleteSession: (session: Conversation) => void
 }) {
+  const { t } = useI18n()
   const canDelete = sess.id !== "coding" && sess.id !== "personal"
   const canRename = sess.id !== "coding" && sess.id !== "personal"
   const isWorking = sess.status === "working"
@@ -177,7 +180,7 @@ export function SessionContextMenuItems({
         onMouseEnter={() => onSetSubmenu(null)}
         onClick={() => { if (canRename) { onRenameSession(sess); onClose() } }}
       >
-        <span>Rename</span>
+        <span>{t("context.rename")}</span>
       </button>
 
       <button
@@ -187,7 +190,7 @@ export function SessionContextMenuItems({
         onMouseEnter={() => onSetSubmenu(null)}
         onClick={() => { onTogglePin(sess.id); onClose() }}
       >
-        <span>{pinned ? "Unpin" : "Pin"}</span>
+        <span>{pinned ? t("context.unpin") : t("context.pin")}</span>
         {pinShortcut ? <span className="ade-ctx-shortcut">{pinShortcut}</span> : null}
       </button>
 
@@ -198,7 +201,7 @@ export function SessionContextMenuItems({
         onMouseEnter={() => onSetSubmenu(null)}
         onClick={() => { onToggleUnread(sess.id); onClose() }}
       >
-        <span>{unread ? "Mark Read" : "Mark Unread"}</span>
+        <span>{unread ? t("context.markRead") : t("context.markUnread")}</span>
       </button>
 
       <button
@@ -208,7 +211,7 @@ export function SessionContextMenuItems({
         onMouseEnter={() => onSetSubmenu(null)}
         onClick={() => { onShowSessionArtifacts(sess); onClose() }}
       >
-        <span>Show all session artefacts</span>
+        <span>{t("context.showSessionArtifacts")}</span>
       </button>
 
       <div className="ade-ctx-divider" />
@@ -220,28 +223,28 @@ export function SessionContextMenuItems({
         onMouseEnter={() => onSetSubmenu("copy")}
         onClick={() => onSetSubmenu(s => (s === "copy" ? null : "copy"))}
       >
-        <span>Copy</span>
+        <span>{t("context.copy")}</span>
         <ChevronRight className="size-3.5 opacity-60" />
         {submenu === "copy" ? (
           <div className={`ade-ctx-submenu ${flipSub ? "align-left" : ""}`} onClick={e => e.stopPropagation()}>
             <button type="button" className="ade-ctx-item" onClick={() => { void copyToClipboard(sess.label); onClose() }}>
-              <span>Session name</span>
+              <span>{t("context.copySessionName")}</span>
             </button>
             <button type="button" className="ade-ctx-item" onClick={() => { void copyToClipboard(sess.id); onClose() }}>
-              <span>Session ID</span>
+              <span>{t("context.copySessionId")}</span>
             </button>
             {branchName ? (
               <button type="button" className="ade-ctx-item" onClick={() => { void copyToClipboard(branchName); onClose() }}>
-                <span>Branch name</span>
+                <span>{t("context.copyBranchName")}</span>
               </button>
             ) : null}
             {workspacePath ? (
               <button type="button" className="ade-ctx-item" onClick={() => { void copyToClipboard(workspacePath); onClose() }}>
-                <span>Folder path</span>
+                <span>{t("context.copyFolderPath")}</span>
               </button>
             ) : null}
             <button type="button" className="ade-ctx-item" onClick={() => { void copyToClipboard(sessionUrl); onClose() }}>
-              <span>Session link</span>
+              <span>{t("context.copySessionLink")}</span>
             </button>
           </div>
         ) : null}

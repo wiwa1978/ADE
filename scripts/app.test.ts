@@ -888,3 +888,37 @@ test("Simple view keeps the activity bar and session to the Captain; Full view b
   assert.ok(labels().some(label => label === "Terminal" || label === "Files"), "tools are back")
   assert.equal(JSON.parse(JSON.stringify(browser.localStorage.getItem("ade.view-mode"))), "full")
 })
+
+test("Localization settings switch display language between English and Dutch and persist", async () => {
+  await act(async () => root.render(React.createElement(App)))
+
+  await click("Settings")
+  await click("Localization")
+
+  const select = container.querySelector("#st-language-select") as HTMLSelectElement | null
+  assert.ok(select, "Expected language select in Localization settings")
+  assert.equal(select.value, "en")
+  assert.match(container.textContent ?? "", /Display language/)
+
+  // Switch to Dutch
+  await act(async () => {
+    select.value = "nl"
+    select.dispatchEvent(new browser.Event("change", { bubbles: true }) as unknown as Event)
+  })
+
+  assert.equal(browser.document.documentElement.lang, "nl-NL")
+  assert.match(container.textContent ?? "", /Lokalisatie/)
+  assert.match(container.textContent ?? "", /Weergavetaal/)
+  assert.match(container.textContent ?? "", /Instellingen/)
+
+  const saved = JSON.parse(browser.localStorage.getItem("ade-settings-v1") ?? "{}") as { language?: string }
+  assert.equal(saved.language, "nl")
+
+  // Switch back to English
+  await act(async () => {
+    select.value = "en"
+    select.dispatchEvent(new browser.Event("change", { bubbles: true }) as unknown as Event)
+  })
+  assert.equal(browser.document.documentElement.lang, "en-US")
+  assert.match(container.textContent ?? "", /Display language/)
+})

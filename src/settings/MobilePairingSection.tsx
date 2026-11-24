@@ -14,6 +14,7 @@ import {
   Wifi,
 } from "lucide-react"
 import { request } from "../../api"
+import { useI18n } from "../i18n/I18nContext"
 import { generateQrSvgData } from "../mobile/qr-code"
 
 export type MobileAddressMode = "lan" | "tailscale" | "tunnel" | "custom"
@@ -60,15 +61,8 @@ function formatCountdown(expiresAt: number, now: number): string {
   return `${m}:${String(s).padStart(2, "0")}`
 }
 
-function formatRelativeTime(timestamp: number, now: number): string {
-  const diffSec = Math.max(0, Math.floor((now - timestamp) / 1000))
-  if (diffSec < 45) return "just now"
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`
-  return new Date(timestamp).toLocaleDateString()
-}
-
 export function MobilePairingSection() {
+  const { t, formatRelativeTime: relative, formatDay } = useI18n()
   const [status, setStatus] = useState<MobilePairingStatusPayload | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -103,11 +97,11 @@ export function MobilePairingSection() {
       })
       .catch(err => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : "Could not load mobile pairing status.")
+        setError(err instanceof Error ? err.message : t("mobile.loadError"))
         setLoading(false)
       })
     return () => { cancelled = true }
-  }, [])
+  }, [t])
 
   // Live countdown tick + silent status poll while enabled so newly paired phones appear immediately.
   useEffect(() => {
@@ -132,7 +126,7 @@ export function MobilePairingSection() {
       setStatus(updated)
       setNow(Date.now())
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update mobile pairing.")
+      setError(err instanceof Error ? err.message : t("mobile.updateError"))
     } finally {
       setBusy(false)
     }
@@ -150,7 +144,7 @@ export function MobilePairingSection() {
       setStatus(updated)
       setNow(Date.now())
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not switch connection mode.")
+      setError(err instanceof Error ? err.message : t("mobile.switchError"))
     } finally {
       setBusy(false)
     }
@@ -171,7 +165,7 @@ export function MobilePairingSection() {
       setStatus(updated)
       setNow(Date.now())
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not generate a new QR code.")
+      setError(err instanceof Error ? err.message : t("mobile.qrError"))
     } finally {
       setBusy(false)
     }
@@ -189,7 +183,7 @@ export function MobilePairingSection() {
       setStatus(updated)
       setNow(Date.now())
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Tunnel action failed.")
+      setError(err instanceof Error ? err.message : t("mobile.tunnelError"))
     } finally {
       setTunnelBusy(false)
     }
@@ -228,7 +222,7 @@ export function MobilePairingSection() {
       setRenamingId(null)
       await loadStatus()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not rename device.")
+      setError(err instanceof Error ? err.message : t("mobile.renameError"))
     }
   }
 
@@ -238,7 +232,7 @@ export function MobilePairingSection() {
       await request(`/api/mobile/devices/${encodeURIComponent(id)}`, { method: "DELETE" })
       await loadStatus()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not revoke device.")
+      setError(err instanceof Error ? err.message : t("mobile.revokeError"))
     }
   }
 
@@ -248,7 +242,7 @@ export function MobilePairingSection() {
       await request("/api/mobile/devices/revoke-all", { method: "POST" })
       await loadStatus()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not revoke devices.")
+      setError(err instanceof Error ? err.message : t("mobile.revokeAllError"))
     }
   }
 
@@ -275,13 +269,13 @@ export function MobilePairingSection() {
   const challengeExpired = Boolean(status?.challenge && status.challenge.expiresAt <= now)
 
   if (loading && !status) {
-    return <div className="ade-pane-note">Loading phone pairing settings…</div>
+    return <div className="ade-pane-note">{t("mobile.loading")}</div>
   }
 
   return (
     <div className="ade-mobile-settings">
       {error ? <div className="st-banner is-error" role="alert">{error}</div> : null}
-      {status?.bridgeError ? <div className="st-banner is-error" role="alert">Mobile bridge error: {status.bridgeError}</div> : null}
+      {status?.bridgeError ? <div className="st-banner is-error" role="alert">{t("mobile.bridgeError", { error: status.bridgeError })}</div> : null}
 
       {/* Master Enable Card */}
       <section className="ade-mp-pair-card">
@@ -291,13 +285,13 @@ export function MobilePairingSection() {
               <Smartphone className="size-4" />
             </span>
             <div>
-              <h3>Remote phone access</h3>
-              <p>Connect your iPhone or Android to view sessions, chat with agents, approve commands, and inspect artefacts remotely.</p>
+              <h3>{t("mobile.title")}</h3>
+              <p>{t("mobile.subtitle")}</p>
             </div>
           </div>
           <div className="ade-mp-pair-head-actions">
             <span className={`ade-pill ${status?.running ? "ade-pill-ok" : ""}`}>
-              {status?.running ? `Listening on :${status.port}` : "Off"}
+              {status?.running ? t("mobile.listening", { port: status.port }) : t("mobile.off")}
             </span>
             <button
               type="button"
@@ -306,7 +300,7 @@ export function MobilePairingSection() {
               onClick={() => void handleToggleEnabled(!status?.enabled)}
             >
               {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
-              {status?.enabled ? "Disable" : "Enable phone pairing"}
+              {status?.enabled ? t("mobile.disable") : t("mobile.enable")}
             </button>
           </div>
         </div>
@@ -314,7 +308,7 @@ export function MobilePairingSection() {
         {status?.enabled ? (
           <>
             {/* Connection mode tabs */}
-            <div className="ade-mp-mode-bar" role="tablist" aria-label="Phone connection mode">
+            <div className="ade-mp-mode-bar" role="tablist" aria-label={t("mobile.modeAria")}>
               <button
                 type="button"
                 role="tab"
@@ -323,7 +317,7 @@ export function MobilePairingSection() {
                 onClick={() => void handleSwitchMode("lan")}
               >
                 <Wifi className="size-3.5" />
-                <span>Same Wi-Fi</span>
+                <span>{t("mobile.modeLan")}</span>
                 {status.lanIps[0] ? <code className="ade-mp-mode-hint">{status.lanIps[0]}</code> : null}
               </button>
               <button
@@ -334,7 +328,7 @@ export function MobilePairingSection() {
                 onClick={() => void handleSwitchMode("tailscale")}
               >
                 <ShieldCheck className="size-3.5" />
-                <span>Tailscale</span>
+                <span>{t("mobile.modeTailscale")}</span>
                 {status.tailscaleIp ? <code className="ade-mp-mode-hint">{status.tailscaleIp}</code> : null}
               </button>
               <button
@@ -345,7 +339,7 @@ export function MobilePairingSection() {
                 onClick={() => void handleSwitchMode("tunnel")}
               >
                 <Globe className="size-3.5" />
-                <span>Internet Tunnel</span>
+                <span>{t("mobile.modeTunnel")}</span>
                 {status.tunnelRunning ? <span className="ade-dot ade-dot-running" /> : null}
               </button>
               <button
@@ -356,27 +350,27 @@ export function MobilePairingSection() {
                 onClick={() => void handleSwitchMode("custom")}
               >
                 <Link2 className="size-3.5" />
-                <span>Custom URL</span>
+                <span>{t("mobile.modeCustom")}</span>
               </button>
             </div>
 
             {/* Mode-specific controls */}
             {status.mode === "tailscale" && !status.tailscaleIp ? (
               <div className="ade-mp-mode-note">
-                No Tailscale interface detected on this machine. Install and sign in to Tailscale on both this computer and your phone to connect over 5G from anywhere.
+                {t("mobile.noTailscale")}
               </div>
             ) : null}
 
             {status.mode === "tunnel" ? (
               <div className="ade-mp-tunnel-row">
                 <div className="ade-mp-tunnel-meta">
-                  <strong>Cloudflare Quick Tunnel (works over 5G / anywhere)</strong>
+                  <strong>{t("mobile.tunnelName")}</strong>
                   <span>
                     {status.tunnelUrl
                       ? status.tunnelUrl
                       : status.cloudflaredAvailable
-                        ? "Creates a temporary encrypted HTTPS tunnel to this computer with no router configuration."
-                        : "Install cloudflared (`brew install cloudflared`) to enable 1-click HTTPS tunneling."}
+                        ? t("mobile.tunnelCreate")
+                        : t("mobile.tunnelInstall")}
                   </span>
                   {status.tunnelError ? <span className="text-rose-400">{status.tunnelError}</span> : null}
                 </div>
@@ -387,7 +381,7 @@ export function MobilePairingSection() {
                   onClick={() => void handleTunnelAction(status.tunnelRunning ? "stop" : "start")}
                 >
                   {tunnelBusy ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                  {status.tunnelRunning ? "Stop tunnel" : "Start tunnel"}
+                  {status.tunnelRunning ? t("mobile.stopTunnel") : t("mobile.startTunnel")}
                 </button>
               </div>
             ) : null}
@@ -401,10 +395,10 @@ export function MobilePairingSection() {
                   value={customUrlDraft}
                   onChange={e => setCustomUrlDraft(e.target.value)}
                   onKeyDown={e => { if (e.key === "Enter") void handleSaveCustomUrl() }}
-                  aria-label="Custom public URL"
+                  aria-label={t("mobile.customUrlAria")}
                 />
                 <button type="button" className="ade-btn ade-btn-primary" disabled={busy} onClick={() => void handleSaveCustomUrl()}>
-                  Save URL
+                  {t("mobile.saveUrl")}
                 </button>
               </div>
             ) : null}
@@ -417,7 +411,7 @@ export function MobilePairingSection() {
                     className="ade-mp-qr-svg"
                     viewBox={`0 0 ${qrSvg.viewBoxSize} ${qrSvg.viewBoxSize}`}
                     role="img"
-                    aria-label="QR code to pair your iPhone or Android with ADE"
+                    aria-label={t("mobile.qrAria")}
                     shapeRendering="crispEdges"
                   >
                     <rect width={qrSvg.viewBoxSize} height={qrSvg.viewBoxSize} fill="#ffffff" />
@@ -429,15 +423,15 @@ export function MobilePairingSection() {
                     <span>
                       {!status.activeBaseUrl
                         ? status.mode === "tunnel"
-                          ? "Start the tunnel above to generate a scannable QR code."
+                          ? t("mobile.qrStartTunnel")
                           : status.mode === "custom"
-                            ? "Enter and save a URL above to generate a QR code."
-                            : "No network address available for this mode."
-                        : "QR code expired."}
+                            ? t("mobile.qrEnterUrl")
+                            : t("mobile.qrNoAddress")
+                        : t("mobile.qrExpired")}
                     </span>
                     {status.activeBaseUrl ? (
                       <button type="button" className="ade-btn ade-btn-primary ade-btn-xs" onClick={() => void handleRegenerateQr()}>
-                        <RefreshCw className="size-3" /> Generate fresh QR
+                        <RefreshCw className="size-3" /> {t("mobile.freshQr")}
                       </button>
                     ) : null}
                   </div>
@@ -447,11 +441,11 @@ export function MobilePairingSection() {
               <div className="ade-mp-qr-details">
                 <div className="ade-mp-qr-top">
                   <div>
-                    <div className="ade-mp-qr-heading">Scan with iPhone or Android camera</div>
+                    <div className="ade-mp-qr-heading">{t("mobile.scanHeading")}</div>
                     <div className="ade-mp-qr-sub">
                       {status.challenge && !challengeExpired
-                        ? `Single-use code · expires in ${formatCountdown(status.challenge.expiresAt, now)}`
-                        : "Generate a fresh single-use pairing QR code."}
+                        ? t("mobile.singleUse", { time: formatCountdown(status.challenge.expiresAt, now) })
+                        : t("mobile.generateSingleUse")}
                     </div>
                   </div>
                   <button
@@ -459,16 +453,16 @@ export function MobilePairingSection() {
                     className="ade-chip-btn"
                     disabled={busy}
                     onClick={() => void handleRegenerateQr()}
-                    title="Generate a new single-use QR code"
+                    title={t("mobile.newQrTitle")}
                   >
-                    <RefreshCw className="size-3.5" /> New QR
+                    <RefreshCw className="size-3.5" /> {t("mobile.newQr")}
                   </button>
                 </div>
 
                 {status.challenge && !challengeExpired ? (
                   <div className="ade-mp-code-row">
                     <div className="ade-mp-short-code">
-                      <span className="ade-mp-short-code-label">Manual code</span>
+                      <span className="ade-mp-short-code-label">{t("mobile.manualCode")}</span>
                       <code className="ade-mono">{status.challenge.shortCode}</code>
                     </div>
                     <button
@@ -476,7 +470,7 @@ export function MobilePairingSection() {
                       className="ade-chip-btn"
                       onClick={() => void copyValue(status.challenge!.shortCode, "code")}
                     >
-                      {copiedField === "code" ? <><Check className="size-3" /> Copied</> : <><Copy className="size-3" /> Copy code</>}
+                      {copiedField === "code" ? <><Check className="size-3" /> {t("common.copied")}</> : <><Copy className="size-3" /> {t("mobile.copyCode")}</>}
                     </button>
                     {status.challenge.qrUrl ? (
                       <button
@@ -484,7 +478,7 @@ export function MobilePairingSection() {
                         className="ade-chip-btn"
                         onClick={() => void copyValue(status.challenge!.qrUrl!, "url")}
                       >
-                        {copiedField === "url" ? <><Check className="size-3" /> Copied link</> : <><Copy className="size-3" /> Copy link</>}
+                        {copiedField === "url" ? <><Check className="size-3" /> {t("mobile.copiedLink")}</> : <><Copy className="size-3" /> {t("mobile.copyLink")}</>}
                       </button>
                     ) : null}
                   </div>
@@ -492,14 +486,14 @@ export function MobilePairingSection() {
 
                 {status.activeBaseUrl ? (
                   <div className="ade-mp-endpoint-line">
-                    <span>Bridge address:</span>
+                    <span>{t("mobile.bridgeAddress")}</span>
                     <code className="ade-mono">{status.activeBaseUrl}</code>
                   </div>
                 ) : null}
 
                 <ol className="ade-mp-steps">
-                  <li><strong>iPhone:</strong> Point the Camera app at the QR code and tap the Safari link. Tap <em>Share → Add to Home Screen</em> for a full-screen app icon.</li>
-                  <li><strong>Android:</strong> Scan with Camera or Google Lens and open in Chrome. Tap <em>Menu → Install app</em> (or <em>Add to Home screen</em>).</li>
+                  <li><strong>iPhone:</strong> <span dangerouslySetInnerHTML={{ __html: t("mobile.iphoneSteps") }} /></li>
+                  <li><strong>Android:</strong> <span dangerouslySetInnerHTML={{ __html: t("mobile.androidSteps") }} /></li>
                 </ol>
               </div>
             </div>
@@ -511,19 +505,19 @@ export function MobilePairingSection() {
       <section className="ade-mp-pair-card">
         <div className="ade-mp-devices-head">
           <div>
-            <h3>Paired devices ({status?.devices.length ?? 0})</h3>
-            <p>Each device gets a unique cryptographic token stored hashed on this computer. Revoking cuts off access immediately.</p>
+            <h3>{t("mobile.devices", { count: status?.devices.length ?? 0 })}</h3>
+            <p>{t("mobile.devicesHint")}</p>
           </div>
           {(status?.devices.length ?? 0) > 0 ? (
             <button type="button" className="ade-btn ade-btn-danger ade-btn-xs" onClick={() => void handleRevokeAll()}>
-              Revoke all
+              {t("mobile.revokeAll")}
             </button>
           ) : null}
         </div>
 
         {!status || status.devices.length === 0 ? (
           <div className="ade-mp-devices-empty">
-            No phones paired yet. Enable phone pairing above and scan the QR code with your iPhone or Android.
+            {t("mobile.noDevices")}
           </div>
         ) : (
           <div className="ade-mp-devices-list">
@@ -546,25 +540,25 @@ export function MobilePairingSection() {
                           if (e.key === "Escape") setRenamingId(null)
                         }}
                       />
-                      <button type="button" className="ade-btn ade-btn-primary ade-btn-xs" onClick={() => void handleRenameDevice(device.id)}>Save</button>
-                      <button type="button" className="ade-btn ade-btn-xs" onClick={() => setRenamingId(null)}>Cancel</button>
+                      <button type="button" className="ade-btn ade-btn-primary ade-btn-xs" onClick={() => void handleRenameDevice(device.id)}>{t("common.save")}</button>
+                      <button type="button" className="ade-btn ade-btn-xs" onClick={() => setRenamingId(null)}>{t("common.cancel")}</button>
                     </div>
                   ) : (
                     <div className="ade-mp-device-name">
                       <strong>{device.name}</strong>
-                      <span className="ade-pill">{device.platform === "ios" ? "iOS" : device.platform === "android" ? "Android" : "Web"}</span>
+                      <span className="ade-pill">{device.platform === "ios" ? "iOS" : device.platform === "android" ? "Android" : t("mobile.web")}</span>
                     </div>
                   )}
                   <div className="ade-mp-device-meta">
-                    Last seen {formatRelativeTime(device.lastSeenAt, now)} · IP {device.lastIp} · Paired {new Date(device.pairedAt).toLocaleDateString()}
+                    {t("mobile.deviceMeta", { seen: relative(device.lastSeenAt, now), ip: device.lastIp, paired: formatDay(device.pairedAt) })}
                   </div>
                 </div>
                 <div className="ade-mp-device-actions">
                   <button
                     type="button"
                     className="ade-icon-btn"
-                    title={`Rename ${device.name}`}
-                    aria-label={`Rename ${device.name}`}
+                    title={t("mobile.rename", { name: device.name })}
+                    aria-label={t("mobile.rename", { name: device.name })}
                     onClick={() => { setRenamingId(device.id); setRenameDraft(device.name) }}
                   >
                     <Pencil className="size-3.5" />
@@ -574,7 +568,7 @@ export function MobilePairingSection() {
                     className="ade-btn ade-btn-danger ade-btn-xs"
                     onClick={() => void handleRevokeDevice(device.id)}
                   >
-                    <Trash2 className="size-3" /> Revoke
+                    <Trash2 className="size-3" /> {t("mobile.revoke")}
                   </button>
                 </div>
               </div>

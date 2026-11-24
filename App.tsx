@@ -23,6 +23,7 @@ import { isEditableTarget, matchesChord, resolveKeybindings } from "./src/keybin
 import { MobileAuthGate, type MobileSessionState } from "./src/mobile/MobileAuthGate"
 import { MobileAppShell } from "./src/mobile/MobileAppShell"
 import { useIsMobile } from "./src/mobile/useIsMobile"
+import { I18nProvider } from "./src/i18n/I18nProvider"
 import { request } from "./api"
 
 type LastView = { screen?: Screen; activeSessionId?: string; selectedProjectId?: string | null; expandedProjects?: string[] }
@@ -39,16 +40,25 @@ function readLastView(): LastView {
   }
 }
 export default function App() {
+  const settingsHook = useSettings()
   return (
-    <EventStreamProvider>
-      <AppInner />
-    </EventStreamProvider>
+    <I18nProvider
+      language={settingsHook.settings.language}
+      dateFormat={settingsHook.settings.dateFormat}
+      timeFormat={settingsHook.settings.timeFormat}
+      currency={settingsHook.settings.currency}
+      onChangeLanguage={language => settingsHook.update({ language })}
+    >
+      <EventStreamProvider>
+        <AppInner settingsHook={settingsHook} />
+      </EventStreamProvider>
+    </I18nProvider>
   )
 }
 
-function AppInner() {
+function AppInner({ settingsHook }: { settingsHook: ReturnType<typeof useSettings> }) {
   const [lastView] = useState(readLastView)
-  const { settings, error: settingsError, resolved, update } = useSettings()
+  const { settings, error: settingsError, resolved, update } = settingsHook
   const [screen, setScreen] = useState<Screen>(() => lastView.screen === "project" || lastView.screen === "work" ? lastView.screen : String(lastView.screen) === "factory" ? "project" : "inbox")
   const [newSessionOpen, setNewSessionOpen] = useState(false)
   // Set when New session is opened from an issue (Issues panel): linked and filled in.

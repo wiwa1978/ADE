@@ -1,6 +1,7 @@
 import { Circle, Eye, GitMerge, GitPullRequest, Loader2, MessageCircle, ShieldQuestion, Stamp, TriangleAlert, XCircle, type LucideIcon } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { request } from "../api"
+import { t, type TranslationKey } from "./i18n"
 
 /** Mirrors runtime/inbox.ts. One vocabulary for session status everywhere in the UI. */
 export type SessionState =
@@ -42,19 +43,33 @@ export const sessionStateIcon: Record<SessionState, LucideIcon> = {
   "idle": Circle,
 }
 
-/** Label, tone (dot color), and a one-line hint for each state. */
-export const sessionStateInfo: Record<SessionState, { label: string; tone: "running" | "waiting" | "failed" | "ok" | "review" | "merged" | "idle"; hint: string }> = {
-  "working": { label: "Working", tone: "running", hint: "The agent is working." },
-  "stage-approval": { label: "Approve stage", tone: "waiting", hint: "A blueprint stage is ready for your review: approve it or ask for changes." },
-  "needs-approval": { label: "Needs approval", tone: "waiting", hint: "A command is waiting for you to allow or deny it." },
-  "failed": { label: "Failed", tone: "failed", hint: "The last turn ended with an error." },
-  "checks-failing": { label: "Checks failing", tone: "failed", hint: "The pull request's checks are failing." },
-  "ready-to-review": { label: "Ready to review", tone: "review", hint: "There are changes to review, commit, or open as a pull request." },
-  "pr-open": { label: "PR open", tone: "ok", hint: "A pull request is open." },
-  "replied": { label: "Replied", tone: "ok", hint: "The agent replied and is waiting for you." },
-  "merged": { label: "Merged", tone: "merged", hint: "The pull request was merged. You can archive this session." },
-  "idle": { label: "Idle", tone: "idle", hint: "Nothing is happening." },
+type SessionStateTone = "running" | "waiting" | "failed" | "ok" | "review" | "merged" | "idle"
+type SessionStateSpec = { labelKey: TranslationKey; tone: SessionStateTone; hintKey: TranslationKey }
+
+const sessionStateSpecs: Record<SessionState, SessionStateSpec> = {
+  "working": { labelKey: "session.state.working.label", tone: "running", hintKey: "session.state.working.hint" },
+  "stage-approval": { labelKey: "session.state.stageApproval.label", tone: "waiting", hintKey: "session.state.stageApproval.hint" },
+  "needs-approval": { labelKey: "session.state.needsApproval.label", tone: "waiting", hintKey: "session.state.needsApproval.hint" },
+  "failed": { labelKey: "session.state.failed.label", tone: "failed", hintKey: "session.state.failed.hint" },
+  "checks-failing": { labelKey: "session.state.checksFailing.label", tone: "failed", hintKey: "session.state.checksFailing.hint" },
+  "ready-to-review": { labelKey: "session.state.readyToReview.label", tone: "review", hintKey: "session.state.readyToReview.hint" },
+  "pr-open": { labelKey: "session.state.prOpen.label", tone: "ok", hintKey: "session.state.prOpen.hint" },
+  "replied": { labelKey: "session.state.replied.label", tone: "ok", hintKey: "session.state.replied.hint" },
+  "merged": { labelKey: "session.state.merged.label", tone: "merged", hintKey: "session.state.merged.hint" },
+  "idle": { labelKey: "session.state.idle.label", tone: "idle", hintKey: "session.state.idle.hint" },
 }
+
+/** Label, tone (dot color), and a one-line hint for each state (localized dynamically). */
+export const sessionStateInfo: Record<SessionState, { label: string; tone: SessionStateTone; hint: string }> = new Proxy(
+  {} as Record<SessionState, { label: string; tone: SessionStateTone; hint: string }>,
+  {
+    get(_target, prop: string) {
+      const spec = sessionStateSpecs[prop as SessionState]
+      if (!spec) return undefined
+      return { label: t(spec.labelKey), tone: spec.tone, hint: t(spec.hintKey) }
+    },
+  },
+)
 
 /** Polls the host's inbox; refreshes immediately when `refreshKey` changes (e.g. a session update). */
 export function useInbox(refreshKey: unknown, enabled = true) {
@@ -102,9 +117,9 @@ export function useInbox(refreshKey: unknown, enabled = true) {
 export function relativeTime(timestamp: number | null | undefined) {
   if (!timestamp) return ""
   const minutes = Math.round((Date.now() - timestamp) / 60000)
-  if (minutes < 1) return "just now"
-  if (minutes < 60) return `${minutes}m ago`
+  if (minutes < 1) return t("common.justNow")
+  if (minutes < 60) return t("common.minutesAgo", { count: minutes })
   const hours = Math.round(minutes / 60)
-  if (hours < 48) return `${hours}h ago`
-  return `${Math.round(hours / 24)}d ago`
+  if (hours < 48) return t("common.hoursAgo", { count: hours })
+  return t("common.daysAgo", { count: Math.round(hours / 24) })
 }

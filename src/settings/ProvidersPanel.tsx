@@ -21,6 +21,7 @@ import type {
 } from "../../app-types"
 import type { useConnections } from "../../useConnections"
 import { modelCredentialProviders } from "../../useConnections"
+import { useI18n } from "../i18n/I18nContext"
 
 type EnvVarRow = { key: string; value: string }
 type ProviderRuntimeOverride = {
@@ -156,6 +157,7 @@ export function ProvidersPanel({
     setProviderEnabled,
   } = connections
 
+  const { t } = useI18n()
   const [overrides, setOverrides] = useState<Record<string, ProviderRuntimeOverride>>(loadOverrides)
   const [selectedId, setSelectedId] = useState<string>("")
   const [editingKey, setEditingKey] = useState<string | null>(null)
@@ -164,7 +166,7 @@ export function ProvidersPanel({
   const items: UnifiedProviderItem[] = useMemo(() => {
     const credMap = new Map((modelCredentials ?? []).map(c => [c.provider, c.source]))
     const catalogMap = new Map(modelCatalog.map(c => [c.id, c]))
-    const toolMap = new Map((providerTools ?? []).map(t => [t.id, t]))
+    const toolMap = new Map((providerTools ?? []).map(tool => [tool.id, tool]))
     const list: UnifiedProviderItem[] = []
     const seen = new Set<string>()
 
@@ -177,10 +179,10 @@ export function ProvidersPanel({
       const count = models.length || tool.modelCount || null
       const enabled = tool.enabled
       const statusText = !enabled
-        ? "Disabled"
+        ? t("prov.disabled")
         : tool.installed
-          ? (count ? `Available · ${count} model${count === 1 ? "" : "s"}` : "Available")
-          : "Not installed"
+          ? (count ? (count === 1 ? t("prov.availableOne") : t("prov.availableModels", { count })) : t("prov.available"))
+          : t("prov.notInstalled")
       list.push({
         id: tool.id,
         name: tool.name,
@@ -211,12 +213,12 @@ export function ProvidersPanel({
       enabled: copilotEnabled,
       canToggle: Boolean(copilotTool),
       statusText: copilotStatusError
-        ? "Unavailable"
+        ? t("prov.unavailable")
         : copilotSignedIn
-          ? "Authenticated · Subscription"
+          ? t("prov.authSubscription")
           : copilotWaiting
-            ? "Waiting for sign-in"
-            : "Not signed in",
+            ? t("prov.waitingSignIn")
+            : t("prov.notSignedIn"),
       tone: copilotStatusError ? "warn" : copilotSignedIn ? "ok" : "off",
       modelCount: copilotCat?.models.length || null,
       models: copilotCat?.models ?? [],
@@ -233,14 +235,14 @@ export function ProvidersPanel({
       const configured = Boolean(cat?.configured || source === "saved" || source === "environment")
       const enabled = tool ? tool.enabled : configured
       const statusText = !enabled && tool
-        ? "Disabled"
+        ? t("prov.disabled")
         : source === "saved"
-          ? "Authenticated · Key saved"
+          ? t("prov.authKeySaved")
           : source === "environment"
-            ? "Authenticated · Environment"
+            ? t("prov.authEnvironment")
             : configured
-              ? "Configured"
-              : "Not set up"
+              ? t("prov.configured")
+              : t("prov.notSetUp")
       list.push({
         id: cred.id,
         name: cred.name,
@@ -258,7 +260,7 @@ export function ProvidersPanel({
     }
 
     return list
-  }, [providerTools, modelCatalog, modelCredentials, copilotHealth, copilotStatusError, copilotWaiting])
+  }, [providerTools, modelCatalog, modelCredentials, copilotHealth, copilotStatusError, copilotWaiting, t])
 
   const activeItem = items.find(i => i.id === selectedId)
     ?? items.find(i => i.id === selectedProvider)
@@ -308,22 +310,22 @@ export function ProvidersPanel({
       {/* Compact Scope + Toolbar Row */}
       <div className="st-prov-topbar">
         <div className="st-prov-topbar-left">
-          <span className="st-prov-heading">Providers</span>
+          <span className="st-prov-heading">{t("prov.heading")}</span>
           <button
             type="button"
             className="st-prov-icon-btn"
-            title="Add OpenAI-compatible provider"
-            aria-label="Add provider"
+            title={t("prov.addCompatibleTitle")}
+            aria-label={t("prov.addProvider")}
             onClick={() => setSelectedId("compatible")}
           >
             <Plus className="size-3.5" />
           </button>
-          <span className="st-prov-scope-pill">on {activeEnvironmentName}</span>
+          <span className="st-prov-scope-pill">{t("prov.onEnvironment", { name: activeEnvironmentName })}</span>
         </div>
         <div className="st-prov-topbar-right">
           {runtime?.online ? (
             <span className="st-prov-active-chip">
-              Default: <strong>{modelCatalog.find(p => p.id === selectedProvider)?.name ?? selectedProvider}</strong>
+              {t("prov.defaultLabel")} <strong>{modelCatalog.find(p => p.id === selectedProvider)?.name ?? selectedProvider}</strong>
               {selectedModel ? <> · <code>{selectedModel}</code></> : null}
             </span>
           ) : null}
@@ -334,7 +336,7 @@ export function ProvidersPanel({
             disabled={rescanning}
           >
             <RefreshCw className={`size-3.5 inline mr-1 ${rescanning ? "animate-spin" : ""}`} />
-            Rescan
+            {t("prov.rescan")}
           </button>
         </div>
       </div>
@@ -348,7 +350,7 @@ export function ProvidersPanel({
       {/* Master-Detail Split Card */}
       <div className="st-prov-card">
         {/* Left Master List */}
-        <div className="st-prov-list" role="listbox" aria-label="Model providers">
+        <div className="st-prov-list" role="listbox" aria-label={t("prov.modelProviders")}>
           <div className="st-prov-list-items">
             {items.map(item => {
               const selected = activeItem?.id === item.id
@@ -378,7 +380,7 @@ export function ProvidersPanel({
                       type="button"
                       role="switch"
                       aria-checked={item.enabled}
-                      aria-label={`Enable ${item.name}`}
+                      aria-label={t("prov.enable", { name: item.name })}
                       className={`st-switch ${item.enabled ? "is-on" : ""}`}
                       disabled={busyToggle}
                       onClick={e => {
@@ -402,7 +404,7 @@ export function ProvidersPanel({
             onClick={() => { setSelectedId("compatible"); setEditingKey(null) }}
           >
             <Plus className="size-3.5" />
-            <span>Add provider</span>
+            <span>{t("prov.addProvider")}</span>
           </button>
         </div>
 
@@ -413,7 +415,7 @@ export function ProvidersPanel({
               <div className="flex items-center gap-2.5 min-w-0">
                 <span className="st-prov-detail-icon">{providerGlyph(activeItem)}</span>
                 <h3 className="st-prov-detail-title">{activeOverride.displayName || activeItem.name}</h3>
-                {isDefaultProvider ? <span className="st-prov-default-tag">Default</span> : null}
+                {isDefaultProvider ? <span className="st-prov-default-tag">{t("prov.defaultTag")}</span> : null}
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 {activeCatalogProvider?.configured && !isDefaultProvider ? (
@@ -422,15 +424,15 @@ export function ProvidersPanel({
                     className="st-button"
                     onClick={() => onSelectDefaultProvider(activeItem.id)}
                   >
-                    Use as default
+                    {t("prov.useAsDefault")}
                   </button>
                 ) : null}
                 {Object.keys(activeOverride).length > 0 ? (
                   <button
                     type="button"
                     className="st-prov-icon-btn"
-                    title="Reset overrides to defaults"
-                    aria-label="Reset overrides"
+                    title={t("prov.resetTitle")}
+                    aria-label={t("prov.resetAria")}
                     onClick={() => resetOverride(activeItem.id)}
                   >
                     <RotateCcw className="size-3.5" />
@@ -441,7 +443,7 @@ export function ProvidersPanel({
 
             {/* Status Block */}
             <div className="st-prov-block">
-              <div className="st-prov-block-label">Status</div>
+              <div className="st-prov-block-label">{t("prov.status")}</div>
               <div className="st-prov-status-line">
                 <span className={`st-status is-${activeItem.tone}`}>
                   <i /> {activeItem.statusText}
@@ -455,7 +457,7 @@ export function ProvidersPanel({
             {/* Display Name */}
             <div className="st-prov-field-row">
               <div className="st-prov-field-text">
-                <label htmlFor="prov-display-name">Display name</label>
+                <label htmlFor="prov-display-name">{t("prov.displayName")}</label>
               </div>
               <input
                 id="prov-display-name"
@@ -468,15 +470,15 @@ export function ProvidersPanel({
             {/* API Credentials / Copilot Auth Section */}
             {activeItem.kind === "copilot" ? (
               <div className="st-prov-section">
-                <div className="st-prov-section-title">Authentication</div>
+                <div className="st-prov-section-title">{t("prov.authentication")}</div>
                 <div className="st-prov-field-row">
                   <div className="st-prov-field-text">
-                    <label>GitHub Copilot subscription</label>
+                    <label>{t("prov.copilotSubscription")}</label>
                     <p>
                       {copilotWaiting && copilotSignIn?.code && copilotSignIn.url ? (
-                        <>Open <a href={copilotSignIn.url} target="_blank" rel="noreferrer">github.com/login/device</a> and enter <strong>{copilotSignIn.code}</strong></>
+                        <>{t("prov.copilotOpen", { link: "§L§", code: "§C§" }).split(/(§[LC]§)/).map((part, index) => part === "§L§" ? <a key={index} href={copilotSignIn.url} target="_blank" rel="noreferrer">github.com/login/device</a> : part === "§C§" ? <strong key={index}>{copilotSignIn.code}</strong> : part)}</>
                       ) : (
-                        "Uses your Copilot subscription models. Separate from the GitHub CLI account."
+                        t("prov.copilotUses")
                       )}
                     </p>
                   </div>
@@ -487,7 +489,7 @@ export function ProvidersPanel({
                       disabled={authBusy || !copilotHealth || Boolean(copilotStatusError) || sending}
                       onClick={() => void changeCopilotAuth(copilotWaiting ? "cancel" : "start")}
                     >
-                      {copilotWaiting ? "Cancel" : copilotHealth?.copilotSignedIn ? "Reconnect" : "Sign in"}
+                      {copilotWaiting ? t("common.cancel") : copilotHealth?.copilotSignedIn ? t("prov.reconnect") : t("prov.signIn")}
                     </button>
                     {!copilotWaiting && copilotHealth?.copilotSignedIn ? (
                       <button
@@ -496,7 +498,7 @@ export function ProvidersPanel({
                         disabled={authBusy || sending}
                         onClick={() => void changeCopilotAuth("sign-out")}
                       >
-                        Sign out
+                        {t("prov.signOut")}
                       </button>
                     ) : null}
                   </div>
@@ -506,11 +508,11 @@ export function ProvidersPanel({
 
             {activeItem.credentialProvider ? (
               <div className="st-prov-section">
-                <div className="st-prov-section-title">Authentication</div>
+                <div className="st-prov-section-title">{t("prov.authentication")}</div>
                 <div className="st-prov-field-row">
                   <div className="st-prov-field-text">
-                    <label>API key</label>
-                    <p>Stored securely in this host’s system keychain and never shown again.</p>
+                    <label>{t("prov.apiKey")}</label>
+                    <p>{t("prov.apiKeyHint")}</p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {editingKey !== activeItem.credentialProvider ? (
@@ -520,7 +522,7 @@ export function ProvidersPanel({
                         disabled={credentialDisabled}
                         onClick={() => setEditingKey(activeItem.credentialProvider!)}
                       >
-                        {activeItem.credentialSource === "saved" ? "Replace key" : "Add key"}
+                        {activeItem.credentialSource === "saved" ? t("prov.replaceKey") : t("prov.addKey")}
                       </button>
                     ) : null}
                     {activeItem.credentialSource === "saved" && editingKey !== activeItem.credentialProvider ? (
@@ -533,7 +535,7 @@ export function ProvidersPanel({
                           onModelsChanged?.()
                         }}
                       >
-                        {modelCredentialBusy?.provider === activeItem.credentialProvider && modelCredentialBusy.action === "remove" ? "Removing…" : "Remove"}
+                        {modelCredentialBusy?.provider === activeItem.credentialProvider && modelCredentialBusy.action === "remove" ? t("prov.removing") : t("common.remove")}
                       </button>
                     ) : null}
                   </div>
@@ -554,16 +556,16 @@ export function ProvidersPanel({
                       autoFocus
                       autoComplete="new-password"
                       maxLength={4096}
-                      placeholder={`${activeItem.name} API key`}
+                      placeholder={t("prov.keyFor", { name: activeItem.name })}
                       required
                       disabled={credentialDisabled}
-                      aria-label={`${activeItem.name} API key`}
+                      aria-label={t("prov.keyFor", { name: activeItem.name })}
                     />
                     <button className="st-button is-primary" disabled={credentialDisabled}>
-                      {modelCredentialBusy?.provider === activeItem.credentialProvider && modelCredentialBusy.action === "save" ? "Saving…" : "Save"}
+                      {modelCredentialBusy?.provider === activeItem.credentialProvider && modelCredentialBusy.action === "save" ? t("common.saving") : t("common.save")}
                     </button>
                     <button type="button" className="st-button is-quiet" onClick={() => setEditingKey(null)}>
-                      Cancel
+                      {t("common.cancel")}
                     </button>
                   </form>
                 ) : null}
@@ -572,8 +574,8 @@ export function ProvidersPanel({
                   <form className="flex flex-col gap-3 mt-3 pt-3 border-t border-[rgb(var(--border)/0.7)]" onSubmit={event => void onSaveCompatible(event)}>
                     <div className="st-prov-field-row">
                       <div className="st-prov-field-text">
-                        <label htmlFor="compat-url">Endpoint URL</label>
-                        <p>Any OpenAI-compatible server, e.g. Ollama or LM Studio.</p>
+                        <label htmlFor="compat-url">{t("prov.endpointUrl")}</label>
+                        <p>{t("prov.endpointHint")}</p>
                       </div>
                       <input
                         id="compat-url"
@@ -586,8 +588,8 @@ export function ProvidersPanel({
                     </div>
                     <div className="st-prov-field-row">
                       <div className="st-prov-field-text">
-                        <label htmlFor="compat-model">Default model ID</label>
-                        <p>Model name served by your endpoint.</p>
+                        <label htmlFor="compat-model">{t("prov.defaultModelId")}</label>
+                        <p>{t("prov.defaultModelHint")}</p>
                       </div>
                       <div className="flex items-center gap-2">
                         <input
@@ -599,7 +601,7 @@ export function ProvidersPanel({
                           disabled={compatible?.fromEnvironment || compatibleBusy}
                         />
                         <button className="st-button is-primary" disabled={compatible?.fromEnvironment || compatibleBusy}>
-                          {compatibleBusy ? "Saving…" : "Save"}
+                          {compatibleBusy ? t("common.saving") : t("common.save")}
                         </button>
                       </div>
                     </div>
@@ -612,11 +614,11 @@ export function ProvidersPanel({
             {/* Runtime Section (for CLI providers, matching screenshot!) */}
             {activeItem.kind === "cli" ? (
               <div className="st-prov-section">
-                <div className="st-prov-section-title">Runtime</div>
+                <div className="st-prov-section-title">{t("prov.runtime")}</div>
                 <div className="st-prov-field-row">
                   <div className="st-prov-field-text">
-                    <label htmlFor="prov-bin-path">Binary path</label>
-                    <p>Path to the {activeItem.name} binary used by this instance.</p>
+                    <label htmlFor="prov-bin-path">{t("prov.binaryPath")}</label>
+                    <p>{t("prov.binaryHint", { name: activeItem.name })}</p>
                   </div>
                   <input
                     id="prov-bin-path"
@@ -628,8 +630,8 @@ export function ProvidersPanel({
                 </div>
                 <div className="st-prov-field-row">
                   <div className="st-prov-field-text">
-                    <label htmlFor="prov-home-path">Config home path</label>
-                    <p>Custom home and config directory for {activeItem.name}.</p>
+                    <label htmlFor="prov-home-path">{t("prov.homePath")}</label>
+                    <p>{t("prov.homeHint", { name: activeItem.name })}</p>
                   </div>
                   <input
                     id="prov-home-path"
@@ -640,14 +642,14 @@ export function ProvidersPanel({
                 </div>
                 <div className="st-prov-field-row">
                   <div className="st-prov-field-text">
-                    <label htmlFor="prov-launch-args">Launch arguments</label>
-                    <p>Additional CLI arguments passed on session start.</p>
+                    <label htmlFor="prov-launch-args">{t("prov.launchArgs")}</label>
+                    <p>{t("prov.launchHint")}</p>
                   </div>
                   <input
                     id="prov-launch-args"
                     className="st-input st-prov-field-input font-mono !text-[12px]"
                     value={activeOverride.launchArgs ?? ""}
-                    placeholder="Optional flags"
+                    placeholder={t("prov.optionalFlags")}
                     onChange={e => updateOverride(activeItem.id, { launchArgs: e.target.value })}
                   />
                 </div>
@@ -657,7 +659,7 @@ export function ProvidersPanel({
             {/* Models & Reasoning Section */}
             {activeItem.models.length > 0 ? (
               <div className="st-prov-section">
-                <div className="st-prov-section-title">Models</div>
+                <div className="st-prov-section-title">{t("prov.models")}</div>
                 <div className="st-prov-models-grid">
                   {activeItem.models.map(m => {
                     const isSelected = selectedProvider === activeItem.id && selectedModel === m.id
@@ -677,13 +679,13 @@ export function ProvidersPanel({
                 {isDefaultProvider ? (
                   <div className="st-prov-field-row mt-2">
                     <div className="st-prov-field-text">
-                      <label htmlFor="prov-reasoning">Reasoning effort</label>
-                      <p>How much the model thinks before answering.</p>
+                      <label htmlFor="prov-reasoning">{t("prov.reasoningEffort")}</label>
+                      <p>{t("prov.reasoningHint")}</p>
                     </div>
                     <select
                       id="prov-reasoning"
                       className="st-select"
-                      aria-label="Reasoning"
+                      aria-label={t("prov.reasoningAria")}
                       value={reasoning === "off" ? "none" : reasoning}
                       onChange={e => onSelectReasoning(e.target.value)}
                     >
@@ -698,11 +700,11 @@ export function ProvidersPanel({
 
             {/* Environment Variables Section (matching screenshot!) */}
             <div className="st-prov-section">
-              <div className="st-prov-section-title">Environment</div>
+              <div className="st-prov-section-title">{t("prov.environment")}</div>
               <div className="st-prov-field-row">
                 <div className="st-prov-field-text">
-                  <label>Variables</label>
-                  <p>API keys, base URLs, and other per-instance settings.</p>
+                  <label>{t("prov.variables")}</label>
+                  <p>{t("prov.variablesHint")}</p>
                 </div>
                 <button
                   type="button"
@@ -713,7 +715,7 @@ export function ProvidersPanel({
                     })
                   }
                 >
-                  <Plus className="size-3.5 inline mr-1" /> Add variable
+                  <Plus className="size-3.5 inline mr-1" /> {t("prov.addVariable")}
                 </button>
               </div>
               {(activeOverride.envVars ?? []).length > 0 ? (
@@ -732,7 +734,7 @@ export function ProvidersPanel({
                       />
                       <input
                         className="st-input flex-1 !w-auto font-mono !text-[12px]"
-                        placeholder="value"
+                        placeholder={t("prov.valuePlaceholder")}
                         value={row.value}
                         onChange={e => {
                           const next = [...(activeOverride.envVars ?? [])]
@@ -743,7 +745,7 @@ export function ProvidersPanel({
                       <button
                         type="button"
                         className="st-prov-icon-btn"
-                        aria-label="Remove variable"
+                        aria-label={t("prov.removeVariable")}
                         onClick={() => {
                           const next = (activeOverride.envVars ?? []).filter((_, i) => i !== idx)
                           updateOverride(activeItem.id, { envVars: next })

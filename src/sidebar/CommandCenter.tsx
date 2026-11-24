@@ -14,6 +14,7 @@ import {
 } from "lucide-react"
 import type { Conversation, SubagentInfo } from "../../app-types"
 import type { Project } from "../../ProjectsView"
+import { useI18n } from "../i18n/I18nContext"
 
 type CommandItem = {
   id: string
@@ -53,6 +54,7 @@ export function CommandCenter({
   onOpenExternalBrowser: (url: string) => void
   onOpenSettings: () => void
 }) {
+  const { t } = useI18n()
   const [query, setQuery] = useState("")
   const [index, setIndex] = useState(0)
   const [prevOpen, setPrevOpen] = useState(open)
@@ -75,18 +77,18 @@ export function CommandCenter({
   if (!open) return null
 
   const items: CommandItem[] = [
-    { id: "act-new", group: "Actions", label: "New coding session", detail: "Start a fresh workspace or worktree", icon: <Plus className="size-4" />, action: onNewSession },
-    { id: "act-browser", group: "Workspace", label: "Open Built-in Browser", detail: "Interactive Chrome CDP + iframe preview", icon: <Globe className="size-4" />, action: () => onOpenPanel("browser") },
-    { id: "act-term", group: "Workspace", label: "Open Terminal (Side Pane)", detail: "Interactive shell in session workspace or ~", icon: <Terminal className="size-4" />, action: () => onOpenPanel("terminal") },
-    { id: "act-ext", group: "Workspace", label: "Open localhost:3000 in External Browser", detail: "Launch default system browser", icon: <ExternalLink className="size-4" />, action: () => onOpenExternalBrowser("http://localhost:3000") },
+    { id: "act-new", group: t("command.group.actions"), label: t("command.action.newSession"), detail: t("command.action.newSessionDetail"), icon: <Plus className="size-4" />, action: onNewSession },
+    { id: "act-browser", group: t("command.group.workspace"), label: t("command.action.openBrowser"), detail: t("command.action.openBrowserDetail"), icon: <Globe className="size-4" />, action: () => onOpenPanel("browser") },
+    { id: "act-term", group: t("command.group.workspace"), label: t("command.action.openTerminal"), detail: t("command.action.openTerminalDetail"), icon: <Terminal className="size-4" />, action: () => onOpenPanel("terminal") },
+    { id: "act-ext", group: t("command.group.workspace"), label: t("command.action.openExternal"), detail: t("command.action.openExternalDetail"), icon: <ExternalLink className="size-4" />, action: () => onOpenExternalBrowser("http://localhost:3000") },
     ...(hasActiveWorkspace ? [
-      { id: "act-files", group: "Workspace", label: "Open Files Explorer", detail: "Browse and edit workspace files", icon: <FolderTree className="size-4" />, action: () => onOpenPanel("files") },
-      { id: "act-diff", group: "Workspace", label: "Open Git Changes & Diff", detail: "Review diffs, stage, and commit", icon: <FileDiff className="size-4" />, action: () => onOpenPanel("diff") },
+      { id: "act-files", group: t("command.group.workspace"), label: t("command.action.openFiles"), detail: t("command.action.openFilesDetail"), icon: <FolderTree className="size-4" />, action: () => onOpenPanel("files") },
+      { id: "act-diff", group: t("command.group.workspace"), label: t("command.action.openDiff"), detail: t("command.action.openDiffDetail"), icon: <FileDiff className="size-4" />, action: () => onOpenPanel("diff") },
     ] : []),
-    { id: "act-settings", group: "Actions", label: "Open Settings & MCP Servers", detail: "Providers, appearance, approvals, MCP", icon: <Settings2 className="size-4" />, action: onOpenSettings },
+    { id: "act-settings", group: t("command.group.actions"), label: t("command.action.openSettings"), detail: t("command.action.openSettingsDetail"), icon: <Settings2 className="size-4" />, action: onOpenSettings },
     ...subagents.map(sub => ({
       id: `sub-${sub.id}`,
-      group: "Subagents",
+      group: t("command.group.subagents"),
       label: `${sub.name} (${sub.status})`,
       detail: sub.assignment.slice(0, 70),
       icon: <Bot className="size-4" />,
@@ -94,15 +96,15 @@ export function CommandCenter({
     })),
     ...projects.map(proj => ({
       id: `proj-${proj.id}`,
-      group: "Projects",
+      group: t("command.group.projects"),
       label: proj.name,
-      detail: proj.repository || proj.githubUrl || "Project",
+      detail: proj.repository || proj.githubUrl || t("command.projectFallback"),
       icon: <Folder className="size-4" />,
       action: () => onSelectProject(proj.id),
     })),
     ...sessions.map(sess => ({
       id: `sess-${sess.id}`,
-      group: "Sessions",
+      group: t("command.group.sessions"),
       label: sess.label,
       detail: sess.workspace?.branch || sess.mode,
       icon: <MessageSquare className="size-4" />,
@@ -123,14 +125,14 @@ export function CommandCenter({
 
   return (
     <div className="ade-cmd-backdrop" onClick={onClose}>
-      <div className="ade-cmd-dialog" onClick={e => e.stopPropagation()} role="dialog" aria-label="Command Center">
+      <div className="ade-cmd-dialog" onClick={e => e.stopPropagation()} role="dialog" aria-label={t("command.aria")}>
         <div className="ade-cmd-input-row">
           <Search className="size-4 opacity-60" />
           <input
             ref={inputRef}
             type="text"
             className="ade-cmd-input"
-            placeholder="Jump to session, project, subagent, or open panel…"
+            placeholder={t("command.placeholder")}
             value={query}
             onChange={e => { setQuery(e.target.value); setIndex(0) }}
             onKeyDown={e => {
@@ -144,7 +146,7 @@ export function CommandCenter({
         </div>
         <div className="ade-cmd-results">
           {filtered.length === 0 ? (
-            <div className="ade-pane-note">No matches for "{query}".</div>
+            <div className="ade-pane-note">{t("command.empty", { query })}</div>
           ) : (
             filtered.slice(0, 24).map((item, idx) => (
               <button

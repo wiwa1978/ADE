@@ -1,9 +1,21 @@
 import { useEffect, useState } from "react"
 import { isAccentColor, isColorPalette, isTheme, paletteVariables, resolveAccentHex, type ColorPalette, type Theme } from "./appearance-palettes"
 import { ensureGoogleFontLoaded } from "./src/appearance/fonts"
+import {
+  DEFAULT_FORMAT_PREFERENCES, DEFAULT_LANGUAGE, getLanguageMeta, isCurrencyCode, isDateFormatPreference, isLanguageCode, isTimeFormatPreference, setCurrentLanguage, t,
+  type DateFormatPreference, type LanguageCode, type TimeFormatPreference,
+} from "./src/i18n"
 import { CUSTOM_ACTION_OPTIONS, type CustomKeybinding } from "./src/keybindings"
 
 export type Settings = {
+  /** Interface display language (e.g. "en", "nl"). */
+  language: LanguageCode
+  /** How calendar dates are written ("auto" follows the display language). */
+  dateFormat: DateFormatPreference
+  /** 12- or 24-hour clock ("auto" follows the display language). */
+  timeFormat: TimeFormatPreference
+  /** Preferred currency (ISO 4217) for money amounts. */
+  currency: string
   theme: Theme
   palette: ColorPalette
   /** Optional accent color preset id or #rrggbb hex; "" uses the palette default. */
@@ -45,6 +57,10 @@ export type Settings = {
 
 const storageKey = "ade-settings-v1"
 const defaults: Settings = {
+  language: DEFAULT_LANGUAGE,
+  dateFormat: DEFAULT_FORMAT_PREFERENCES.dateFormat,
+  timeFormat: DEFAULT_FORMAT_PREFERENCES.timeFormat,
+  currency: DEFAULT_FORMAT_PREFERENCES.currency,
   theme: "dark",
   palette: "graphite",
   accentColor: "",
@@ -81,8 +97,14 @@ function readSettings(): { settings: Settings; error: string } {
     const saved: unknown = JSON.parse(raw)
     if (!saved || typeof saved !== "object") throw new Error("Invalid saved settings")
     const value = saved as Partial<Settings>
+    const language = isLanguageCode(value.language) ? value.language : defaults.language
+    setCurrentLanguage(language)
     return {
       settings: {
+        language,
+        dateFormat: isDateFormatPreference(value.dateFormat) ? value.dateFormat : defaults.dateFormat,
+        timeFormat: isTimeFormatPreference(value.timeFormat) ? value.timeFormat : defaults.timeFormat,
+        currency: isCurrencyCode(value.currency) ? value.currency : defaults.currency,
         theme: isTheme(value.theme) ? value.theme : defaults.theme,
         palette: isColorPalette(value.palette) ? value.palette : defaults.palette,
         accentColor: isAccentColor(value.accentColor) ? value.accentColor : defaults.accentColor,
@@ -135,7 +157,7 @@ function readSettings(): { settings: Settings; error: string } {
     }
   } catch (error) {
     console.warn("Could not read settings", error)
-    return { settings: defaults, error: "Could not read saved settings. Defaults are shown." }
+    return { settings: defaults, error: t("settings.error.read") }
   }
 }
 
@@ -154,6 +176,8 @@ export function useSettings() {
   }, [])
   useEffect(() => {
     const root = document.documentElement
+    setCurrentLanguage(settings.language)
+    root.lang = getLanguageMeta(settings.language).bcp47
     root.dataset.theme = resolved
     root.style.colorScheme = resolved
     const interfaceFont = settings.interfaceFont.trim()
@@ -185,17 +209,18 @@ export function useSettings() {
     if (activeAccent) root.dataset.accent = "on"
     else delete root.dataset.accent
     Object.entries(paletteVariables(settings.palette, resolved, settings.accentColor)).forEach(([name, value]) => root.style.setProperty(name, value))
-  }, [settings.palette, settings.accentColor, resolved, settings.interfaceFont, settings.interfaceSize, settings.contentSize, settings.codeFont, settings.codeSize, settings.contentWidth, settings.highlightTheme])
+  }, [settings.language, settings.palette, settings.accentColor, resolved, settings.interfaceFont, settings.interfaceSize, settings.contentSize, settings.codeFont, settings.codeSize, settings.contentWidth, settings.highlightTheme])
 
   function update(patch: Partial<Settings>) {
     const next = { ...settings, ...patch }
+    if (patch.language) setCurrentLanguage(patch.language)
     setSettings(next)
     try {
       localStorage.setItem(storageKey, JSON.stringify(next))
       setError("")
     } catch (cause) {
       console.warn("Could not save settings", cause)
-      setError("Could not save settings. Changes apply only for this session.")
+      setError(t("settings.error.save"))
     }
   }
 

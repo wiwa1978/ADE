@@ -20,6 +20,7 @@ import type { ApprovalPolicy, ProviderCatalogEntry, SkillsAndRulesCatalog } from
 import { ModelPicker } from "./ModelPicker"
 import { insertMention, mentionAt, useFileMentions } from "./file-mentions"
 import { matchesChord } from "../keybindings"
+import { useI18n } from "../i18n/I18nContext"
 
 export function ComposerDock({
   draft,
@@ -88,6 +89,7 @@ export function ComposerDock({
   /** Enables @-mentions of files in the session's workspace. */
   sessionId?: string
 }) {
+  const { t } = useI18n()
   const internalRef = useRef<HTMLTextAreaElement>(null)
   const ref = textareaRef ?? internalRef
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -313,7 +315,7 @@ export function ComposerDock({
                 type="button"
                 className="ade-icon-btn"
                 onClick={() => setPlusMenuOpen(v => !v)}
-                title="Add files, folder, GitHub issue, slash commands, or plugins"
+                title={t("workspace.plusMenuTitle")}
                 aria-expanded={plusMenuOpen}
               >
                 <Plus className="size-4" />
@@ -332,7 +334,7 @@ export function ComposerDock({
                         fileInputRef.current?.click()
                       }}
                     >
-                      <span className="flex items-center gap-2"><Paperclip className="size-3.5 opacity-75" /> Add files or photos</span>
+                      <span className="flex items-center gap-2"><Paperclip className="size-3.5 opacity-75" /> {t("workspace.addFilesOrPhotos")}</span>
                       <span className="opacity-50 font-mono text-[10.5px]">⌘U</span>
                     </button>
                   ) : null}
@@ -345,7 +347,7 @@ export function ComposerDock({
                         onQuickOpenPanel("files")
                       }}
                     >
-                      <FolderOpen className="size-3.5 opacity-75" /> Browse workspace folder
+                      <FolderOpen className="size-3.5 opacity-75" /> {t("workspace.browseWorkspace")}
                     </button>
                   ) : null}
                   <button
@@ -357,7 +359,7 @@ export function ComposerDock({
                       ref.current?.focus()
                     }}
                   >
-                    <Slash className="size-3.5 opacity-75" /> Slash commands
+                    <Slash className="size-3.5 opacity-75" /> {t("workspace.slashCommands")}
                   </button>
                   <button
                     type="button"
@@ -368,7 +370,7 @@ export function ComposerDock({
                       ref.current?.focus()
                     }}
                   >
-                    <GitBranch className="size-3.5 opacity-75" /> Import GitHub issue
+                    <GitBranch className="size-3.5 opacity-75" /> {t("workspace.importGithubIssue")}
                   </button>
                   {onOpenSettings ? (
                     <button
@@ -379,14 +381,14 @@ export function ComposerDock({
                         onOpenSettings()
                       }}
                     >
-                      <Plug className="size-3.5 opacity-75" /> Plugins &amp; MCP
+                      <Plug className="size-3.5 opacity-75" /> {t("workspace.pluginsAndMcp")}
                     </button>
                   ) : null}
                 </div>
               ) : null}
             </div>
 
-            {engineLabel ? <span className="ade-engine-badge" title={`${engineLabel} chooses its own model and uses its own sign-in`}>{engineLabel}</span> : <ModelPicker
+            {engineLabel ? <span className="ade-engine-badge" title={t("workspace.engineBadgeHint", { engine: engineLabel })}>{engineLabel}</span> : <ModelPicker
               catalog={modelCatalog}
               selectedProvider={selectedProvider}
               selectedModel={selectedModel}
@@ -402,18 +404,18 @@ export function ComposerDock({
               <div className="ade-composer-quick-tools">
                 {hasWorkspace ? (
                   <>
-                    <button type="button" className="ade-icon-btn" onClick={() => onQuickOpenPanel("files")} title="Open Files pane">
+                    <button type="button" className="ade-icon-btn" onClick={() => onQuickOpenPanel("files")} title={t("workspace.openFilesPane")}>
                       <FolderTree className="size-3.5" />
                     </button>
-                    <button type="button" className="ade-icon-btn" onClick={() => onQuickOpenPanel("diff")} title="Open Git Diff pane">
+                    <button type="button" className="ade-icon-btn" onClick={() => onQuickOpenPanel("diff")} title={t("workspace.openDiffPane")}>
                       <FileDiff className="size-3.5" />
                     </button>
                   </>
                 ) : null}
-                <button type="button" className="ade-icon-btn" onClick={() => onQuickOpenPanel("terminal")} title="Toggle Terminal (Cmd+J)">
+                <button type="button" className="ade-icon-btn" onClick={() => onQuickOpenPanel("terminal")} title={t("workspace.toggleTerminal")}>
                   <Terminal className="size-3.5" />
                 </button>
-                <button type="button" className="ade-icon-btn" onClick={() => onQuickOpenPanel("browser")} title="Open Built-in Browser pane">
+                <button type="button" className="ade-icon-btn" onClick={() => onQuickOpenPanel("browser")} title={t("workspace.openBrowserPane")}>
                   <Globe className="size-3.5" />
                 </button>
               </div>
@@ -422,15 +424,15 @@ export function ComposerDock({
 
           <div className="ade-composer-right">
             {busy && onAbort ? (
-              <button type="button" className="ade-btn ade-btn-danger" onClick={onAbort} title="Stop current run">
-                <Square className="size-3.5" /> Stop
+              <button type="button" className="ade-btn ade-btn-danger" onClick={onAbort} title={t("workspace.stopRun")}>
+                <Square className="size-3.5" /> {t("workspace.stop")}
               </button>
             ) : null}
             <button
               type="submit"
               className="ade-send-btn"
               disabled={disabled || (!canSubmitEmpty && !draft.trim())}
-              title={submitTitle ?? (busy ? "Steer agent (Enter)" : "Send message (Enter)")}
+              title={submitTitle ?? (busy ? t("workspace.steerAgent") : t("workspace.sendMessage"))}
             >
               {busy ? <CornerDownLeft className="size-4" /> : <ArrowUp className="size-4" />}
             </button>

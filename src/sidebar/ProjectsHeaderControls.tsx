@@ -14,6 +14,7 @@ import {
 import type { Project } from "../../ProjectsView"
 import type { AddProjectSource } from "../projects/AddProjectWizard"
 import type { SidebarPrefs } from "./sidebar-prefs"
+import { useI18n } from "../i18n/I18nContext"
 
 type OpenPopover = null | "filters" | "add-project"
 type FilterSub = null | "projects" | "group"
@@ -47,6 +48,7 @@ export function ProjectsHeaderControls({
   onMarkAllRead: () => void
   onClearCompleted: () => void
 }) {
+  const { t } = useI18n()
   const [popover, setPopover] = useState<OpenPopover>(null)
   const [sub, setSub] = useState<FilterSub>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -77,12 +79,12 @@ export function ProjectsHeaderControls({
     Number(prefs.unreadOnly) + Number(prefs.pinnedOnly) + Number(prefs.hideChats) + Number(Boolean(prefs.projectFilter))
 
   const selectedProjectLabel = prefs.projectFilter
-    ? (projects.find(p => p.id === prefs.projectFilter)?.name ?? "1 project")
-    : "All projects"
+    ? (projects.find(p => p.id === prefs.projectFilter)?.name ?? t("projHead.oneProject"))
+    : t("projHead.allProjects")
 
   return (
     <div className="ade-proj-head" ref={wrapRef}>
-      <span className="ade-proj-head-title">Projects</span>
+      <span className="ade-proj-head-title">{t("sidebar.projects")}</span>
 
       <div className="ade-proj-head-actions">
         {/* Bell Activity / Inbox Pill */}
@@ -90,8 +92,8 @@ export function ProjectsHeaderControls({
           type="button"
           className={`ade-proj-bell-pill ${inboxCount > 0 ? "has-unread" : ""}`}
           onClick={onOpenInbox}
-          title={inboxCount > 0 ? `Inbox · ${inboxCount} needing attention` : "Inbox · All caught up"}
-          aria-label={`Inbox activity, ${inboxCount} needing attention`}
+          title={inboxCount > 0 ? t("projHead.inboxAttention", { count: inboxCount }) : t("projHead.inboxCaughtUp")}
+          aria-label={t("projHead.inboxAria", { count: inboxCount })}
         >
           <Bell className="size-3.5" />
           <span className="ade-proj-bell-count">
@@ -104,9 +106,9 @@ export function ProjectsHeaderControls({
         <button
           type="button"
           className={`ade-proj-head-btn ${popover === "filters" || activeFiltersCount > 0 ? "is-active" : ""}`}
-          aria-label="Filter and view options"
+          aria-label={t("projHead.filtersAria")}
           aria-expanded={popover === "filters"}
-          title="Filters & view"
+          title={t("projHead.filtersTitle")}
           onClick={() => {
             setSub(null)
             setPopover(p => (p === "filters" ? null : "filters"))
@@ -119,9 +121,9 @@ export function ProjectsHeaderControls({
         <button
           type="button"
           className={`ade-proj-head-btn ${popover === "add-project" ? "is-active" : ""}`}
-          aria-label="Add project options"
+          aria-label={t("projHead.addProjectAria")}
           aria-expanded={popover === "add-project"}
-          title="Add project…"
+          title={t("projHead.addProjectTitle")}
           onClick={() => {
             setSub(null)
             setPopover(p => (p === "add-project" ? null : "add-project"))
@@ -134,8 +136,8 @@ export function ProjectsHeaderControls({
         <button
           type="button"
           className="ade-proj-head-btn"
-          aria-label="New workspace"
-          title="New workspace (⌘N)"
+          aria-label={t("projHead.newWorkspaceAria")}
+          title={t("projHead.newWorkspaceTitle")}
           onClick={() => {
             setPopover(null)
             onOpenCreateWorktree()
@@ -147,8 +149,8 @@ export function ProjectsHeaderControls({
 
       {/* Filters & View Popover (Screenshot 2) */}
       {popover === "filters" ? (
-        <div className="ade-proj-popover" role="menu" aria-label="Filters and view">
-          <div className="ade-proj-pop-heading">Filters</div>
+        <div className="ade-proj-popover" role="menu" aria-label={t("projHead.filtersTitle")}>
+          <div className="ade-proj-pop-heading">{t("projHead.filtersHeading")}</div>
 
           <button
             type="button"
@@ -158,7 +160,7 @@ export function ProjectsHeaderControls({
             onClick={() => onChangePrefs({ unreadOnly: !prefs.unreadOnly })}
           >
             <span className="ade-proj-pop-check">{prefs.unreadOnly ? <Check className="size-3.5" /> : null}</span>
-            <span className="flex-1">Show unread only</span>
+            <span className="flex-1">{t("projHead.showUnreadOnly")}</span>
           </button>
 
           <button
@@ -169,7 +171,7 @@ export function ProjectsHeaderControls({
             onClick={() => onChangePrefs({ pinnedOnly: !prefs.pinnedOnly })}
           >
             <span className="ade-proj-pop-check">{prefs.pinnedOnly ? <Check className="size-3.5" /> : null}</span>
-            <span className="flex-1">Show pinned only</span>
+            <span className="flex-1">{t("projHead.showPinnedOnly")}</span>
           </button>
 
           <button
@@ -180,7 +182,7 @@ export function ProjectsHeaderControls({
             onClick={() => onChangePrefs({ hideChats: !prefs.hideChats })}
           >
             <span className="ade-proj-pop-check">{prefs.hideChats ? <Check className="size-3.5" /> : null}</span>
-            <span className="flex-1">Hide chats section</span>
+            <span className="flex-1">{t("projHead.hideChats")}</span>
           </button>
 
           <button
@@ -192,7 +194,7 @@ export function ProjectsHeaderControls({
               onOpenEnvironments()
             }}
           >
-            <span className="flex-1">Hosts</span>
+            <span className="flex-1">{t("projHead.hosts")}</span>
             <span className="ade-proj-pop-val">{environmentName}</span>
             <ChevronRight className="size-3.5 opacity-55" />
           </button>
@@ -203,7 +205,7 @@ export function ProjectsHeaderControls({
             className="ade-proj-pop-item ade-proj-pop-row-meta"
             onClick={() => setSub(s => (s === "projects" ? null : "projects"))}
           >
-            <span className="flex-1">Projects</span>
+            <span className="flex-1">{t("sidebar.projects")}</span>
             <span className="ade-proj-pop-val ade-truncate max-w-[100px]">{selectedProjectLabel}</span>
             <ChevronRight className="size-3.5 opacity-55" />
           </button>
@@ -216,7 +218,7 @@ export function ProjectsHeaderControls({
                 onClick={() => { onChangePrefs({ projectFilter: null }); setSub(null) }}
               >
                 <span className="ade-proj-pop-check">{prefs.projectFilter === null ? <Check className="size-3.5" /> : null}</span>
-                <span className="flex-1">All projects</span>
+                <span className="flex-1">{t("projHead.allProjects")}</span>
               </button>
               {projects.map(p => (
                 <button
@@ -233,7 +235,7 @@ export function ProjectsHeaderControls({
           ) : null}
 
           <div className="ade-proj-pop-divider" />
-          <div className="ade-proj-pop-heading">View</div>
+          <div className="ade-proj-pop-heading">{t("projHead.viewHeading")}</div>
 
           <button
             type="button"
@@ -241,8 +243,8 @@ export function ProjectsHeaderControls({
             className="ade-proj-pop-item ade-proj-pop-row-meta"
             onClick={() => setSub(s => (s === "group" ? null : "group"))}
           >
-            <span className="flex-1">Group by</span>
-            <span className="ade-proj-pop-val">{prefs.groupBy === "status" ? "Status" : "Project"}</span>
+            <span className="flex-1">{t("projHead.groupBy")}</span>
+            <span className="ade-proj-pop-val">{prefs.groupBy === "status" ? t("projHead.groupStatus") : t("projHead.groupProject")}</span>
             <ChevronRight className="size-3.5 opacity-55" />
           </button>
 
@@ -256,7 +258,7 @@ export function ProjectsHeaderControls({
                   onClick={() => { onChangePrefs({ groupBy: mode }); setSub(null) }}
                 >
                   <span className="ade-proj-pop-check">{prefs.groupBy === mode ? <Check className="size-3.5" /> : null}</span>
-                  <span className="flex-1">{mode === "project" ? "Project" : "Status"}</span>
+                  <span className="flex-1">{mode === "project" ? t("projHead.groupProject") : t("projHead.groupStatus")}</span>
                 </button>
               ))}
             </div>
@@ -270,7 +272,7 @@ export function ProjectsHeaderControls({
             onClick={() => onChangePrefs({ compact: !prefs.compact })}
           >
             <span className="ade-proj-pop-check">{prefs.compact ? <Check className="size-3.5" /> : null}</span>
-            <span className="flex-1">Compact mode</span>
+            <span className="flex-1">{t("projHead.compactMode")}</span>
           </button>
 
           <button
@@ -281,7 +283,7 @@ export function ProjectsHeaderControls({
             onClick={() => onChangePrefs({ showSearch: !prefs.showSearch })}
           >
             <span className="ade-proj-pop-check">{prefs.showSearch ? <Check className="size-3.5" /> : null}</span>
-            <span className="flex-1">Show search</span>
+            <span className="flex-1">{t("projHead.showSearch")}</span>
           </button>
 
           <div className="ade-proj-pop-divider" />
@@ -294,7 +296,7 @@ export function ProjectsHeaderControls({
             onClick={() => { onMarkAllRead(); setPopover(null) }}
           >
             <CheckCheck className="size-3.5 opacity-70 shrink-0" />
-            <span className="flex-1">Mark all read</span>
+            <span className="flex-1">{t("projHead.markAllRead")}</span>
           </button>
 
           <button
@@ -305,16 +307,16 @@ export function ProjectsHeaderControls({
             onClick={() => { onClearCompleted(); setPopover(null) }}
           >
             <Trash2 className="size-3.5 opacity-70 shrink-0" />
-            <span className="flex-1">Clear completed</span>
+            <span className="flex-1">{t("projHead.clearCompleted")}</span>
           </button>
         </div>
       ) : null}
 
       {/* Add Project Quick Popover (Screenshot 3) */}
       {popover === "add-project" ? (
-        <div className="ade-proj-popover ade-proj-add-popover" role="menu" aria-label="Add project options">
+        <div className="ade-proj-popover ade-proj-add-popover" role="menu" aria-label={t("projHead.addProjectAria")}>
           <div className="ade-proj-add-head">
-            <span className="font-semibold text-[12.5px]">Add project</span>
+            <span className="font-semibold text-[12.5px]">{t("sidebar.addProject")}</span>
             <button
               type="button"
               className="ade-proj-add-host-btn"
@@ -332,7 +334,7 @@ export function ProjectsHeaderControls({
             onClick={() => { setPopover(null); onOpenAddProject("local") }}
           >
             <FolderOpen className="size-4 opacity-75 shrink-0" />
-            <span className="flex-1">Browse folder…</span>
+            <span className="flex-1">{t("projHead.browseFolder")}</span>
             <span className="text-[11px] opacity-50">↩</span>
           </button>
 
@@ -343,7 +345,7 @@ export function ProjectsHeaderControls({
             onClick={() => { setPopover(null); onOpenAddProject("url") }}
           >
             <Globe className="size-4 opacity-75 shrink-0" />
-            <span className="flex-1">Clone from URL…</span>
+            <span className="flex-1">{t("projHead.cloneFromUrl")}</span>
           </button>
 
           <button
@@ -353,7 +355,7 @@ export function ProjectsHeaderControls({
             onClick={() => { setPopover(null); onOpenAddProject("menu") }}
           >
             <Plus className="size-4 opacity-75 shrink-0" />
-            <span className="flex-1">Create new project…</span>
+            <span className="flex-1">{t("projHead.createNewProject")}</span>
           </button>
         </div>
       ) : null}

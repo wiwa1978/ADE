@@ -9,6 +9,7 @@ import { DEFAULT_KEYBINDINGS, formatShortcut, type KeybindingMap } from "../keyb
 import type { AddProjectSource } from "../projects/AddProjectWizard"
 import { useSessionTools } from "../layout/session-tools"
 import { setViewMode, useViewMode } from "../view-mode"
+import { useI18n } from "../i18n/I18nContext"
 
 type AppSidebarProps = {
   selection: SidebarSelection
@@ -53,6 +54,7 @@ type AppSidebarProps = {
 
 /** The app's left navigation: handles collapsing and resizing, and renders the Sidebar. */
 export function AppSidebar(props: AppSidebarProps) {
+  const { t } = useI18n()
   const [sidebarOpen, setSidebarOpen] = useState(() => matchMedia("(min-width: 720px)").matches)
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = Number(localStorage.getItem("ade.sidebar-width"))
@@ -94,25 +96,25 @@ export function AppSidebar(props: AppSidebarProps) {
   // The activity bar on the far left: always there. App places at the top, the open session's tools
   // (each opens in the side panel, again to hide it) in the middle, Settings at the bottom.
   const rail = (
-    <nav className="ade-activity-bar" aria-label="Activity bar">
-      <RailButton tip={setTip} label={sidebarOpen ? "Hide sidebar" : "Show sidebar"} description="Your projects, sessions and chats" active={sidebarOpen} onClick={() => setSidebarOpen(open => !open)} ariaLabel={sidebarOpen ? "Hide sidebar" : "Expand sidebar"}>
+    <nav className="ade-activity-bar" aria-label={t("sidebar.activityBarAria")}>
+      <RailButton tip={setTip} label={sidebarOpen ? t("sidebar.hideSidebar") : t("sidebar.showSidebar")} description={t("sidebar.sidebarDesc")} active={sidebarOpen} onClick={() => setSidebarOpen(open => !open)} ariaLabel={sidebarOpen ? t("sidebar.hideSidebar") : t("sidebar.expandSidebar")}>
         <PanelLeft className="size-[18px]" />
       </RailButton>
-      <RailButton tip={setTip} label="Search" description="Find projects, sessions and commands" shortcut={searchBadge} onClick={props.onOpenCommandCenter}>
+      <RailButton tip={setTip} label={t("sidebar.search")} description={t("sidebar.searchDesc")} shortcut={searchBadge} onClick={props.onOpenCommandCenter}>
         <Search className="size-[18px]" />
       </RailButton>
-      <RailButton tip={setTip} label="Inbox" description={props.inboxCount > 0 ? `${props.inboxCount} ${props.inboxCount === 1 ? "session needs" : "sessions need"} you` : "Every session, sorted by what needs you first"} shortcut={inboxBadge} active={props.selection.kind === "inbox"} onClick={props.onOpenInbox} ariaLabel={`Inbox, ${props.inboxCount} need you`}>
+      <RailButton tip={setTip} label={t("sidebar.inbox")} description={props.inboxCount > 0 ? (props.inboxCount === 1 ? t("sidebar.inboxSessionNeeds", { count: props.inboxCount }) : t("sidebar.inboxSessionsNeed", { count: props.inboxCount })) : t("sidebar.inboxDesc")} shortcut={inboxBadge} active={props.selection.kind === "inbox"} onClick={props.onOpenInbox} ariaLabel={t("sidebar.inboxNeedYou", { count: props.inboxCount })}>
         <Inbox className="size-[18px]" />
         {props.inboxCount > 0 ? <span className="ade-rail-badge">{props.inboxCount}</span> : null}
       </RailButton>
-      <RailButton tip={setTip} label="Add project" description="Add a repository or folder" shortcut={addProjectBadge} onClick={() => props.onOpenAddProject()}>
+      <RailButton tip={setTip} label={t("sidebar.addProject")} description={t("sidebar.addProjectDesc")} shortcut={addProjectBadge} onClick={() => props.onOpenAddProject()}>
         <FolderPlus className="size-[18px]" />
       </RailButton>
       {tools.length ? <span className="ade-activity-sep" aria-hidden="true" /> : null}
       {tools.map(tool => {
         const Icon = tool.icon
         return (
-          <RailButton key={tool.id} tip={setTip} label={tool.label} description={tool.description} status={tool.attention ? "Waiting for you" : tool.badge !== undefined && tool.badge !== "" ? String(tool.badge) : tool.live ? "Active" : undefined} active={tool.active} onClick={tool.onOpen}>
+          <RailButton key={tool.id} tip={setTip} label={tool.label} description={tool.description} status={tool.attention ? t("sidebar.waitingForYou") : tool.badge !== undefined && tool.badge !== "" ? String(tool.badge) : tool.live ? t("sidebar.active") : undefined} active={tool.active} onClick={tool.onOpen}>
             <Icon className="size-[18px]" />
             {tool.attention ? <span className="ade-activity-live is-attention" aria-hidden="true" />
               : typeof tool.badge === "number" && tool.badge > 0 ? <span className="ade-rail-badge is-quiet">{tool.badge > 99 ? "99+" : tool.badge}</span>
@@ -122,20 +124,20 @@ export function AppSidebar(props: AppSidebarProps) {
       })}
       <RailButton
         tip={setTip}
-        label={viewMode === "simple" ? "Show all tools" : "Simple view"}
-        description={viewMode === "simple" ? "Switch to the full view: files, changes, terminal, browser and more" : "Back to the simple view: just the Captain and what its agents are doing"}
+        label={viewMode === "simple" ? t("sidebar.showAllTools") : t("sidebar.simpleView")}
+        description={viewMode === "simple" ? t("sidebar.showAllToolsDesc") : t("sidebar.simpleViewDesc")}
         onClick={() => setViewMode(viewMode === "simple" ? "full" : "simple")}
         className="mt-auto"
-        ariaLabel={viewMode === "simple" ? "Switch to full view" : "Switch to simple view"}
+        ariaLabel={viewMode === "simple" ? t("sidebar.switchToFull") : t("sidebar.switchToSimple")}
       >
         {viewMode === "simple" ? <LayoutDashboard className="size-[18px]" /> : <Sparkles className="size-[18px]" />}
       </RailButton>
       {props.onOpenMobilePairing ? (
-        <RailButton tip={setTip} label="Pair phone" description="Connect iPhone or Android via QR code" onClick={props.onOpenMobilePairing}>
+        <RailButton tip={setTip} label={t("sidebar.pairPhone")} description={t("sidebar.pairPhoneDesc")} onClick={props.onOpenMobilePairing}>
           <Smartphone className="size-[18px]" />
         </RailButton>
       ) : null}
-      <RailButton tip={setTip} label="Settings" description="Models, agents, appearance and more" shortcut={settingsBadge} active={props.selection.kind === "settings"} onClick={props.onOpenSettings}>
+      <RailButton tip={setTip} label={t("sidebar.settings")} description={t("sidebar.settingsDesc")} shortcut={settingsBadge} active={props.selection.kind === "settings"} onClick={props.onOpenSettings}>
         <Settings2 className="size-[18px]" />
       </RailButton>
       {tip ? (
@@ -208,7 +210,7 @@ export function AppSidebar(props: AppSidebarProps) {
       <div
         className="ade-split-divider"
         onPointerDown={() => { sidebarDragging.current = true }}
-        title="Drag to resize sidebar"
+        title={t("sidebar.resizeTitle")}
       />
     </>
   )
