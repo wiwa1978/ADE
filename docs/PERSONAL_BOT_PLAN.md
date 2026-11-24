@@ -39,7 +39,7 @@
 | Connectors | MCP servers with origins, per-project switches, one-time trust; Git skill sources and your own skills | `runtime/mcp.ts`, `capabilities.ts`, `skill-library.ts` |
 | Delegation | Subagents on Pi/Claude Code/Codex, team board, Swarm view | `runtime/subagents.ts`, `team-board.ts` |
 | Data-location policy | EU-only mode over models, agent CLIs and tool servers | `runtime/eu-policy.ts` |
-| Money/time visibility | Usage and budget tracking | `runtime/usage-limits.ts` |
+| Money/time visibility | Usage and budget tracking | `runtime/usage.ts` |
 
 **What a personal session lacks today:** channels other than the ADE app, any memory, proactivity beyond coding automations, a per-profile scope for tools and settings, a safe "own folder", a taxonomy of risky actions beyond shell commands, and an audit trail of external effects.
 
