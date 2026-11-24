@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 
 type InstructionFile = { name: "AGENTS.md" | "CLAUDE.md"; readBy: string; exists: boolean; content: string }
 
@@ -37,11 +37,7 @@ export function ProjectInstructionsSettings({ projectId }: { projectId: string }
     setSaving(true)
     setMessage("")
     try {
-      const result = await request<{ files: InstructionFile[] }>(`/api/projects/${encodeURIComponent(projectId)}/instructions`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: active, content: draft }),
-      })
+      const result = await requestJson<{ files: InstructionFile[] }>(`/api/projects/${encodeURIComponent(projectId)}/instructions`, "PUT", { name: active, content: draft })
       setFiles(result.files)
       setMessage(`Saved ${active}. New messages use it.`)
     } catch (err) {

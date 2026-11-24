@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { Bot, ChevronRight, Hand, Loader2, PauseCircle, Square } from "lucide-react"
 import type { SessionBlueprintSummary, SubagentInfo } from "../../app-types"
-import { request } from "../../api"
+import { requestJson } from "../../api"
 import { useI18n } from "../i18n/I18nContext"
 import "./captain-status.css"
 
@@ -58,11 +58,7 @@ function GateCard({ sessionId, stageId, stageName }: { sessionId: string; stageI
     setWorking(true)
     setError("")
     try {
-      await request(`/api/sessions/${encodeURIComponent(sessionId)}/stages/decision`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ decision, feedback }),
-      })
+      await requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/stages/decision`, "POST", { decision, feedback })
       setFeedback("")
       setAsking(false)
     } catch (err) {

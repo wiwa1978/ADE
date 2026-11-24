@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import type { ProviderCatalogEntry, ProviderTool, RuntimeHealth } from "../../app-types"
 import type { Settings } from "../../useSettings"
 
@@ -55,11 +55,7 @@ export function useModelSelection(params: {
     try {
       const [catalog, tools] = await Promise.all([
         request<{ providers: ProviderCatalogEntry[] }>("/api/models/catalog"),
-        request<{ providers: ProviderTool[] }>("/api/provider-tools", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ action: "status" }),
-        }).catch(() => ({ providers: [] as ProviderTool[] })),
+        requestJson<{ providers: ProviderTool[] }>("/api/provider-tools", "POST", { action: "status" }).catch(() => ({ providers: [] as ProviderTool[] })),
       ])
       if (Array.isArray(catalog?.providers)) setModelCatalog(catalog.providers)
       if (Array.isArray(tools?.providers)) setCliTools(tools.providers)
@@ -87,11 +83,7 @@ export function useModelSelection(params: {
         if (!cancelled && Array.isArray(catalog?.providers)) setModelCatalog(catalog.providers)
       })
       .catch(() => undefined)
-    void request<{ providers: ProviderTool[] }>("/api/provider-tools", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "status" }),
-    })
+    void requestJson<{ providers: ProviderTool[] }>("/api/provider-tools", "POST", { action: "status" })
       .then(tools => {
         if (!cancelled && Array.isArray(tools?.providers)) setCliTools(tools.providers)
       })
@@ -108,11 +100,7 @@ export function useModelSelection(params: {
         if (!cancelled && Array.isArray(catalog?.providers)) setModelCatalog(catalog.providers)
       })
       .catch(() => undefined)
-    void request<{ providers: ProviderTool[] }>("/api/provider-tools", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "status" }),
-    })
+    void requestJson<{ providers: ProviderTool[] }>("/api/provider-tools", "POST", { action: "status" })
       .then(tools => {
         if (!cancelled && Array.isArray(tools?.providers)) setCliTools(tools.providers)
       })

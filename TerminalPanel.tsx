@@ -3,7 +3,7 @@ import { Play, Square, Terminal as TerminalIcon } from "lucide-react"
 import type { FitAddon as FitAddonInstance } from "@xterm/addon-fit"
 import type { Terminal as XTermInstance } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
-import { request } from "./api"
+import { request, requestJson } from "./api"
 
 /** The runtime accepts 20–300 columns and 5–200 rows; a short drawer can measure less. */
 function terminalSize(cols: number, rows: number) {
@@ -106,9 +106,7 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
           const id = terminalIdRef.current
           if (!id || exitedRef.current) return
           writeQueueRef.current = writeQueueRef.current.then(async () => {
-            await request(`/api/terminals/${id}/input`, {
-              method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ data }),
-            })
+            await requestJson(`/api/terminals/${id}/input`, "POST", { data })
           }).catch(cause => {
             setError(cause instanceof Error ? cause.message : "Could not write to the terminal.")
           })
@@ -116,9 +114,7 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
         resizeSubscription = terminal.onResize(({ cols, rows }) => {
           const id = terminalIdRef.current
           if (!id) return
-          void request(`/api/terminals/${id}/resize`, {
-            method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(terminalSize(cols, rows)),
-          }).catch(cause => setError(cause instanceof Error ? cause.message : "Could not resize the terminal."))
+          void requestJson(`/api/terminals/${id}/resize`, "POST", terminalSize(cols, rows)).catch(cause => setError(cause instanceof Error ? cause.message : "Could not resize the terminal."))
         })
 
         fitTerminal = () => {
@@ -196,10 +192,7 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
     try {
       try { fitRef.current?.fit() } catch { /* Use the terminal's default size before first layout. */ }
       const terminal = terminalRef.current
-      const result = await request<TerminalStart>("/api/terminals", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cwd, ...terminalSize(terminal?.cols ?? 80, terminal?.rows ?? 24) }),
-      })
+      const result = await requestJson<TerminalStart>("/api/terminals", "POST", { cwd, ...terminalSize(terminal?.cols ?? 80, terminal?.rows ?? 24) })
       terminalIdRef.current = result.id
       cursorRef.current = 0
       exitedRef.current = false

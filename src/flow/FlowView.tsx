@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { Activity, Bot, ChevronRight, ClipboardCheck, ClipboardList, FileLock2, MessagesSquare, Crown, FileDiff, FileText, ListChecks, MessageSquareText, Send, User, Users, Workflow } from "lucide-react"
 import type { Conversation, SessionTaskItem, SubagentInfo, TimelineItem } from "../../app-types"
-import { request } from "../../api"
+import { requestJson } from "../../api"
 import type { TeamTask, TeamView } from "./team-types"
 import { ago, buildEvents, linksOf, partsOf, summarizePart, LIVE_MS, type FlowEvent, type Part, type Party, type RunInput } from "./run-model"
 
@@ -648,7 +648,7 @@ function PlansPage({ sessionId, team, subagents, now, onChanged }: { sessionId: 
     setBusy(taskId)
     setError("")
     try {
-      await request(`/api/sessions/${encodeURIComponent(sessionId)}/team/plans/${encodeURIComponent(taskId)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision, note: notes[taskId] ?? "" }) })
+      await requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/team/plans/${encodeURIComponent(taskId)}`, "POST", { decision, note: notes[taskId] ?? "" })
       onChanged?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send the decision.")
@@ -658,7 +658,7 @@ function PlansPage({ sessionId, team, subagents, now, onChanged }: { sessionId: 
   }
   const toggle = async () => {
     try {
-      await request(`/api/sessions/${encodeURIComponent(sessionId)}/team/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ requirePlans: !team.requirePlans }) })
+      await requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/team/settings`, "PUT", { requirePlans: !team.requirePlans })
       onChanged?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not change the setting.")
@@ -702,7 +702,7 @@ function BoardPage({ sessionId, team, subagents, now, onChanged }: { sessionId: 
     setSending(true)
     setError("")
     try {
-      await request(`/api/sessions/${encodeURIComponent(sessionId)}/team/posts`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) })
+      await requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/team/posts`, "POST", { text })
       setText("")
       onChanged?.()
     } catch (err) {

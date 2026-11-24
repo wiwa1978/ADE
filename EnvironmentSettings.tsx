@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react"
 import { ArrowLeft, ClipboardPaste, Link2, Terminal, X } from "lucide-react"
 import type { EnvironmentDirectory, EnvironmentSummary } from "./app-types"
-import { getCaptainEndpoint, request, setCaptainEndpoint } from "./api"
+import { getCaptainEndpoint, request, setCaptainEndpoint, requestJson } from "./api"
 import { useI18n } from "./src/i18n/I18nContext"
 
 type Environment = EnvironmentSummary
@@ -89,13 +89,8 @@ export function EnvironmentSettings({
     setNotice("")
     try {
       const result = environment.kind === "ssh" && !environment.active
-        ? await request<EnvironmentList>(`/api/environments/${environment.id}/connect`, {
-          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}),
-        })
-        : await request<EnvironmentList>("/api/environments/active", {
-          method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ id: environment.active ? "local" : environment.id }),
-        })
+        ? await requestJson<EnvironmentList>(`/api/environments/${environment.id}/connect`, "POST", {})
+        : await requestJson<EnvironmentList>("/api/environments/active", "POST", { id: environment.active ? "local" : environment.id })
       const updated = await refresh()
       const activeName = updated?.environments.find(item => item.id === result.activeId)?.name ?? (result.activeId === "local" ? "This computer" : result.activeId)
       onEnvironmentChanged(result.activeId, activeName, updated ?? result)
@@ -128,17 +123,12 @@ export function EnvironmentSettings({
     setBusy("new")
     setError("")
     try {
-      const result = await request<{ environment: Environment }>("/api/environments", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name, sshHost, sshPort: Number(sshPort), remotePort: Number(remotePort) }),
-      })
+      const result = await requestJson<{ environment: Environment }>("/api/environments", "POST", { name, sshHost, sshPort: Number(sshPort), remotePort: Number(remotePort) })
       const savedName = result.environment.name
       setName("")
       setSshHost("")
       try {
-        const connected = await request<EnvironmentList>(`/api/environments/${result.environment.id}/connect`, {
-          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}),
-        })
+        const connected = await requestJson<EnvironmentList>(`/api/environments/${result.environment.id}/connect`, "POST", {})
         const updated = await refresh()
         const activeName = updated?.environments.find(item => item.id === connected.activeId)?.name ?? connected.activeId
         onEnvironmentChanged(connected.activeId, activeName, updated ?? connected)

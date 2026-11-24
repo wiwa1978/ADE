@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react"
 import { AlertTriangle, CheckCircle2, Loader2, QrCode, ShieldCheck, Smartphone } from "lucide-react"
-import { request } from "../../api"
+import { requestJson } from "../../api"
 import { useI18n } from "../i18n/I18nContext"
 
 export type MobileSessionState = {
@@ -41,11 +41,7 @@ export function MobileAuthGate({
     setSubmitting(true)
     setError("")
     try {
-      await request("/api/mobile/claim", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code: clean, ...(deviceName.trim() ? { deviceName: deviceName.trim() } : {}) }),
-      })
+      await requestJson("/api/mobile/claim", "POST", { code: clean, ...(deviceName.trim() ? { deviceName: deviceName.trim() } : {}) })
       onPaired()
     } catch (err) {
       setError(err instanceof Error ? err.message : t("mobile.auth.pairError"))

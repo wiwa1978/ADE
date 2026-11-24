@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { Plug, Plus, Trash2, Unplug } from "lucide-react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import { useI18n } from "../i18n/I18nContext"
 import "./skills-tools.css"
 
@@ -19,8 +19,6 @@ type Server = {
   readOnly: boolean; active: boolean; globalSetting: boolean | null; projectSetting: boolean | null; needsTrust: boolean; shadowedBy: string | null
 }
 type ProjectRef = { id: string; name: string }
-type Json = { "content-type": string }
-const JSON_HEADERS: Json = { "content-type": "application/json" }
 
 /**
  * Skills and tool servers: everything ADE found and where it came from, what is on, for all
@@ -58,10 +56,7 @@ export function SkillsToolsSettings({ projects, onRefreshMcp }: { projects: Proj
   }
 
   /** Turn one item on/off in the chosen scope; null goes back to inheriting. */
-  const setCapability = (kind: "skill" | "mcp" | "mcp-trust", key: string, enabled: boolean | null) => attempt(() => request("/api/capabilities", {
-    method: "PUT", headers: JSON_HEADERS,
-    body: JSON.stringify({ scope: projectId ? "project" : "global", projectId: projectId || undefined, kind, key, enabled }),
-  }))
+  const setCapability = (kind: "skill" | "mcp" | "mcp-trust", key: string, enabled: boolean | null) => attempt(() => requestJson("/api/capabilities", "PUT", { scope: projectId ? "project" : "global", projectId: projectId || undefined, kind, key, enabled }))
 
   const stateHint = (state: { global: boolean | null; project: boolean | null; active: boolean }) => {
     if (projectId && state.project !== null) return state.project ? t("skills.onHere") : t("skills.offHere")
@@ -111,9 +106,9 @@ export function SkillsToolsSettings({ projects, onRefreshMcp }: { projects: Proj
                 {server.readOnly ? <span className="st-hint">{t("tools.readOnly", { origin: server.origin.label })}</span> : null}
               </div>
               <div className="ade-st-actions">
-                {server.readOnly && !server.needsTrust ? <button type="button" className="st-button" onClick={() => void attempt(() => request(`/api/mcp/${encodeURIComponent(server.id)}/adopt${scopeQuery}`, { method: "POST", headers: JSON_HEADERS, body: "{}" }))}>{t("tools.copyIntoAde")}</button> : null}
+                {server.readOnly && !server.needsTrust ? <button type="button" className="st-button" onClick={() => void attempt(() => requestJson(`/api/mcp/${encodeURIComponent(server.id)}/adopt${scopeQuery}`, "POST"))}>{t("tools.copyIntoAde")}</button> : null}
                 {server.active ? (
-                  <button type="button" className="st-button is-quiet" title={server.status === "connected" ? t("common.disconnect") : t("common.connect")} onClick={() => void attempt(() => request(`/api/mcp/${encodeURIComponent(server.id)}/${server.status === "connected" ? "disconnect" : "connect"}${scopeQuery}`, { method: "POST", headers: JSON_HEADERS, body: "{}" }))}>
+                  <button type="button" className="st-button is-quiet" title={server.status === "connected" ? t("common.disconnect") : t("common.connect")} onClick={() => void attempt(() => requestJson(`/api/mcp/${encodeURIComponent(server.id)}/${server.status === "connected" ? "disconnect" : "connect"}${scopeQuery}`, "POST"))}>
                     {server.status === "connected" ? <Unplug className="size-3.5" /> : <Plug className="size-3.5" />}
                   </button>
                 ) : null}
@@ -202,7 +197,7 @@ function SourcesCard({ sources, attempt }: { sources: Source[]; attempt: Attempt
       <form className="ade-st-form" onSubmit={event => {
         event.preventDefault()
         void run("preview", async () => {
-          const data = await request<{ preview: Preview }>("/api/skills/sources/preview", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ url, ref, subpath }) })
+          const data = await requestJson<{ preview: Preview }>("/api/skills/sources/preview", "POST", { url, ref, subpath })
           setPreview(data.preview)
         })
       }}>
@@ -217,9 +212,9 @@ function SourcesCard({ sources, attempt }: { sources: Source[]; attempt: Attempt
           {preview.commit ? <span className="st-hint">{t("skills.previewCommit", { commit: preview.commit.slice(0, 7) })}</span> : null}
           <ul>{preview.skills.map(skill => <li key={skill.relPath}><strong>{skill.name}</strong> <span className="st-hint">{skill.description}</span></li>)}</ul>
           <div className="ade-st-actions">
-            <button type="button" className="st-button is-quiet" onClick={() => { void request("/api/skills/sources/discard", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ previewId: preview.previewId }) }).catch(() => undefined); setPreview(null) }}>{t("common.cancel")}</button>
+            <button type="button" className="st-button is-quiet" onClick={() => { void requestJson("/api/skills/sources/discard", "POST", { previewId: preview.previewId }).catch(() => undefined); setPreview(null) }}>{t("common.cancel")}</button>
             <button type="button" className="st-button is-primary" disabled={busy === "install"} onClick={() => void run("install", async () => {
-              await request("/api/skills/sources/confirm", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ previewId: preview.previewId }) })
+              await requestJson("/api/skills/sources/confirm", "POST", { previewId: preview.previewId })
               setPreview(null); setUrl(""); setRef(""); setSubpath("")
             })}>{busy === "install" ? t("skills.installing") : t("skills.install")}</button>
           </div>
@@ -241,7 +236,7 @@ function SourcesCard({ sources, attempt }: { sources: Source[]; attempt: Attempt
                   const result = await request<{ updateAvailable: boolean }>(`/api/skills/sources/${encodeURIComponent(source.id)}/check`)
                   setChecks(current => ({ ...current, [source.id]: result.updateAvailable }))
                 })}>{t("skills.check")}</button>
-                <button type="button" className="st-button" disabled={busy === source.id} onClick={() => void run(source.id, () => request(`/api/skills/sources/${encodeURIComponent(source.id)}/update`, { method: "POST", headers: JSON_HEADERS, body: "{}" }))}>{t("skills.update")}</button>
+                <button type="button" className="st-button" disabled={busy === source.id} onClick={() => void run(source.id, () => requestJson(`/api/skills/sources/${encodeURIComponent(source.id)}/update`, "POST"))}>{t("skills.update")}</button>
                 <button type="button" className="st-prov-icon-btn" aria-label={t("skills.remove")} onClick={() => void run(source.id, () => request(`/api/skills/sources/${encodeURIComponent(source.id)}`, { method: "DELETE" }))}><Trash2 className="size-3.5" /></button>
               </div>
             </li>
@@ -264,7 +259,7 @@ function WriteSkillCard({ attempt }: { attempt: Attempt }) {
       <form className="ade-st-form is-stacked" onSubmit={event => {
         event.preventDefault()
         void attempt(async () => {
-          await request("/api/skills/user", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ name, description, body }) })
+          await requestJson("/api/skills/user", "POST", { name, description, body })
           setName(""); setDescription(""); setBody("")
         })
       }}>
@@ -285,7 +280,7 @@ function ImportMcp({ attempt }: { attempt: Attempt }) {
     <form className="ade-st-form is-stacked" onSubmit={event => {
       event.preventDefault()
       void attempt(async () => {
-        const data = await request<{ servers: unknown[] }>("/api/mcp/import", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ text }) })
+        const data = await requestJson<{ servers: unknown[] }>("/api/mcp/import", "POST", { text })
         setDone(t("tools.imported", { count: data.servers.length }))
         setText("")
       })

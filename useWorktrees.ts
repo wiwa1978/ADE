@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react"
-import { request } from "./api"
+import { request, requestJson } from "./api"
 
 type Worktree = {
   path: string
@@ -37,11 +37,7 @@ export function useWorktrees() {
     setInspecting(true)
     setWorktreeError("")
     try {
-      const result = await request<{ worktrees: Worktree[] }>("/api/worktrees/inspect", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ repository: repository.trim() }),
-      })
+      const result = await requestJson<{ worktrees: Worktree[] }>("/api/worktrees/inspect", "POST", { repository: repository.trim() })
       setInspectedRepository(repository.trim())
       setWorktrees(result.worktrees)
       const operations = await request<{ operations: WorktreeOperation[] }>("/api/worktree-operations")

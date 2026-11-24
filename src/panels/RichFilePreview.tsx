@@ -13,7 +13,7 @@ import {
   RefreshCw,
   Save,
 } from "lucide-react"
-import { request, resolveCaptainUrl } from "../../api"
+import { request, resolveCaptainUrl, requestJson } from "../../api"
 import { MessageContent } from "../../MessageContent"
 import {
   formatFileSize,
@@ -142,11 +142,7 @@ export function RichFilePreview({
     setSaving(true)
     setError("")
     try {
-      await request("/api/workspace/file", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId, path: filePath, content }),
-      })
+      await requestJson("/api/workspace/file", "PUT", { sessionId, path: filePath, content })
       setOriginal(content)
       setReloadNonce(n => n + 1)
       setSavedToast(true)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { History, RotateCcw, Save } from "lucide-react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import { relativeTime } from "../session-state"
 import { confirmRestore, restoreCheckpoint, type CheckpointInfo } from "./checkpoint-actions"
 
@@ -37,7 +37,7 @@ export function CheckpointList({ sessionId, busy, onRestored }: { sessionId: str
     setWorking("save")
     setError("")
     try {
-      const result = await request<{ unchanged: boolean }>(`/api/sessions/${encodeURIComponent(sessionId)}/checkpoints`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
+      const result = await requestJson<{ unchanged: boolean }>(`/api/sessions/${encodeURIComponent(sessionId)}/checkpoints`, "POST")
       setNotice(result.unchanged ? "Nothing changed since the last checkpoint." : "Checkpoint saved.")
       await load()
     } catch (cause) {

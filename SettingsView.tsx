@@ -13,7 +13,7 @@ import type { Settings } from "./useSettings"
 import type { useConnections } from "./useConnections"
 import { McpAndSecuritySettings } from "./src/panels/McpSettingsSection"
 import { SkillsToolsSettings } from "./src/settings/SkillsToolsSettings"
-import { request } from "./api"
+import { requestJson } from "./api"
 import { UsageSettings } from "./src/usage/UsageSettings"
 import { IntegrationsSettings } from "./src/integrations/IntegrationsSettings"
 import { CODE_FONT_OPTIONS, INTERFACE_FONT_OPTIONS } from "./src/appearance/fonts"
@@ -205,9 +205,7 @@ export function SettingsView({
 
   useEffect(() => {
     if (selectedCategory !== "models") return
-    void request<{ compatible?: { url: string; model: string; fromEnvironment: boolean } }>("/api/model-credentials", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "status" }),
-    }).then(result => {
+    void requestJson<{ compatible?: { url: string; model: string; fromEnvironment: boolean } }>("/api/model-credentials", "POST", { action: "status" }).then(result => {
       if (!result.compatible) return
       setCompatible(result.compatible)
       setCompatibleDraft({ url: result.compatible.url, model: result.compatible.model })
@@ -249,10 +247,7 @@ export function SettingsView({
     setCompatibleBusy(true)
     setCompatibleMessage("")
     try {
-      const result = await request<{ compatible: { url: string; model: string; fromEnvironment: boolean } }>("/api/model-credentials", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "configure-compatible", url: compatibleDraft.url, model: compatibleDraft.model }),
-      })
+      const result = await requestJson<{ compatible: { url: string; model: string; fromEnvironment: boolean } }>("/api/model-credentials", "POST", { action: "configure-compatible", url: compatibleDraft.url, model: compatibleDraft.model })
       setCompatible(result.compatible)
       setCompatibleMessage(t("common.saved"))
       onModelsChanged?.()

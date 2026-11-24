@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from "react"
 import type { GitHubConnection } from "./ProjectsView"
 import type { CopilotSignIn, ModelCredential, ModelCredentialProvider, ProviderTool, RuntimeHealth, Screen } from "./app-types"
-import { request } from "./api"
+import { request, requestJson } from "./api"
 
 const modelCredentialProviders: { id: ModelCredentialProvider; name: string }[] = [
   { id: "openai", name: "OpenAI" },
@@ -41,18 +41,14 @@ export function useConnections(screen: Screen, setRuntime: Dispatch<SetStateActi
       refreshing = true
       const revision = githubConnectionRevision.current
       try {
-        const connection = await request<GitHubConnection>("/api/github/connection", {
-          method: "POST", headers: { "content-type": "application/json" }, body: "{}",
-        })
+        const connection = await requestJson<GitHubConnection>("/api/github/connection", "POST")
         if (active && revision === githubConnectionRevision.current) {
           setGithubConnection(connection)
           setGithubStatusError("")
         }
         if (!connection.login && active && revision === githubConnectionRevision.current) {
           try {
-            const detected = await request<GitHubConnection>("/api/github/auto-connect", {
-              method: "POST", headers: { "content-type": "application/json" }, body: "{}",
-            })
+            const detected = await requestJson<GitHubConnection>("/api/github/auto-connect", "POST")
             if (active && revision === githubConnectionRevision.current) {
               setGithubConnection(detected)
               setGithubCliError("")
@@ -109,9 +105,7 @@ export function useConnections(screen: Screen, setRuntime: Dispatch<SetStateActi
       refreshing = true
       const revision = modelCredentialRevision.current
       try {
-        const result = await request<{ credentials: ModelCredential[] }>("/api/model-credentials", {
-          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "status" }),
-        })
+        const result = await requestJson<{ credentials: ModelCredential[] }>("/api/model-credentials", "POST", { action: "status" })
         if (active && revision === modelCredentialRevision.current) {
           setModelCredentials(result.credentials)
           setModelCredentialStatusError("")
@@ -135,9 +129,7 @@ export function useConnections(screen: Screen, setRuntime: Dispatch<SetStateActi
       if (refreshing) return
       refreshing = true
       try {
-        const result = await request<{ providers: ProviderTool[] }>("/api/provider-tools", {
-          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "list" }),
-        })
+        const result = await requestJson<{ providers: ProviderTool[] }>("/api/provider-tools", "POST", { action: "list" })
         if (active) {
           setProviderTools(result.providers)
           setProviderToolsError("")
@@ -159,9 +151,7 @@ export function useConnections(screen: Screen, setRuntime: Dispatch<SetStateActi
     setGithubConnectionBusy(true)
     setGithubActionError("")
     try {
-      const connection = await request<GitHubConnection>(`/api/github/${action}`, {
-        method: "POST", headers: { "content-type": "application/json" }, body: "{}",
-      })
+      const connection = await requestJson<GitHubConnection>(`/api/github/${action}`, "POST")
       setGithubConnection(connection)
       setGithubStatusError("")
       setGithubCliError("")
@@ -179,9 +169,7 @@ export function useConnections(screen: Screen, setRuntime: Dispatch<SetStateActi
     setModelCredentialBusy({ provider, action })
     setModelCredentialActionError("")
     try {
-      const result = await request<{ credentials: ModelCredential[] }>("/api/model-credentials", {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, provider, ...(key ? { key } : {}) }),
-      })
+      const result = await requestJson<{ credentials: ModelCredential[] }>("/api/model-credentials", "POST", { action, provider, ...(key ? { key } : {}) })
       setModelCredentials(result.credentials)
       setModelCredentialStatusError("")
     } catch (cause) {
@@ -207,11 +195,7 @@ export function useConnections(screen: Screen, setRuntime: Dispatch<SetStateActi
     setProviderToolsBusy(id)
     setProviderToolsError("")
     try {
-      const result = await request<{ providers: ProviderTool[] }>("/api/provider-tools", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "set", id, enabled }),
-      })
+      const result = await requestJson<{ providers: ProviderTool[] }>("/api/provider-tools", "POST", { action: "set", id, enabled })
       setProviderTools(result.providers)
     } catch (cause) {
       setProviderToolsError(cause instanceof Error ? cause.message : "Could not update provider availability.")
@@ -226,11 +210,7 @@ export function useConnections(screen: Screen, setRuntime: Dispatch<SetStateActi
     setAuthBusy(true)
     setCopilotActionError("")
     try {
-      const state = await request<CopilotSignIn>("/api/copilot/auth", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action }),
-      })
+      const state = await requestJson<CopilotSignIn>("/api/copilot/auth", "POST", { action })
       setRuntime(current => current?.provider === "github-copilot" ? {
         ...current,
         copilotSignIn: state,

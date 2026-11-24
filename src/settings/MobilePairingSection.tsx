@@ -13,7 +13,7 @@ import {
   Trash2,
   Wifi,
 } from "lucide-react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import { useI18n } from "../i18n/I18nContext"
 import { generateQrSvgData } from "../mobile/qr-code"
 
@@ -118,11 +118,7 @@ export function MobilePairingSection() {
     setBusy(true)
     setError("")
     try {
-      const updated = await request<MobilePairingStatusPayload>("/api/mobile/enable", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ enabled: nextEnabled }),
-      })
+      const updated = await requestJson<MobilePairingStatusPayload>("/api/mobile/enable", "POST", { enabled: nextEnabled })
       setStatus(updated)
       setNow(Date.now())
     } catch (err) {
@@ -136,11 +132,7 @@ export function MobilePairingSection() {
     setBusy(true)
     setError("")
     try {
-      const updated = await request<MobilePairingStatusPayload>("/api/mobile/pair", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mode, ...(mode === "custom" ? { customUrl: customUrlDraft } : {}) }),
-      })
+      const updated = await requestJson<MobilePairingStatusPayload>("/api/mobile/pair", "POST", { mode, ...(mode === "custom" ? { customUrl: customUrlDraft } : {}) })
       setStatus(updated)
       setNow(Date.now())
     } catch (err) {
@@ -154,14 +146,10 @@ export function MobilePairingSection() {
     setBusy(true)
     setError("")
     try {
-      const updated = await request<MobilePairingStatusPayload>("/api/mobile/pair", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const updated = await requestJson<MobilePairingStatusPayload>("/api/mobile/pair", "POST", {
           mode: status?.mode ?? "lan",
           ...(status?.mode === "custom" ? { customUrl: customUrlDraft } : {}),
-        }),
-      })
+        })
       setStatus(updated)
       setNow(Date.now())
     } catch (err) {
@@ -175,11 +163,7 @@ export function MobilePairingSection() {
     setTunnelBusy(true)
     setError("")
     try {
-      const updated = await request<MobilePairingStatusPayload>("/api/mobile/tunnel", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action }),
-      })
+      const updated = await requestJson<MobilePairingStatusPayload>("/api/mobile/tunnel", "POST", { action })
       setStatus(updated)
       setNow(Date.now())
     } catch (err) {
@@ -193,11 +177,7 @@ export function MobilePairingSection() {
     setBusy(true)
     setError("")
     try {
-      const updated = await request<MobilePairingStatusPayload>("/api/mobile/enable", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mode: "custom", customUrl: customUrlDraft }),
-      })
+      const updated = await requestJson<MobilePairingStatusPayload>("/api/mobile/enable", "POST", { mode: "custom", customUrl: customUrlDraft })
       setStatus(updated)
       setNow(Date.now())
     } catch (err) {
@@ -214,11 +194,7 @@ export function MobilePairingSection() {
       return
     }
     try {
-      await request(`/api/mobile/devices/${encodeURIComponent(id)}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: clean }),
-      })
+      await requestJson(`/api/mobile/devices/${encodeURIComponent(id)}`, "PATCH", { name: clean })
       setRenamingId(null)
       await loadStatus()
     } catch (err) {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { Globe2, ShieldCheck } from "lucide-react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import { useI18n } from "../i18n/I18nContext"
 import "./eu-only.css"
 
@@ -38,7 +38,7 @@ export function EuOnlySettings() {
   const save = async (patch: Partial<EuState["settings"]>) => {
     setError("")
     try {
-      await request("/api/eu", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) })
+      await requestJson("/api/eu", "PUT", patch)
       await load()
     } catch (err) { setError(err instanceof Error ? err.message : t("settings.eu.saveError")) }
   }

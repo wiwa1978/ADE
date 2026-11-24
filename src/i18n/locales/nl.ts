@@ -1159,4 +1159,5 @@ export const nl: Record<TranslationKey, string> = {
   "brief.reviewTitle": "De wijzigingen beoordelen",
   "brief.reviewDetail": "Niets wacht op goedkeuring; het werk is klaar om te bekijken.",
   "brief.noneTitle": "Niets om goed te keuren",
+  "ag.mergeFiles": "{count} gewijzigde bestanden mergen",
 }

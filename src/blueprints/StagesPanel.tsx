@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Check, CircleDashed, CircleSlash, Eye, Loader2, PauseCircle, RotateCcw, Users, XCircle } from "lucide-react"
-import { request } from "../../api"
+import { requestJson } from "../../api"
 import "./stage-checks.css"
 import { shortBlueprintName, useBlueprintOptions, VIBE_ID } from "./blueprint-options"
 import { useI18n } from "../i18n/I18nContext"
@@ -52,11 +52,7 @@ export function StagesPanel({
     setWorking(true)
     setError("")
     try {
-      const next = await request<SessionStages>(`/api/sessions/${encodeURIComponent(sessionId)}/stages/decision`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ decision, feedback }),
-      })
+      const next = await requestJson<SessionStages>(`/api/sessions/${encodeURIComponent(sessionId)}/stages/decision`, "POST", { decision, feedback })
       setFeedback("")
       setAsking(false)
       setSelected(null)
@@ -162,11 +158,7 @@ export function WayOfWorkingSelect({ sessionId, current, currentName, locked, bu
     setSwitching(true)
     setError("")
     try {
-      onChanged(await request<SessionStages>(`/api/sessions/${encodeURIComponent(sessionId)}/blueprint`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ blueprintId }),
-      }))
+      onChanged(await requestJson<SessionStages>(`/api/sessions/${encodeURIComponent(sessionId)}/blueprint`, "PUT", { blueprintId }))
     } catch (err) {
       setError(err instanceof Error ? err.message : t("stg.switchError"))
     } finally {

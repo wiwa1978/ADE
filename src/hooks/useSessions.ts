@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import type { Conversation, GitHubIssue, PendingApproval, StartFrom, TaskStart } from "../../app-types"
 import { clearPendingStart, pendingStarts, storePendingStart } from "../../pending-task-starts"
 import type { Project } from "../../ProjectsView"
@@ -121,11 +121,7 @@ export function useSessions(params: {
     const pending = Object.values(pendingStarts()).filter(s => (s.environmentId ?? "local") === activeEnvironmentId)
     if (!pending.length) return
     for (const start of pending) {
-      void request<{ session: Conversation }>("/api/coding-tasks", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(start),
-      }).then(() => {
+      void requestJson<{ session: Conversation }>("/api/coding-tasks", "POST", start).then(() => {
         clearPendingStart(start.id)
         void loadSessions()
       }).catch(() => {
@@ -312,11 +308,7 @@ export function useSessions(params: {
   const steerSession = useCallback(async (text: string, mode: "steer" | "follow-up") => {
     setDraft("")
     try {
-      await request(`/api/sessions/${encodeURIComponent(activeSession.id)}/steer`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ content: text, mode }),
-      })
+      await requestJson(`/api/sessions/${encodeURIComponent(activeSession.id)}/steer`, "POST", { content: text, mode })
     } catch (err) {
       onError(err instanceof Error ? err.message : "Could not steer session.")
     }
@@ -325,11 +317,7 @@ export function useSessions(params: {
   const abortSession = useCallback(async (targetSessionId?: string) => {
     const id = targetSessionId ?? activeSession.id
     try {
-      await request(`/api/sessions/${encodeURIComponent(id)}/abort`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: "{}",
-      })
+      await requestJson(`/api/sessions/${encodeURIComponent(id)}/abort`, "POST")
       await loadSessions()
     } catch (err) {
       onError(err instanceof Error ? err.message : "Could not stop session.")
@@ -338,11 +326,7 @@ export function useSessions(params: {
 
   const compactSession = useCallback(async () => {
     try {
-      await request(`/api/sessions/${encodeURIComponent(activeSession.id)}/compact`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: "{}",
-      })
+      await requestJson(`/api/sessions/${encodeURIComponent(activeSession.id)}/compact`, "POST")
     } catch (err) {
       onError(err instanceof Error ? err.message : "Could not compact session.")
     }
@@ -400,17 +384,13 @@ export function useSessions(params: {
       }
       storePendingStart(start)
       try {
-        const res = await request<{ session: Conversation }>("/api/coding-tasks", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(start),
-        })
+        const res = await requestJson<{ session: Conversation }>("/api/coding-tasks", "POST", start)
         clearPendingStart(taskId)
         if (external) {
-          await request(`/api/sessions/${encodeURIComponent(taskId)}/engine`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ engine }) })
+          await requestJson(`/api/sessions/${encodeURIComponent(taskId)}/engine`, "POST", { engine })
           if (input.prompt.trim()) {
             // Don't wait for the agent's turn; several attempts run at the same time.
-            void request(`/api/coding-tasks/${encodeURIComponent(taskId)}/messages`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: input.prompt }) })
+            void requestJson(`/api/coding-tasks/${encodeURIComponent(taskId)}/messages`, "POST", { content: input.prompt })
               .catch(err => onError(err instanceof Error ? err.message : "Could not send the task to the agent."))
           }
         }
@@ -477,11 +457,7 @@ export function useSessions(params: {
           }
         : {}),
     }
-    const res = await request<{ session: Conversation }>("/api/coding-tasks", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(start),
-    })
+    const res = await requestJson<{ session: Conversation }>("/api/coding-tasks", "POST", start)
     await loadSessions()
     if (!start.initialMessage) onError(`${modelSetupMessage} The session was created without sending your message.`)
     // Go straight to the new session, like starting one anywhere else.
@@ -494,11 +470,7 @@ export function useSessions(params: {
   const createChatThread = useCallback(async (mode: "coding" | "personal") => {
     try {
       const id = crypto.randomUUID()
-      const res = await request<{ session: Conversation }>("/api/chat-threads", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id, mode }),
-      })
+      const res = await requestJson<{ session: Conversation }>("/api/chat-threads", "POST", { id, mode })
       await loadSessions()
       onOpenSession(res.session.id)
     } catch (err) {
@@ -526,11 +498,7 @@ export function useSessions(params: {
 
   const forkSession = useCallback(async (sess: Conversation) => {
     try {
-      const res = await request<{ session: Conversation }>(`/api/sessions/${encodeURIComponent(sess.id)}/fork`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: "{}",
-      })
+      const res = await requestJson<{ session: Conversation }>(`/api/sessions/${encodeURIComponent(sess.id)}/fork`, "POST")
       await loadSessions()
       if (res?.session?.id) onOpenSession(res.session.id)
     } catch (err) {
@@ -540,11 +508,7 @@ export function useSessions(params: {
 
   const moveSession = useCallback(async (sess: Conversation, opts: { mode?: "coding" | "personal"; projectId?: string | null }) => {
     try {
-      await request(`/api/sessions/${encodeURIComponent(sess.id)}/move`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(opts),
-      })
+      await requestJson(`/api/sessions/${encodeURIComponent(sess.id)}/move`, "PATCH", opts)
       await loadSessions()
       if (opts.projectId) onExpandProject(opts.projectId)
     } catch (err) {
@@ -589,11 +553,7 @@ export function useSessions(params: {
 
   const openExternalApp = useCallback(async (app: "cursor" | "vscode" | "windsurf" | "finder", path?: string | null) => {
     try {
-      await request("/api/system/open-in", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ app, path: path || undefined }),
-      })
+      await requestJson("/api/system/open-in", "POST", { app, path: path || undefined })
     } catch (err) {
       onError(err instanceof Error ? err.message : `Could not open in ${app}.`)
     }

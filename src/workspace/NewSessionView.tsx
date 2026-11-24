@@ -17,7 +17,7 @@ import {
   Workflow,
   X,
 } from "lucide-react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import type { ApprovalPolicy, GitHubIssue, ProviderCatalogEntry, SkillsAndRulesCatalog, StartFrom, TaskStart } from "../../app-types"
 import type { Project } from "../../ProjectsView"
 import { ComposerDock } from "../composer/ComposerDock"
@@ -224,11 +224,7 @@ export function NewSessionView({
 
   async function pickFolder() {
     try {
-      const res = await request<{ path: string | null }>("/api/system/pick-folder", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: "{}",
-      })
+      const res = await requestJson<{ path: string | null }>("/api/system/pick-folder", "POST")
       if (res.path) setRepository(res.path)
     } catch (err) {
       console.warn("[ADE] Native folder picker unavailable:", err instanceof Error ? err.message : String(err))

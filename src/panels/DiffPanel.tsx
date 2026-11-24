@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { Check, FileCode2, GitCommit, Minus, Plus, RefreshCw, RotateCcw, Send } from "lucide-react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import { reviewFeedbackPrompt } from "../../packages/protocol/agent-prompts.ts"
 import { DiffLines } from "./DiffLines"
 import { useDiffNotes } from "./diff-notes"
@@ -107,11 +107,7 @@ export function DiffPanel({
     setBusy(true)
     setError("")
     try {
-      await request("/api/workspace/git/stage", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId, paths }),
-      })
+      await requestJson("/api/workspace/git/stage", "POST", { sessionId, paths })
       onRefresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to stage")
@@ -124,11 +120,7 @@ export function DiffPanel({
     setBusy(true)
     setError("")
     try {
-      await request("/api/workspace/git/unstage", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId, paths }),
-      })
+      await requestJson("/api/workspace/git/unstage", "POST", { sessionId, paths })
       onRefresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to unstage")
@@ -142,11 +134,7 @@ export function DiffPanel({
     setBusy(true)
     setError("")
     try {
-      await request("/api/workspace/git/discard", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId, path }),
-      })
+      await requestJson("/api/workspace/git/discard", "POST", { sessionId, path })
       onRefresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to discard changes")
@@ -163,17 +151,9 @@ export function DiffPanel({
     try {
       // Nothing staged: commit everything, which is what most people expect from a single Commit button.
       if (!summary.files.some(f => f.staged)) {
-        await request("/api/workspace/git/stage", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sessionId, paths: [] }),
-        })
+        await requestJson("/api/workspace/git/stage", "POST", { sessionId, paths: [] })
       }
-      const res = await request<{ commit: { hash: string } }>("/api/workspace/git/commit", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId, message: commitMessage }),
-      })
+      const res = await requestJson<{ commit: { hash: string } }>("/api/workspace/git/commit", "POST", { sessionId, message: commitMessage })
       setCommitMessage("")
       setNotice(`Committed ${res.commit.hash}`)
       onRefresh()

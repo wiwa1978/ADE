@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertTriangle, CheckCircle2, CircleDashed, ExternalLink, GitBranch, GitMerge, GitPullRequest, MessageSquare, RefreshCw, Send, Upload, Wrench, XCircle } from "lucide-react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import { fixCiPrompt, resolveConflictsPrompt, reviewFeedbackPrompt, type PromptFailedRun } from "../../packages/protocol/agent-prompts.ts"
 
 type BranchStatus = {
@@ -207,11 +207,7 @@ export function PullRequestPanel({
     setError("")
     setSent("")
     try {
-      const result = await request<{ result: "up-to-date" | "updated" | "conflicts"; baseRef: string; status: BranchStatus }>(`/api/sessions/${encodeURIComponent(sessionId)}/branch/update`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: "{}",
-      })
+      const result = await requestJson<{ result: "up-to-date" | "updated" | "conflicts"; baseRef: string; status: BranchStatus }>(`/api/sessions/${encodeURIComponent(sessionId)}/branch/update`, "POST")
       setStatus(result.status)
       if (result.result === "updated") setSent(`Merged the latest ${result.baseRef} into this branch.`)
       if (result.result === "up-to-date") setSent(`Already up to date with ${result.baseRef}.`)
@@ -226,11 +222,7 @@ export function PullRequestPanel({
     setBusy("finish")
     setError("")
     try {
-      const result = await request<{ status: BranchStatus }>(`/api/sessions/${encodeURIComponent(sessionId)}/branch/finish-update`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: "{}",
-      })
+      const result = await requestJson<{ status: BranchStatus }>(`/api/sessions/${encodeURIComponent(sessionId)}/branch/finish-update`, "POST")
       setStatus(result.status)
       setSent(`Finished the update from ${result.status.baseRef ?? "the base branch"}.`)
     } catch (err) {
@@ -244,11 +236,7 @@ export function PullRequestPanel({
     setBusy("abort")
     setError("")
     try {
-      const result = await request<{ status: BranchStatus }>(`/api/sessions/${encodeURIComponent(sessionId)}/branch/abort-update`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: "{}",
-      })
+      const result = await requestJson<{ status: BranchStatus }>(`/api/sessions/${encodeURIComponent(sessionId)}/branch/abort-update`, "POST")
       setStatus(result.status)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not abort the update.")
@@ -268,11 +256,7 @@ export function PullRequestPanel({
     setBusy(name)
     setError("")
     try {
-      const result = await request<{ pullRequest?: PullRequestInfo | null }>(`/api/sessions/${encodeURIComponent(sessionId)}/${path}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      })
+      const result = await requestJson<{ pullRequest?: PullRequestInfo | null }>(`/api/sessions/${encodeURIComponent(sessionId)}/${path}`, "POST", payload)
       if (result && "pullRequest" in result) {
         setPr(result.pullRequest ?? null)
         onPullRequestChange?.(result.pullRequest ?? null)

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import { runTargetDescriptions, targetLabel, targetUnavailable, useRunTargets, type TargetSettings } from "../run-targets"
 
 /** Project settings: where new sessions run by default, with the settings each target needs. */
@@ -28,11 +28,7 @@ export function ProjectRunOnSettings({ projectId }: { projectId: string }) {
     setSaving(true)
     setMessage("")
     try {
-      const result = await request<TargetSettings>(`/api/projects/${encodeURIComponent(projectId)}/run-on`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(draft),
-      })
+      const result = await requestJson<TargetSettings>(`/api/projects/${encodeURIComponent(projectId)}/run-on`, "PUT", draft)
       setSaved(result)
       setDraft(result)
       setMessage("Saved. New sessions use this.")

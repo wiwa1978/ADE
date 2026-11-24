@@ -13,7 +13,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import type { GitHubIssue, StartFrom, TaskStart } from "../../app-types"
 import type { Project } from "../../ProjectsView"
 import { targetLabel, targetUnavailable, useRunTargets, type RunTarget } from "../run-targets"
@@ -142,11 +142,7 @@ export function CreateWorktreeModal({
 
   async function pickFolder() {
     try {
-      const res = await request<{ path: string | null }>("/api/system/pick-folder", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: "{}",
-      })
+      const res = await requestJson<{ path: string | null }>("/api/system/pick-folder", "POST")
       if (res.path) setManualRepo(res.path)
     } catch {
       // Optional native picker.

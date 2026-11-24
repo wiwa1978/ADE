@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ExternalLink, Globe, Play, RefreshCw, Settings2, Square } from "lucide-react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import { checkFailedPrompt } from "../../packages/protocol/agent-prompts.ts"
 import { runTargetDescriptions, targetLabel, targetUnavailable, useRunTargets, type RunTarget, type TargetSettings, type TargetState } from "../run-targets"
 
@@ -157,7 +157,7 @@ export function RunPanel({
     setError("")
     if (kind === "run" && action === "start") openedUrl.current = null
     try {
-      await request(`/api/sessions/${encodeURIComponent(sessionId)}/scripts/${kind}/${action}`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
+      await requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/scripts/${kind}/${action}`, "POST")
       await load()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The script could not start.")

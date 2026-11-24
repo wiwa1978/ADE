@@ -1,6 +1,6 @@
 import { useEffect, useId, useState, type FormEvent, type KeyboardEvent } from "react"
 import { ArrowLeft, ArrowUpRight, FolderGit2, FolderOpen, GitBranch, PanelRight, Plus } from "lucide-react"
-import { request } from "./api"
+import { requestJson } from "./api"
 import type { FeatureAgent } from "./FeatureAgents"
 import { BUILTIN_BLUEPRINTS } from "./packages/blueprints/index.ts"
 import type {
@@ -45,11 +45,7 @@ async function defaultCreateGitHubRepository(input: {
   visibility: "private" | "public"
   addReadme?: boolean
 }): Promise<CreatedGitHubRepository> {
-  const res = await request<{ repository: CreatedGitHubRepository }>("/api/github/repositories/create", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(input),
-  })
+  const res = await requestJson<{ repository: CreatedGitHubRepository }>("/api/github/repositories/create", "POST", input)
   return res.repository
 }
 
@@ -371,20 +367,12 @@ export function ProjectSettings({ project, open, initialDraft, githubConnection,
 
   async function pickLocalFolder() {
     try {
-      const res = await request<{ path: string | null }>("/api/system/pick-folder", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: "{}",
-      })
+      const res = await requestJson<{ path: string | null }>("/api/system/pick-folder", "POST")
       if (!res.path) return
       setRepository(res.path)
       if (!githubUrl.trim()) {
         try {
-          const detected = await request<{ githubRepo: string | null }>("/api/projects/detect-git", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ path: res.path }),
-          })
+          const detected = await requestJson<{ githubRepo: string | null }>("/api/projects/detect-git", "POST", { path: res.path })
           if (detected.githubRepo) setGithubUrl(detected.githubRepo)
         } catch {
           // Non-git folder or no remote; keep folder path as-is.

@@ -7,6 +7,7 @@ import { t as tr } from "../i18n"
 import { useI18n } from "../i18n/I18nContext"
 import { clock, type SessionHold } from "../subagents/session-hold"
 import { formatDuration, summarize, useAgentsWork, type AgentChanges } from "./agent-summary"
+import { useMergeSubagent } from "./useMergeSubagent"
 
 const harnessName: Record<string, string> = { pi: "Pi", "claude-code": "Claude Code", codex: "Codex" }
 const LEAD = "lead"
@@ -238,8 +239,7 @@ function AgentChangesStrip({ sessionId, sub, changes, busy }: { sessionId: strin
   const [open, setOpen] = useState(false)
   const [openFile, setOpenFile] = useState<string | null>(null)
   const [diff, setDiff] = useState("")
-  const [merging, setMerging] = useState(false)
-  const [message, setMessage] = useState("")
+  const { merge, merging, message } = useMergeSubagent(sessionId, sub)
 
   const showDiff = async (path: string) => {
     if (openFile === path) { setOpenFile(null); return }
@@ -253,18 +253,6 @@ function AgentChangesStrip({ sessionId, sub, changes, busy }: { sessionId: strin
     }
   }
 
-  const merge = async () => {
-    if (!window.confirm(t("ag.mergeConfirm", { name: sub.name, branch: sub.branch ?? "" }))) return
-    setMerging(true)
-    try {
-      const result = await request<{ merged: boolean; message: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/agents/${encodeURIComponent(sub.id)}/merge`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
-      setMessage(result.message)
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : t("ag.mergeError"))
-    } finally {
-      setMerging(false)
-    }
-  }
 
   return (
     <div className="ade-agent-changes">

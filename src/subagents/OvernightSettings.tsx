@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import type { ProviderCatalogEntry } from "../../app-types"
 
 type Limits = { taskMinutes: number; taskCost: number; dayCost: number; fallbackProvider: string; fallbackModel: string; maxSubagents: number }
@@ -45,18 +45,14 @@ export function OvernightSettings({ modelCatalog }: { modelCatalog: ProviderCata
     setSaved("")
     const slash = draft.fallback.indexOf("/")
     try {
-      const result = await request<{ limits: Limits }>("/api/limits", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const result = await requestJson<{ limits: Limits }>("/api/limits", "PUT", {
           taskMinutes: Number(draft.taskMinutes || 0),
           taskCost: Number(draft.taskCost || 0),
           dayCost: Number(draft.dayCost || 0),
           maxSubagents: Number(draft.maxSubagents || 0),
           fallbackProvider: slash > 0 ? draft.fallback.slice(0, slash) : "",
           fallbackModel: slash > 0 ? draft.fallback.slice(slash + 1) : "",
-        }),
-      })
+        })
       setLimits(result.limits)
       setDraft(toDraft(result.limits))
       setSaved("Saved.")

@@ -24,6 +24,16 @@ export function resolveCaptainUrl(path: string, endpoint: CaptainEndpointConfig 
   return `${endpoint.baseUrl}${normalized}`;
 }
 
+/** A change sent as JSON (POST, PUT, PATCH or DELETE); no body sends `{}`. */
+export function requestJson<T = Record<string, never>>(
+  url: string,
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
+  body?: unknown,
+  endpoint: CaptainEndpointConfig = activeEndpoint,
+): Promise<T> {
+  return request<T>(url, { method, headers: { "content-type": "application/json" }, body: body === undefined ? "{}" : JSON.stringify(body) }, endpoint);
+}
+
 export async function request<T>(
   url: string,
   init?: RequestInit,

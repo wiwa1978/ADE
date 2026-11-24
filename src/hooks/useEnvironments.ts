@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import type { EnvironmentDirectory } from "../../app-types"
 
 export function useEnvironments() {
@@ -45,11 +45,7 @@ export function useEnvironments() {
   }, [environmentVersion])
 
   const selectEnvironment = useCallback(async (env: EnvironmentDirectory["environments"][number]) => {
-    const dir = await request<EnvironmentDirectory>("/api/environments/active", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: env.id }),
-    })
+    const dir = await requestJson<EnvironmentDirectory>("/api/environments/active", "POST", { id: env.id })
     setEnvironmentDirectory(dir)
     setActiveEnvironmentId(dir.activeId)
     setActiveEnvironmentName(dir.environments.find(e => e.id === dir.activeId)?.name ?? env.name)

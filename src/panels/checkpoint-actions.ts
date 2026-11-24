@@ -1,11 +1,9 @@
-import { request } from "../../api"
+import { requestJson } from "../../api"
 
 export type CheckpointInfo = { id: string; label: string; createdAt: number; filesChanged: number }
 
 export async function restoreCheckpoint(sessionId: string, checkpoint: CheckpointInfo) {
-  await request(`/api/sessions/${encodeURIComponent(sessionId)}/checkpoints/${encodeURIComponent(checkpoint.id)}/restore`, {
-    method: "POST", headers: { "content-type": "application/json" }, body: "{}",
-  })
+  await requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/checkpoints/${encodeURIComponent(checkpoint.id)}/restore`, "POST")
 }
 
 export function confirmRestore(checkpoint: CheckpointInfo) {

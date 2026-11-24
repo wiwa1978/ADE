@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react"
 import { KeyRound, X } from "lucide-react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import { relativeTime } from "../session-state"
 
 type Secret = { name: string; updatedAt: number }
@@ -30,11 +30,7 @@ export function ProjectSecretsSettings({ projectId }: { projectId: string }) {
     setMessage("")
     try {
       const replacing = secrets?.some(secret => secret.name === name.trim())
-      const result = await request<{ secrets: Secret[] }>(`/api/projects/${encodeURIComponent(projectId)}/secrets`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), value }),
-      })
+      const result = await requestJson<{ secrets: Secret[] }>(`/api/projects/${encodeURIComponent(projectId)}/secrets`, "PUT", { name: name.trim(), value })
       setSecrets(result.secrets)
       setMessage(`${replacing ? "Replaced" : "Saved"} ${name.trim()}. New commands and sessions get it.`)
       setName("")

@@ -225,6 +225,9 @@ export class SessionManager {
 		if (teamExt) registry.install(teamExt);
 		if (task) {
 			const wsTools = workspaceExt?.tools ?? [];
+			const eu = this.#eu;
+			const blueprints = this.#blueprints;
+			const routing = this.#routing;
 			registry.install(createSubagentTools({
 				sessionId: key,
 				workspace: task.workspace ?? null,
@@ -238,20 +241,19 @@ export class SessionManager {
 				processes: this.#processes,
 				events: this.#events,
 				teamTools: teamExt?.tools ?? [],
-				...(this.#eu ? { euBlock: { provider: id => this.#eu!.blockReason("provider", id, this.#eu!.regionOfProvider(id)), engine: id => this.#eu!.engineBlock(id) } } : {}),
-				...(this.#blueprints && this.#routing ? {
+				...(eu ? { euBlock: { provider: id => eu.blockReason("provider", id, eu.regionOfProvider(id)), engine: id => eu.engineBlock(id) } } : {}),
+				...(blueprints && routing ? {
 					reviews: {
 						begin: async () => {
-							const blueprints = this.#blueprints!;
 							const stage = blueprints.reviewStage(key);
 							if (!stage) return null;
 							const project = task.projectId ? this.#projects.serialize(this.#projects.get(task.projectId)) : null;
 							const mine = this.#rootModels.get(key) ?? { provider: "", model: "" };
-							const choice = await this.#routing!.reviewer(stage, project, mine);
+							const choice = await routing.reviewer(stage, project, mine);
 							return { model: choice.model ? { provider: choice.model.provider, modelId: choice.model.model } : null, label: choice.label, independent: choice.independent };
 						},
-						started: (subagentId, info) => this.#blueprints!.reviewStarted(key, { subagentId, ...info }),
-						finished: (subagentId, status, report) => this.#blueprints!.reviewFinished(key, subagentId, status, report),
+						started: (subagentId, info) => blueprints.reviewStarted(key, { subagentId, ...info }),
+						finished: (subagentId, status, report) => blueprints.reviewFinished(key, subagentId, status, report),
 					},
 				} : {}),
 				onSubagentCreated: (convId) => {

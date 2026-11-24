@@ -12,7 +12,7 @@ import {
   Smartphone,
   Tablet,
 } from "lucide-react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import type { BrowserState, BrowserViewport } from "../../app-types"
 
 const QUICK_BOOKMARKS = [
@@ -63,11 +63,7 @@ export function BrowserPanel({
       const prev = lastSentSizeRef.current
       if (prev && Math.abs(prev.width - w) < 16 && Math.abs(prev.height - h) < 16) return
       lastSentSizeRef.current = { width: w, height: h }
-      void request<BrowserState>("/api/browser/viewport", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ preset: "desktop", width: w, height: h }),
-      }).then(next => {
+      void requestJson<BrowserState>("/api/browser/viewport", "POST", { preset: "desktop", width: w, height: h }).then(next => {
         if (next && typeof next.url === "string") onStateChange(next)
       }).catch(() => {
         // ignore transient resize error
@@ -111,11 +107,7 @@ export function BrowserPanel({
     setBusy(true)
     setError("")
     try {
-      const next = await request<BrowserState>("/api/browser/navigate", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url: normalized }),
-      })
+      const next = await requestJson<BrowserState>("/api/browser/navigate", "POST", { url: normalized })
       onStateChange(next)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to navigate built-in Chrome.")
@@ -166,16 +158,8 @@ export function BrowserPanel({
     const pos = mapCoords(e)
     if (!pos) return
     try {
-      await request("/api/browser/input", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ kind: "mouse", type: "mousePressed", x: pos.x, y: pos.y, button: "left", clickCount: 1 }),
-      })
-      await request("/api/browser/input", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ kind: "mouse", type: "mouseReleased", x: pos.x, y: pos.y, button: "left", clickCount: 1 }),
-      })
+      await requestJson("/api/browser/input", "POST", { kind: "mouse", type: "mousePressed", x: pos.x, y: pos.y, button: "left", clickCount: 1 })
+      await requestJson("/api/browser/input", "POST", { kind: "mouse", type: "mouseReleased", x: pos.x, y: pos.y, button: "left", clickCount: 1 })
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send browser click.")
     }
@@ -185,11 +169,7 @@ export function BrowserPanel({
     const pos = mapCoords(e)
     if (!pos) return
     try {
-      await request("/api/browser/input", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ kind: "mouse", type: "mouseWheel", x: pos.x, y: pos.y, deltaX: e.deltaX, deltaY: e.deltaY }),
-      })
+      await requestJson("/api/browser/input", "POST", { kind: "mouse", type: "mouseWheel", x: pos.x, y: pos.y, deltaX: e.deltaX, deltaY: e.deltaY })
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send browser scroll.")
     }
@@ -201,17 +181,9 @@ export function BrowserPanel({
     e.preventDefault()
     try {
       if (e.key.length === 1) {
-        await request("/api/browser/input", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ kind: "text", text: e.key }),
-        })
+        await requestJson("/api/browser/input", "POST", { kind: "text", text: e.key })
       } else {
-        await request("/api/browser/input", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ kind: "key", key: e.key }),
-        })
+        await requestJson("/api/browser/input", "POST", { kind: "key", key: e.key })
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send browser key input.")

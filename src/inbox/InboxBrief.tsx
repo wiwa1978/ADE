@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { ArrowRight } from "lucide-react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import { useI18n } from "../i18n/I18nContext"
 import "./inbox-brief.css"
 
@@ -62,9 +62,8 @@ export function InboxBrief({ sessionId, title, refreshKey, onOpen }: { sessionId
       setWorking(false)
     }
   }
-  const post = (path: string, body: unknown) => request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
-  const decideStage = (decision: "approve" | "request_changes") => act(() => post(`/api/sessions/${encodeURIComponent(sessionId)}/stages/decision`, { decision, feedback }))
-  const decideCommand = (id: string, allow: boolean) => act(() => post(`/api/approvals/${encodeURIComponent(id)}/resolve`, { allow }))
+  const decideStage = (decision: "approve" | "request_changes") => act(() => requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/stages/decision`, "POST", { decision, feedback }))
+  const decideCommand = (id: string, allow: boolean) => act(() => requestJson(`/api/approvals/${encodeURIComponent(id)}/resolve`, "POST", { allow }))
   return (
     <aside className="ade-brief" aria-label={title} aria-busy={!brief || stale}>
       <h2 className="ade-brief-title ade-truncate" title={title}>{title}</h2>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 
 type Scripts = { setup: string; run: string; copy: string[]; check: string; checkAutoFix: boolean }
 type ScriptsResponse = { saved: Scripts; repository: Scripts | null; effective: Scripts & { source: Record<string, string> } }
@@ -35,11 +35,7 @@ export function ProjectScriptsSettings({ projectId }: { projectId: string }) {
     setSaving(true)
     setMessage("")
     try {
-      const result = await request<ScriptsResponse>(`/api/projects/${encodeURIComponent(projectId)}/scripts`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ setup, run, copy: copy.split("\n").map(line => line.trim()).filter(Boolean), check, checkAutoFix }),
-      })
+      const result = await requestJson<ScriptsResponse>(`/api/projects/${encodeURIComponent(projectId)}/scripts`, "PUT", { setup, run, copy: copy.split("\n").map(line => line.trim()).filter(Boolean), check, checkAutoFix })
       setData(result)
       setMessage("Saved. New sessions use these scripts.")
     } catch (cause) {

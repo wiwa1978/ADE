@@ -6,7 +6,7 @@ import { sessionStateInfo, type InboxEntry } from "../session-state"
 import { FolderTree, Layers, PanelRight, Settings2, Sparkles } from "lucide-react"
 import { FilesPanel } from "../panels/FilesPanel"
 import { ArtefactsBrowserPanel } from "../panels/ArtefactsBrowserPanel"
-import { request } from "../../api"
+import { requestJson } from "../../api"
 import type { Conversation, EnvironmentDirectory, GitHubIssue, StartFrom, ProviderCatalogEntry, RuntimeHealth, Screen, SessionArtifact, WorkspaceTab } from "../../app-types"
 import { ProjectSettings, ProjectsView, type Project, type ProjectActivity, type ProjectInput } from "../../ProjectsView"
 import { SettingsView, type SettingsCategory } from "../../SettingsView"
@@ -439,11 +439,7 @@ export function AppMainColumn(props: AppMainColumnProps) {
           error={launchError}
           onStart={props.onStartNewSession}
           onLookupIssue={async (projectId, url) => {
-            const res = await request<{ issue: GitHubIssue }>("/api/github/issues/lookup", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ projectId, url }),
-            })
+            const res = await requestJson<{ issue: GitHubIssue }>("/api/github/issues/lookup", "POST", { projectId, url })
             return res.issue
           }}
         />

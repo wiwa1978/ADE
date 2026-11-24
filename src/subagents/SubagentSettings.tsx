@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import type { ProviderCatalogEntry } from "../../app-types"
 
 type Harness = "pi" | "claude-code" | "codex"
@@ -26,7 +26,7 @@ export function SubagentSettings({ modelCatalog }: { modelCatalog: ProviderCatal
     setError("")
     setSaved("")
     try {
-      const result = await request<{ policy: Policy }>("/api/subagent-policy", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...info.policy, ...patch }) })
+      const result = await requestJson<{ policy: Policy }>("/api/subagent-policy", "PUT", { ...info.policy, ...patch })
       setInfo({ ...info, policy: result.policy })
       setSaved("Saved. New subagents use this.")
     } catch (err) {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import { useEventStream } from "./useEventStream"
 import type {
   ApprovalPolicy,
@@ -356,21 +356,13 @@ export function useRuntimeStream(opts: {
   }, [sessionId, hasWorkspace, refreshGit])
 
   const resolveApproval = useCallback(async (id: string, decision: { allow: boolean; alwaysAllow?: boolean; prefix?: string; reason?: string }) => {
-    await request(`/api/approvals/${encodeURIComponent(id)}/resolve`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(decision),
-    })
+    await requestJson(`/api/approvals/${encodeURIComponent(id)}/resolve`, "POST", decision)
     setApprovals(prev => prev.filter(a => a.id !== id))
     await refreshApprovals(sessionIdRef.current)
   }, [refreshApprovals])
 
   const setApprovalPolicy = useCallback(async (policy: ApprovalPolicy, targetSessionId?: string) => {
-    const res = await request<{ policy: ApprovalPolicy }>("/api/approvals/policy", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ policy, sessionId: targetSessionId }),
-    })
+    const res = await requestJson<{ policy: ApprovalPolicy }>("/api/approvals/policy", "POST", { policy, sessionId: targetSessionId })
     setApprovalPolicyState(res.policy)
   }, [])
 
@@ -380,61 +372,37 @@ export function useRuntimeStream(opts: {
   }, [])
 
   const addApprovalRule = useCallback(async (prefix: string, effect: "allow" | "deny") => {
-    const res = await request<{ rules: ApprovalRule[] }>("/api/approvals/rules", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ toolName: "run_command", prefix, effect }),
-    })
+    const res = await requestJson<{ rules: ApprovalRule[] }>("/api/approvals/rules", "POST", { toolName: "run_command", prefix, effect })
     setApprovalRules(res.rules ?? [])
   }, [])
 
   const killProcess = useCallback(async (id: string) => {
-    await request(`/api/processes/${encodeURIComponent(id)}/kill`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-    })
+    await requestJson(`/api/processes/${encodeURIComponent(id)}/kill`, "POST")
     await refreshProcesses(sessionIdRef.current)
   }, [refreshProcesses])
 
   const messageSubagent = useCallback(async (subagentId: string, message: string, mode: "steer" | "follow-up" = "follow-up") => {
     if (!sessionIdRef.current) return
-    await request(`/api/sessions/${encodeURIComponent(sessionIdRef.current)}/subagents/${encodeURIComponent(subagentId)}/message`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ message, mode }),
-    })
+    await requestJson(`/api/sessions/${encodeURIComponent(sessionIdRef.current)}/subagents/${encodeURIComponent(subagentId)}/message`, "POST", { message, mode })
     await refreshSubagents(sessionIdRef.current)
   }, [refreshSubagents])
 
   const stopSubagent = useCallback(async (subagentId: string) => {
     if (!sessionIdRef.current) return
-    await request(`/api/sessions/${encodeURIComponent(sessionIdRef.current)}/subagents/${encodeURIComponent(subagentId)}/stop`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-    })
+    await requestJson(`/api/sessions/${encodeURIComponent(sessionIdRef.current)}/subagents/${encodeURIComponent(subagentId)}/stop`, "POST")
     await refreshSubagents(sessionIdRef.current)
   }, [refreshSubagents])
 
   const openExternalBrowser = useCallback(async (url: string) => {
     try {
-      await request("/api/browser/open-external", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url }),
-      })
+      await requestJson("/api/browser/open-external", "POST", { url })
     } catch {
       window.open(url, "_blank", "noopener,noreferrer")
     }
   }, [])
 
   const reviewArtifact = useCallback(async (id: string, decision: "approved" | "changes_requested", feedback?: string) => {
-    const res = await request<{ artifact: SessionArtifact }>(`/api/artifacts/${encodeURIComponent(id)}/review`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ decision, feedback }),
-    })
+    const res = await requestJson<{ artifact: SessionArtifact }>(`/api/artifacts/${encodeURIComponent(id)}/review`, "POST", { decision, feedback })
     setArtifacts(prev => prev.map(a => a.id === id ? res.artifact : a))
     return res.artifact
   }, [])

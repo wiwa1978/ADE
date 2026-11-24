@@ -11,7 +11,7 @@ import {
   Search,
   Settings2,
 } from "lucide-react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import type { WorkspaceEntry } from "../../app-types"
 import { RichFilePreview } from "./RichFilePreview"
 
@@ -23,11 +23,7 @@ function joinRelativePath(root: string, rel: string): string {
 }
 
 async function openPathInEditor(app: "vscode" | "cursor", targetPath: string): Promise<void> {
-  await request("/api/system/open-in", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ app, path: targetPath }),
-  })
+  await requestJson("/api/system/open-in", "POST", { app, path: targetPath })
 }
 
 function DirectoryBranch({

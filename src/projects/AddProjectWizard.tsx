@@ -14,7 +14,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react"
-import { request } from "../../api"
+import { request, requestJson } from "../../api"
 import type { EnvironmentSummary, ModelProfileId } from "../../app-types"
 import { BUILTIN_BLUEPRINTS } from "../../packages/blueprints/index.ts"
 import type { GitHubRepositoryPage, Project } from "../../ProjectsView"
@@ -216,11 +216,7 @@ export function AddProjectWizard({
   )
 
   const quickConnectGh = useCallback(async () => {
-    const res = await request<{ login: string | null }>("/api/github/connect", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-    })
+    const res = await requestJson<{ login: string | null }>("/api/github/connect", "POST")
     setActiveGhLogin(res.login)
     return res.login
   }, [])
@@ -262,11 +258,7 @@ export function AddProjectWizard({
       return
     }
     try {
-      const res = await request<{ isGitRepo?: boolean; repository: string; githubRepo: string | null }>("/api/projects/detect-git", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ path }),
-      })
+      const res = await requestJson<{ isGitRepo?: boolean; repository: string; githubRepo: string | null }>("/api/projects/detect-git", "POST", { path })
       const isGit = res.isGitRepo !== false
       setLocalGitStatus(isGit ? "git" : "no-git")
       setDetectedGh(isGit ? res.githubRepo : null)
@@ -279,11 +271,7 @@ export function AddProjectWizard({
   async function pickFolderNative(target: "local" | "parent") {
     setError("")
     try {
-      const res = await request<{ path: string | null }>("/api/system/pick-folder", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: "{}",
-      })
+      const res = await requestJson<{ path: string | null }>("/api/system/pick-folder", "POST")
       if (!res.path) return
       if (target === "parent") {
         setCloneParentDir(res.path)
@@ -336,18 +324,14 @@ export function AddProjectWizard({
     setStatusMsg("Creating empty project…")
     try {
       const emptyName = projectName.trim() || nextEmptyProjectName(existingProjectNames)
-      const saved = await request<{ project: Project }>("/api/projects", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const saved = await requestJson<{ project: Project }>("/api/projects", "POST", {
           id: crypto.randomUUID(),
           name: emptyName,
           repository: "",
           githubUrl: "",
           blueprintId,
           modelProfile,
-        }),
-      })
+        })
       onCreated(saved.project, { openSettings: true })
       onClose()
     } catch (err) {
@@ -374,11 +358,7 @@ export function AddProjectWizard({
         if (!finalName) finalName = slug.split("/").pop() || slug
         if (cloneLocally) {
           setStatusMsg(`Cloning ${slug}…`)
-          const cloned = await request<{ repository: string; githubUrl: string | null; name: string }>("/api/projects/clone", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ url: slug, destinationParent: cloneParentDir || undefined }),
-          })
+          const cloned = await requestJson<{ repository: string; githubUrl: string | null; name: string }>("/api/projects/clone", "POST", { url: slug, destinationParent: cloneParentDir || undefined })
           finalRepoPath = cloned.repository
           if (cloned.githubUrl) finalGithubUrl = cloned.githubUrl
           if (!finalName) finalName = cloned.name
@@ -386,22 +366,14 @@ export function AddProjectWizard({
       } else if (source === "url") {
         if (!gitUrl.trim()) throw new Error("Enter a Git repository URL (HTTPS or SSH).")
         setStatusMsg("Cloning repository…")
-        const cloned = await request<{ repository: string; githubUrl: string | null; name: string }>("/api/projects/clone", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ url: gitUrl.trim(), destinationParent: cloneParentDir || undefined }),
-        })
+        const cloned = await requestJson<{ repository: string; githubUrl: string | null; name: string }>("/api/projects/clone", "POST", { url: gitUrl.trim(), destinationParent: cloneParentDir || undefined })
         finalRepoPath = cloned.repository
         finalGithubUrl = cloned.githubUrl ?? ""
         if (!finalName) finalName = cloned.name
       } else if (source === "local") {
         if (!localPath.trim()) throw new Error("Choose or enter a local folder path.")
         setStatusMsg("Preparing local workspace…")
-        const inited = await request<{ repository: string; githubUrl: string | null; name: string }>("/api/projects/init-local", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ folderPath: localPath.trim(), initializeGit: initGitIfMissing }),
-        })
+        const inited = await requestJson<{ repository: string; githubUrl: string | null; name: string }>("/api/projects/init-local", "POST", { folderPath: localPath.trim(), initializeGit: initGitIfMissing })
         finalRepoPath = inited.repository
         finalGithubUrl = detectedGh || inited.githubUrl || ""
         if (!finalName) finalName = inited.name
@@ -410,36 +382,24 @@ export function AddProjectWizard({
         const safeSlug = finalName.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-|-$/g, "") || "new-project"
         const targetFolder = `${(cloneParentDir || "").replace(/\/$/, "")}/${safeSlug}`
         setStatusMsg(`Initializing ${targetFolder}…`)
-        const inited = await request<{ repository: string }>("/api/projects/init-local", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ folderPath: targetFolder, initializeGit: true }),
-        })
+        const inited = await requestJson<{ repository: string }>("/api/projects/init-local", "POST", { folderPath: targetFolder, initializeGit: true })
         finalRepoPath = inited.repository
         if (createOnGitHub) {
           setStatusMsg(`Creating ${visibility} repository on GitHub…`)
-          const created = await request<{ repository: { fullName: string; url: string } }>("/api/github/repositories/create", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ name: safeSlug, visibility, addReadme: false }),
-          })
+          const created = await requestJson<{ repository: { fullName: string; url: string } }>("/api/github/repositories/create", "POST", { name: safeSlug, visibility, addReadme: false })
           finalGithubUrl = created.repository.fullName
         }
       }
 
       setStatusMsg("Saving project…")
-      const saved = await request<{ project: Project }>("/api/projects", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const saved = await requestJson<{ project: Project }>("/api/projects", "POST", {
           id: crypto.randomUUID(),
           name: finalName || nextEmptyProjectName(existingProjectNames),
           repository: finalRepoPath,
           githubUrl: finalGithubUrl,
           blueprintId,
           modelProfile,
-        }),
-      })
+        })
       onCreated(saved.project, { openSettings: false })
       onClose()
     } catch (err) {

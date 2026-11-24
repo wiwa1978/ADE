@@ -1157,6 +1157,7 @@ export const en = {
   "brief.reviewTitle": "Review the changes",
   "brief.reviewDetail": "Nothing is waiting for approval; the work is ready to look at.",
   "brief.noneTitle": "Nothing needs approving",
+  "ag.mergeFiles": "Merge {count} changed files",
 } as const
 
 export type TranslationKey = keyof typeof en
