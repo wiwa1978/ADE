@@ -305,6 +305,7 @@ export class LocalAgentHost {
 	}
 
 	abortSession(sessionId: string) {
+		this.blueprints.cancelAutoAdvance(sessionId);
 		return this.#sessionManager.abortSession(sessionId);
 	}
 

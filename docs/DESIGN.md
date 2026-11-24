@@ -93,7 +93,9 @@ BMAD and custom `.ade/blueprint.json` are described in earlier versions and are 
 | **Checks** (`deterministicChecks`) | ADE runs them itself (the project's check script, else the matching `package.json` scripts) when the Captain calls `finish_stage`. A failing check refuses the stage and sends the output back; a word the project has no command for is skipped and said so. The results show in the Stages view. |
 | **Independent review** (`contextIsolation: goldfish`) | ADE won't finish the stage until a fresh read-only reviewer subagent has started and completed in this attempt (it has to be started again after a loop-back). ADE picks the reviewer's model: another model family than the Captain when one is set up, else the same one, and the stage says which. The reviewer's report is kept with the stage. *Not yet:* limiting what the reviewer is told to the spec and diff, and using a codemode-style batch reader. |
 | **Model** | The Captain keeps the person's model unless the project pins one for the stage (stage override) or chose a model profile; applied at the start of each turn. See §4.3. |
-| **Tools per stage** | *Planned.* Stages declare `allowedToolGroups`, but sessions do not prune tools yet. |
+| **Tools per stage** | Applied to the Captain: only the tools a stage's `allowedToolGroups` allow (looking around, the team tools and delegating are always allowed; a document stage may write in its document's folder; a stage with checks may edit so failures can be fixed). Subagents have their own tool sets. |
+| **Next stage** | When the Captain finishes a stage that needs no approval and then stops without starting the next one, ADE sends the "continue" itself (up to three times for the same stage). Gates, escalations, a stop by the person and questions in the new stage never trigger it. |
+| **Document** | A stage with a document can't finish until the file exists on the branch and isn't empty. |
 | **Artifacts** | Files on the session's branch (`artifactPathPattern`), reviewed and merged with the code. |
 
 **Where it shows.** A **Stages** tab in the bottom drawer (with Terminal) shows each stage's state, summary, checks, review and verdict, with Approve / Request changes on the waiting stage. When the drawer is closed, a slim **stage bar** keeps the current stage in view. The Simple view adds the inline decision card. On the phone, Stages is a full-screen list.
@@ -176,7 +178,7 @@ Where a session's commands run: this computer, a Docker container, WSL2, an SSH 
 | EU-only mode for models, agent CLIs and tool servers | **Built** (see §5 for limits) |
 | Self-hosted server (`scripts/ade-server.ts`), phone web app with pairing | **Built**; Web Push notifications for approvals are not built |
 | Inbox cards for agents' questions | Planned |
-| Stage-aware tool pruning, failure-loop watchdog, memory/decision log (Scribe) | Planned (pieces exist in `captain-core`, not wired into sessions) |
+| Failure-loop watchdog, memory/decision log (Scribe), token-saving tool pruning by usage | Planned (pieces exist in `captain-core`, not wired into sessions) |
 | Spec-linked PR summaries with check output and review verdict | Planned |
 | Native Mistral provider, EU open-weights presets, GitLab/Forgejo intake | Planned |
 | BMAD and repo-committed custom blueprints | Planned |

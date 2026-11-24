@@ -226,6 +226,16 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		if (was && !now) {
 			runCheck(event.sessionId);
 			const sessionId = event.sessionId;
+			// A stage was finished and the agent stopped before starting the next: start it.
+			setTimeout(() => {
+				try {
+					const nudge = host.blueprints.takeAutoAdvance(sessionId);
+					if (!nudge || limitGuard.stopped(sessionId) || usageWaiter.waiting(sessionId) || viewSessions().find(item => item.id === sessionId)?.lastTurnStatus !== "completed") return;
+					void sendToAgent(sessionId, nudge, { async: true }).catch(() => undefined);
+				} catch {
+					// The runtime may be shutting down.
+				}
+			}, 600).unref?.();
 			// Give the turn's final status a moment to be stored before reading it.
 			if (integrations.wants("finished") || integrations.wants("failed")) {
 				setTimeout(() => {

@@ -106,3 +106,48 @@ test("ADE runs the project's tests itself before a verify stage can finish: a fa
 		rmSync(repoDir, { recursive: true, force: true });
 	}
 });
+
+test("when the agent finishes a stage and just stops, ADE starts the next stage itself", { timeout: 60_000 }, async () => {
+	const stateDir = mkdtempSync(join(tmpdir(), "ade-advance-"));
+	const repoDir = mkdtempSync(join(tmpdir(), "ade-advance-repo-"));
+	execFileSync("git", ["init", "-q"], { cwd: repoDir });
+	const faux = fauxProvider();
+	const models = createModels();
+	models.setProvider(faux.provider);
+	const fixture = { provider: faux.provider.id, defaultModel: faux.getModel().id, availableModels: [{ id: faux.getModel().id, name: "Fixture" }], configured: true, setupMessage: "", models, faux, resolveModel: (id: string) => models.getModel(faux.provider.id, id) };
+	const host = new LocalAgentHost({ stateDirectory: stateDir, modelConfigFactory: () => fixture });
+	const manager = new WorktreeManager(stateDir);
+	host.setWorktreeManager(manager);
+	createAgentWorkflow({ host, worktreeManager: manager, sessionGit: createSessionGit() });
+	try {
+		const taskId = randomUUID();
+		await host.createCodingTask({ id: taskId, title: "Advance", repository: repoDir, kind: "checkout", blueprintId: "automated-factory" }, manager);
+		for (const path of host.blueprints.view(taskId).stages.find(item => item.id === "triage")!.artifactPaths) {
+			mkdirSync(join(repoDir, path, ".."), { recursive: true });
+			writeFileSync(join(repoDir, path), "# Triage\n");
+		}
+		faux.setResponses([
+			fauxAssistantMessage(fauxToolCall("finish_stage", { stageId: "triage", summary: "Triaged." }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("Triage is done."),
+			fauxAssistantMessage("Starting the plan."),
+		]);
+		await host.send("coding", { content: "Fix the login bug", model: faux.getModel().id, reasoning: "none" }, taskId);
+		// The turn ended after Triage with the next stage running: ADE sends the follow-up on its own.
+		const deadline = Date.now() + 15_000;
+		let user: string[] = [];
+		while (Date.now() < deadline) {
+			const timeline = await host.getTimeline(taskId);
+			user = timeline.items.filter(item => item.kind === "user").map(item => (item as { text?: string; content?: string }).text ?? (item as { content?: string }).content ?? "");
+			if (faux.state.callCount >= 3) break;
+			await new Promise(resolve => setTimeout(resolve, 200));
+		}
+		assert.equal(faux.state.callCount, 3, "the agent was asked again without the user writing");
+		assert.ok(user.some(text => /Continue with the next stage now: "Light Plan"/.test(text)) || user.length >= 2, `a follow-up message was sent: ${JSON.stringify(user)}`);
+		assert.equal(host.blueprints.summary(taskId)?.stage?.id, "plan", "and it is the next stage that is running");
+	} finally {
+		await host.close();
+		manager.close();
+		rmSync(stateDir, { recursive: true, force: true });
+		rmSync(repoDir, { recursive: true, force: true });
+	}
+});

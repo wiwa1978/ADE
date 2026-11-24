@@ -93,6 +93,10 @@ export class SessionBlueprints {
 	#gated = new Set<string>();
 	/** Runs a stage's checks in the session's workspace; null when there is nothing to run them in. */
 	#workspace: ((sessionId: string) => string | null) | null = null;
+	/** Sessions whose agent moved to the next stage and then stopped without doing anything in it. */
+	#advanced = new Set<string>();
+	/** How many times in a row ADE started the same stage for a session (progress to another stage starts the count again). */
+	#nudges = new Map<string, { stageId: string; count: number }>();
 	#checker: ((sessionId: string, stage: BlueprintStage) => Promise<StageChecks | null>) | null = null;
 
 	constructor(db: DatabaseSync, events?: RuntimeEventBus, now: () => number = Date.now) {
@@ -227,6 +231,38 @@ export class SessionBlueprints {
 		this.#save(sessionId, row.blueprintId!, record);
 	}
 
+	/**
+	 * Called when a turn ends. If the agent finished a stage that needs no approval and then stopped
+	 * without starting the next one, this is the message that starts it, so ungated stages chain
+	 * without the user typing "continue". At most `limit` times in a row for the same stage; gates, escalations and
+	 * questions (the agent did something in the new stage) never get one.
+	 */
+	takeAutoAdvance(sessionId: string, limit = 3): string | null {
+		const pending = this.#advanced.delete(sessionId);
+		if (!pending) {
+			this.#nudges.delete(sessionId);
+			return null;
+		}
+		const stage = this.currentStage(sessionId);
+		const row = this.#row(sessionId);
+		const record = row ? this.#record(row) : null;
+		if (!stage || record?.run.stages[record.run.currentStageIndex]?.status !== "running" || this.#gated.has(sessionId)) return null;
+		const previous = this.#nudges.get(sessionId);
+		const count = previous?.stageId === stage.id ? previous.count + 1 : 1;
+		if (count > limit) {
+			this.#nudges.delete(sessionId);
+			return null;
+		}
+		this.#nudges.set(sessionId, { stageId: stage.id, count });
+		return `Continue with the next stage now: "${stage.name}" (${stage.id}). When it's done, call finish_stage.`;
+	}
+
+	/** The user stopped the agent: don't start anything on their behalf. */
+	cancelAutoAdvance(sessionId: string) {
+		this.#advanced.delete(sessionId);
+		this.#nudges.delete(sessionId);
+	}
+
 	/** A new turn begins (the user wrote, or decided): the gate stop is over. */
 	unlock(sessionId: string) {
 		this.#gated.delete(sessionId);
@@ -255,6 +291,8 @@ export class SessionBlueprints {
 		const stage = blueprint.stages[record.run.currentStageIndex];
 		const state = record.run.stages[record.run.currentStageIndex];
 		if (!stage || !state) return null;
+		// Any tool call after moving on means the agent is working in the new stage.
+		if (isLead && toolName !== "finish_stage") this.#advanced.delete(sessionId);
 		const waiting = state.status === "awaiting_approval" || record.run.status === "awaiting_human" || this.#gated.has(sessionId);
 		if (waiting) {
 			if (GATE_ALLOWED.has(toolName)) return null;
@@ -451,6 +489,8 @@ export class SessionBlueprints {
 		if (action.kind === "execute_stage") record.history.push({ at: now, stageId: action.stage.id, event: "started" });
 		this.#save(sessionId, row.blueprintId!, record);
 		if (action.kind === "await_approval" || action.kind === "failed") this.#gated.add(sessionId);
+		if (action.kind === "execute_stage") this.#advanced.add(sessionId);
+		else this.#advanced.delete(sessionId);
 		if (action.kind === "completed") return { reply: `${prefix} All stages are done. End your turn with a short final summary: what was built, where the PR or branch is, and anything left for the user.`, waiting: false };
 		if (action.kind === "await_approval") return { reply: `${prefix} The next stage, "${action.stage.name}", starts after the user approves it. Stop here and end your turn with a short summary.`, waiting: true };
 		if (action.kind === "failed") return { reply: `${prefix} The blueprint can't continue: ${action.reason}. Explain this to the user.`, waiting: true };

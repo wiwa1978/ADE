@@ -316,3 +316,33 @@ test("a stage that should produce a document can't finish until that file is on 
 		rmSync(folder, { recursive: true, force: true });
 	}
 });
+
+test("when the agent finishes a stage and stops, ADE starts the next one itself, a few times at most", async () => {
+	const { blueprints } = setup("automated-factory");
+	const finish = (blueprints.createExtension("s1").tools ?? []).find(tool => tool.name === "finish_stage") as unknown as { execute: (args: Record<string, unknown>, api: unknown) => Promise<unknown> };
+	const call = (args: Record<string, unknown>) => finish.execute(args, { conversationId: 0 });
+
+	assert.equal(blueprints.takeAutoAdvance("s1"), null, "nothing to continue before any stage is finished");
+	// Triage finished, no gate, and the turn ends without anything done in Plan.
+	await call({ stageId: "triage", summary: "Triaged" });
+	assert.equal(blueprints.summary("s1")!.stage?.id, "plan");
+	const nudge = blueprints.takeAutoAdvance("s1");
+	assert.match(nudge ?? "", /Continue with the next stage now: "Light Plan" \(plan\)/);
+	assert.equal(blueprints.takeAutoAdvance("s1"), null, "one nudge per stop");
+
+	// The agent did work in the new stage (any tool call) and then stopped: it may be asking the user something.
+	await call({ stageId: "plan", summary: "Planned" });
+	assert.equal(blueprints.toolBlockReason("s1", "read", {}, true), null);
+	assert.equal(blueprints.takeAutoAdvance("s1"), null, "no nudge when the agent engaged with the stage");
+
+	// A subagent's tool calls don't count as the Captain working.
+	await call({ stageId: "implement", summary: "Built" });
+	blueprints.toolBlockReason("s1", "read", {}, false);
+	assert.match(blueprints.takeAutoAdvance("s1") ?? "", /"Deterministic Hooks"|verify/);
+
+	// Stopping by the user cancels it; a gate never gets one.
+	await call({ stageId: "verify", summary: "ok" });
+	blueprints.cancelAutoAdvance("s1");
+	assert.equal(blueprints.takeAutoAdvance("s1"), null);
+	assert.equal(blueprints.summary("s1")!.stage?.id, "review");
+});
