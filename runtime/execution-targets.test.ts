@@ -65,7 +65,9 @@ test("Docker: a container per session with its worktree, Git metadata and agent 
 		const run = calls.find(args => args[0] === "run")!;
 		// ADE mounts real paths (on Windows the temp folder has a short 8.3 name, e.g. RUNNER~1).
 		const root = realpathSync.native(f.root);
-		const mounts = run.flatMap((arg, index) => (arg === "-v" ? [run[index + 1].split(":")[0]] : [])).filter(path => path.startsWith(root));
+		// A mount is "host:container[:mode]"; on Windows the host path itself starts with a drive letter and colon.
+		const hostPath = (spec: string) => /^[A-Za-z]:[\\/]/.test(spec) ? /^([A-Za-z]:[^:]*)/.exec(spec)![1] : spec.split(":")[0];
+		const mounts = run.flatMap((arg, index) => (arg === "-v" ? [hostPath(run[index + 1])] : [])).filter(path => path.startsWith(root));
 		assert.deepEqual(mounts.sort(), [join(realpathSync.native(f.repo), ".git"), realpathSync.native(f.worktrees)].sort(), "the worktree sits inside the worktree folder, so it isn't mounted twice");
 		assert.ok(run.includes("IS_SANDBOX=1") && run.some(arg => arg.startsWith("HOME=")), "agent CLIs find their sign-in and may skip prompts in the container");
 		assert.equal(run.at(-3), DEFAULT_DOCKER_IMAGE);
