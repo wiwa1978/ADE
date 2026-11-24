@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { ArrowLeft, Check, GitBranch, Trophy } from "lucide-react"
 import { request } from "../../api"
+import { useConfirm } from "../../components/ui/index.ts"
 import type { Conversation } from "../../app-types"
 import { sessionStateInfo, relativeTime, type InboxEntry } from "../session-state"
 import { formatUsage, useUsage } from "../usage/usage-data"
@@ -29,6 +30,7 @@ export function AttemptsView({
   onArchive: (sessionId: string) => Promise<void> | void
   onBack: () => void
 }) {
+  const { confirm } = useConfirm()
   const attempts = sessions.filter(session => session.attemptGroup === group).sort((a, b) => a.label.localeCompare(b.label))
   const { report } = useUsage(attempts.map(item => item.status).join())
   const [details, setDetails] = useState<Record<string, AttemptDetails>>({})
@@ -55,7 +57,14 @@ export function AttemptsView({
 
   const keep = async (winner: Conversation) => {
     const others = attempts.filter(item => item.id !== winner.id && !item.archivedAt)
-    if (others.length && !confirm(`Keep "${winner.label}" and archive the other ${others.length} attempt${others.length === 1 ? "" : "s"}? Their branches are kept. Their worktrees are removed, unless they have uncommitted changes.`)) return
+    if (others.length) {
+      const confirmed = await confirm({
+        title: `Keep "${winner.label}"?`,
+        description: `Archive the other ${others.length} attempt${others.length === 1 ? "" : "s"}? Their branches are kept. Their worktrees are removed, unless they have uncommitted changes.`,
+        confirmLabel: "Keep this one",
+      })
+      if (!confirmed) return
+    }
     setKeeping(winner.id)
     try {
       for (const other of others) await onArchive(other.id)

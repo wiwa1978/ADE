@@ -50,6 +50,7 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
   const cursorRef = useRef(0)
   const exitedRef = useRef(false)
   const writeQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const wakePollRef = useRef<(() => void) | null>(null)
   const fontSizeRef = useRef(fontSize)
   const scrollbackRef = useRef(scrollback)
   const [terminalReady, setTerminalReady] = useState(false)
@@ -109,6 +110,7 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
             await request(`/api/terminals/${id}/input`, {
               method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ data }),
             })
+            wakePollRef.current?.()
           }).catch(cause => {
             setError(cause instanceof Error ? cause.message : "Could not write to the terminal.")
           })
@@ -158,21 +160,49 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
 
   useEffect(() => {
     if (!visible || !terminalReady || !terminalId || !terminalRef.current) return
+    const ACTIVE_POLL_MS = 180
+    const MAX_IDLE_POLL_MS = 1000
     let active = true
     let polling = false
+    let delayMs = ACTIVE_POLL_MS
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let controller: AbortController | null = null
+
+    const isHidden = () => typeof document !== "undefined" && document.visibilityState !== "visible"
+
+    const clearTimer = () => {
+      if (timer !== null) {
+        clearTimeout(timer)
+        timer = null
+      }
+    }
+
+    const schedule = (ms: number) => {
+      clearTimer()
+      if (!active || exitedRef.current || isHidden()) return
+      timer = setTimeout(() => { void poll() }, ms)
+    }
+
     const poll = async () => {
-      if (!active || polling) return
+      if (!active || polling || exitedRef.current || isHidden()) return
       polling = true
+      clearTimer()
+      const nextController = new AbortController()
+      controller = nextController
       try {
-        const result = await request<TerminalOutput>(`/api/terminals/${terminalId}/output?cursor=${cursorRef.current}`)
-        if (!active) return
+        const result = await request<TerminalOutput>(
+          `/api/terminals/${terminalId}/output?cursor=${cursorRef.current}`,
+          { signal: nextController.signal },
+        )
+        if (!active || nextController.signal.aborted) return
         if (result.truncated) terminalRef.current?.write("\r\n[Earlier terminal output was truncated.]\r\n")
         if (result.data) terminalRef.current?.write(result.data)
         cursorRef.current = result.cursor
         exitedRef.current = result.exited
         setStatus(result.exited ? `Exited${result.exitCode === null ? "" : ` (${result.exitCode})`}` : `Running · ${result.shell}`)
+        delayMs = result.data ? ACTIVE_POLL_MS : Math.min(MAX_IDLE_POLL_MS, Math.round(delayMs * 1.5))
       } catch (cause) {
-        if (!active) return
+        if (!active || nextController.signal.aborted) return
         const message = cause instanceof Error ? cause.message : "Terminal connection was lost."
         if (/not found|already closed/i.test(message)) {
           localStorage.removeItem(storageKey)
@@ -180,13 +210,56 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
           setTerminalId(null)
           exitedRef.current = true
           setStatus("Terminal expired")
-        } else setStatus("Connection interrupted")
+        } else {
+          setStatus("Connection interrupted")
+          delayMs = MAX_IDLE_POLL_MS
+        }
         setError(message)
-      } finally { polling = false }
+      } finally {
+        if (controller === nextController) controller = null
+        polling = false
+        if (active && !exitedRef.current && !isHidden()) {
+          schedule(delayMs)
+        }
+      }
     }
-    void poll()
-    const timer = window.setInterval(() => { void poll() }, 180)
-    return () => { active = false; window.clearInterval(timer) }
+
+    const wake = () => {
+      if (!active || exitedRef.current || isHidden()) return
+      delayMs = ACTIVE_POLL_MS
+      if (!polling) {
+        schedule(40)
+      }
+    }
+    wakePollRef.current = wake
+
+    const onVisibilityChange = () => {
+      if (!active) return
+      if (isHidden()) {
+        clearTimer()
+        return
+      }
+      delayMs = ACTIVE_POLL_MS
+      void poll()
+    }
+
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityChange)
+    }
+
+    if (!isHidden()) {
+      void poll()
+    }
+
+    return () => {
+      active = false
+      if (wakePollRef.current === wake) wakePollRef.current = null
+      clearTimer()
+      controller?.abort()
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityChange)
+      }
+    }
   }, [visible, terminalReady, terminalId, storageKey])
 
   async function start() {

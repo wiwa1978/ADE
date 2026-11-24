@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { Check, FileCode2, GitCommit, Minus, Plus, RefreshCw, RotateCcw, Send } from "lucide-react"
 import { request } from "../../api"
+import { useConfirm } from "../../components/ui/index.ts"
 import { reviewFeedbackPrompt } from "../../packages/protocol/agent-prompts.ts"
 import { DiffLines } from "./DiffLines"
 import { useDiffNotes } from "./diff-notes"
@@ -28,6 +29,7 @@ export function DiffPanel({
   /** Send the line notes to the session's agent. */
   onAskAgent?: (text: string) => Promise<void>
 }) {
+  const { confirm } = useConfirm()
   const diffNotes = useDiffNotes(sessionId)
   const [sendingNotes, setSendingNotes] = useState(false)
   const sendNotes = async () => {
@@ -138,7 +140,13 @@ export function DiffPanel({
   }
 
   const discard = async (path: string) => {
-    if (!confirm(`Discard unstaged changes in ${path}?`)) return
+    const confirmed = await confirm({
+      title: "Discard unstaged changes?",
+      description: `Discard unstaged changes in ${path}? This cannot be undone.`,
+      confirmLabel: "Discard",
+      destructive: true,
+    })
+    if (!confirmed) return
     setBusy(true)
     setError("")
     try {
@@ -219,7 +227,16 @@ export function DiffPanel({
   const notesBar = onAskAgent && diffNotes.notes.length ? (
     <div className="ade-notes-bar" role="status">
       <span>{diffNotes.notes.length} note{diffNotes.notes.length === 1 ? "" : "s"} for the agent in {noteFiles} file{noteFiles === 1 ? "" : "s"}</span>
-      <button type="button" className="ade-chip-btn" onClick={() => { if (confirm("Remove all notes?")) diffNotes.clear() }}>Clear</button>
+      <button
+        type="button"
+        className="ade-chip-btn"
+        onClick={() => void confirm({
+          title: "Remove all notes?",
+          description: "All line notes in this session will be removed.",
+          confirmLabel: "Remove notes",
+          destructive: true,
+        }).then(ok => { if (ok) diffNotes.clear() })}
+      >Clear</button>
       <button
         type="button"
         className="ade-btn ade-btn-primary ade-btn-xs"

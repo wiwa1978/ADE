@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
 import { FolderPlus, Inbox, PanelLeft, Search, Settings2, Smartphone } from "lucide-react"
 import type { Conversation, RuntimeHealth } from "../../app-types"
 import type { Project } from "../../ProjectsView"
@@ -54,7 +54,7 @@ type AppSidebarProps = {
 }
 
 /** The app's left navigation: handles collapsing and resizing, and renders the Sidebar. */
-export function AppSidebar(props: AppSidebarProps) {
+export const AppSidebar = memo(function AppSidebar(props: AppSidebarProps) {
   const [sidebarOpen, setSidebarOpen] = useState(() => matchMedia("(min-width: 720px)").matches)
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = Number(localStorage.getItem("ade.sidebar-width"))
@@ -62,15 +62,28 @@ export function AppSidebar(props: AppSidebarProps) {
   })
   const [archivedExpanded, setArchivedExpanded] = useState(false)
   const sidebarDragging = useRef(false)
+  const sidebarWidthRef = useRef(sidebarWidth)
+
+  useEffect(() => {
+    sidebarWidthRef.current = sidebarWidth
+  }, [sidebarWidth])
 
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
       if (!sidebarDragging.current) return
       const next = Math.min(360, Math.max(200, e.clientX))
+      sidebarWidthRef.current = next
       setSidebarWidth(next)
-      localStorage.setItem("ade.sidebar-width", String(Math.round(next)))
     }
-    const onUp = () => { sidebarDragging.current = false }
+    const onUp = () => {
+      if (!sidebarDragging.current) return
+      sidebarDragging.current = false
+      try {
+        localStorage.setItem("ade.sidebar-width", String(Math.round(sidebarWidthRef.current)))
+      } catch {
+        // Storage can be unavailable in private browsing mode.
+      }
+    }
     window.addEventListener("pointermove", onMove)
     window.addEventListener("pointerup", onUp)
     return () => {
@@ -79,8 +92,29 @@ export function AppSidebar(props: AppSidebarProps) {
     }
   }, [])
 
-  const sortPinnedFirst = (list: Conversation[]) =>
-    [...list].sort((a, b) => Number(props.pinnedIds.includes(b.id)) - Number(props.pinnedIds.includes(a.id)))
+  const sessionsByProject = useMemo(() => {
+    const archivedSet = new Set(props.archivedIds)
+    const pinnedSet = new Set(props.pinnedIds)
+    return Object.fromEntries(
+      props.visibleProjects.map(project => [
+        project.id,
+        props.codingTasks
+          .filter(s => s.projectId === project.id && !archivedSet.has(s.id))
+          .sort((a, b) => Number(pinnedSet.has(b.id)) - Number(pinnedSet.has(a.id))),
+      ]),
+    )
+  }, [props.visibleProjects, props.codingTasks, props.archivedIds, props.pinnedIds])
+
+  const factoryRunsByProject = useMemo(
+    () =>
+      Object.fromEntries(
+        props.visibleProjects.map(project => [
+          project.id,
+          props.factoryRuns.filter(r => r.run.projectId === project.id),
+        ]),
+      ),
+    [props.visibleProjects, props.factoryRuns],
+  )
 
   const tools = useSessionTools().filter(tool => !tool.menuOnly)
   // The hover card beside an activity bar icon (one at a time, placed next to the icon).
@@ -157,10 +191,10 @@ export function AppSidebar(props: AppSidebarProps) {
         width={sidebarWidth}
         selection={props.selection}
         projects={props.visibleProjects}
-        sessionsByProject={Object.fromEntries(props.visibleProjects.map(project => [project.id, sortPinnedFirst(props.codingTasks.filter(s => s.projectId === project.id && !props.archivedIds.includes(s.id)))]))}
+        sessionsByProject={sessionsByProject}
         ungroupedSessions={props.ungroupedTasks}
         chats={props.chats}
-        factoryRunsByProject={Object.fromEntries(props.visibleProjects.map(project => [project.id, props.factoryRuns.filter(r => r.run.projectId === project.id)]))}
+        factoryRunsByProject={factoryRunsByProject}
         archivedProjects={props.archivedProjects}
         archivedSessions={props.archivedSessions}
         inbox={props.inbox}
@@ -204,7 +238,7 @@ export function AppSidebar(props: AppSidebarProps) {
       />
     </>
   )
-}
+})
 
 type RailTip = { label: string; description: string; shortcut?: string; status?: string; top: number }
 

@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { Bot, Brain, CheckCircle2, ChevronDown, ChevronRight, Clock, GitMerge, Loader2, Maximize2, Minimize2, PauseCircle, Pin, PinOff, XCircle } from "lucide-react"
 import { request } from "../../api"
+import { useConfirm } from "../../components/ui/index.ts"
+import { usePolling } from "../hooks/usePolling"
 import type { ConversationTimelineSnapshot, SubagentInfo, TimelineItem, TimelineToolCall } from "../../app-types"
 import { SubagentPanel } from "../panels/SubagentPanel"
 import { clock, type SessionHold } from "../subagents/session-hold"
@@ -66,18 +68,15 @@ export function AgentsView({
   const work = useAgentsWork(sessionId, refreshKey)
   const [selected, setSelected] = useState<string | null>(null)
   const [pinned, setPinned] = useState<string[]>([])
-  // "Now", for how long working agents have been running; ticks every 30 seconds.
+  // "Now", for how long working agents have been running; ticks every 30 seconds while visible and active.
+  const working = subagents.filter(busyOf).length + (leadBusy ? 1 : 0)
   const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 30_000)
-    return () => clearInterval(timer)
-  }, [])
+  usePolling(() => { setNow(Date.now()) }, 30_000, { enabled: working > 0, immediate: false })
   const firstWorking = subagents.find(busyOf)?.id ?? subagents.at(-1)?.id ?? LEAD
   const focus = selected && (selected === LEAD || subagents.some(sub => sub.id === selected)) ? selected : firstWorking
   const shownIds = pinned.length ? [...pinned, ...(pinned.includes(focus) ? [] : [focus])].slice(0, 3) : [focus]
   const togglePin = (id: string) => setPinned(list => list.includes(id) ? list.filter(item => item !== id) : [...list, id].slice(-3))
 
-  const working = subagents.filter(busyOf).length + (leadBusy ? 1 : 0)
   const done = subagents.filter(sub => sub.status === "completed").length
   const lead = summarize(leadItems, leadBusy, leadLiveTools)
 
@@ -230,6 +229,7 @@ function AgentCard(props: {
 
 /** A worktree subagent's changes on its branch: the files, each file's diff, and merging into the session. */
 function AgentChangesStrip({ sessionId, sub, changes, busy }: { sessionId: string; sub: SubagentInfo; changes: AgentChanges; busy: boolean }) {
+  const { confirm } = useConfirm()
   const [open, setOpen] = useState(false)
   const [openFile, setOpenFile] = useState<string | null>(null)
   const [diff, setDiff] = useState("")
@@ -249,7 +249,12 @@ function AgentChangesStrip({ sessionId, sub, changes, busy }: { sessionId: strin
   }
 
   const merge = async () => {
-    if (!window.confirm(`Merge ${sub.name}'s branch (${sub.branch}) into the session's branch?`)) return
+    const confirmed = await confirm({
+      title: `Merge ${sub.name}'s branch?`,
+      description: `Merge ${sub.name}'s branch (${sub.branch}) into the session's branch?`,
+      confirmLabel: "Merge",
+    })
+    if (!confirmed) return
     setMerging(true)
     try {
       const result = await request<{ merged: boolean; message: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/agents/${encodeURIComponent(sub.id)}/merge`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })

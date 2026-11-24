@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { resolveCaptainUrl } from "../../api"
+import type { RuntimeEventType } from "../../packages/protocol/index.ts"
 import {
+  decodeRuntimeEvent,
   EventStreamContext,
   type EventStreamContextValue,
   type EventStreamListener,
+  type TypedEventStreamListener,
 } from "./useEventStream"
 
 export function EventStreamProvider({ children }: { children: ReactNode }) {
@@ -64,6 +67,15 @@ export function EventStreamProvider({ children }: { children: ReactNode }) {
     [getDispatcher],
   )
 
+  const subscribeTyped = useCallback(
+    <K extends RuntimeEventType>(eventName: K, listener: TypedEventStreamListener<K>) =>
+      subscribe(eventName, (raw) => {
+        const decoded = decodeRuntimeEvent(eventName, raw)
+        if (decoded) listener(decoded)
+      }),
+    [subscribe],
+  )
+
   const reconnect = useCallback(() => {
     setEpoch(prev => prev + 1)
   }, [])
@@ -120,8 +132,8 @@ export function EventStreamProvider({ children }: { children: ReactNode }) {
   }, [epoch, getDispatcher])
 
   const value = useMemo<EventStreamContextValue>(
-    () => ({ connected, subscribe, reconnect }),
-    [connected, subscribe, reconnect],
+    () => ({ connected, subscribe, subscribeTyped, reconnect }),
+    [connected, subscribe, subscribeTyped, reconnect],
   )
 
   return <EventStreamContext.Provider value={value}>{children}</EventStreamContext.Provider>

@@ -43,7 +43,10 @@ export type {
   ProviderTool,
   RepoMicroSkill,
   ResolvedModel,
+  RuntimeEventMap,
+  RuntimeEventType,
   RuntimeHealth,
+  RunTargetDto,
   SandboxHandle,
   SandboxProviderKind,
   SessionArtifact,
@@ -52,10 +55,11 @@ export type {
   StageStatus,
   StageVerdict,
   TokenSavingsReport,
+  TypedRuntimeEvent,
   WorkspaceEntry,
   WorkspaceGitSummary,
 } from "./packages/protocol/index.ts"
-import type { GitHubIssue } from "./packages/protocol/index.ts"
+import type { GitHubIssue, RunTargetDto, WorkerTaskSpec } from "./packages/protocol/index.ts"
 
 export type Screen = "inbox" | "projects" | "project" | "work" | "factory" | "settings" | "worktrees" | "attempts"
 
@@ -72,7 +76,7 @@ export type TaskStart = {
   /** Shared by parallel attempts at the same task (best of N). */
   attemptGroup?: string
   /** Where the session's commands run; defaults to the project's choice. */
-  runOn?: "local" | "docker" | "wsl" | "ssh" | "boat"
+  runOn?: RunTargetDto
   /** Way of working: "vibe" or a blueprint id; empty = the project's default. */
   blueprintId?: string
   initialMessage?: { id: string; content: string; provider: string; model: string; reasoning: string }
@@ -123,7 +127,7 @@ export type SubagentInfo = {
   assignment: string
   status: "running" | "waiting" | "completed" | "failed" | "blocked" | "unknown"
   /** Which agent runs this subagent: the ADE agent (Pi), Claude Code or Codex. */
-  harness?: "pi" | "claude-code" | "codex"
+  harness?: WorkerTaskSpec["harness"]
   model: string | null
   reasoning: string
   error: string | null

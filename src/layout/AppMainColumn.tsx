@@ -1,20 +1,16 @@
-import { useRef, useState, type RefObject } from "react"
-import { PaneResizer } from "./PaneResizer"
+import { useMemo, type RefObject } from "react"
+import { Sparkles } from "lucide-react"
 import { InboxView } from "../inbox/InboxView"
 import { sessionStateInfo, type InboxEntry } from "../session-state"
-import { FolderTree, Layers, PanelRight, Settings2, Sparkles } from "lucide-react"
-import { FilesPanel } from "../panels/FilesPanel"
-import { ArtefactsBrowserPanel } from "../panels/ArtefactsBrowserPanel"
 import { request } from "../../api"
 import type { Conversation, EnvironmentDirectory, GitHubIssue, StartFrom, ProviderCatalogEntry, RuntimeHealth, Screen, SessionArtifact, WorkspaceTab } from "../../app-types"
-import { ProjectSettings, ProjectsView, type Project, type ProjectActivity, type ProjectInput } from "../../ProjectsView"
+import { ProjectsView, type Project, type ProjectActivity, type ProjectInput } from "../../ProjectsView"
 import { SettingsView, type SettingsCategory } from "../../SettingsView"
 import { WorktreeDiagnostics } from "../../WorktreeDiagnostics"
 import type { useConnections } from "../../useConnections"
 import type { Settings } from "../../useSettings"
 import type { useWorktrees } from "../../useWorktrees"
 import type { useRuntimeStream } from "../hooks/useRuntimeStream"
-import { searchGitHubRepositories } from "../hooks/useProjects"
 import { SplitWorkspace } from "../workspace/SplitWorkspace"
 import { NewSessionView } from "../workspace/NewSessionView"
 import { ProjectStreamsWorkspace } from "../projects/ProjectStreamsWorkspace"
@@ -22,6 +18,7 @@ import { FactoryView } from "../factory/FactoryView"
 import type { FactoryRunDetail } from "../factory/types"
 import { AttemptsView } from "../attempts/AttemptsView"
 import { resolveKeybindings } from "../keybindings"
+import { ProjectRightInspector, type ProjectRightPaneMode } from "./ProjectRightInspector"
 
 type AppMainColumnProps = {
   screen: Screen
@@ -49,7 +46,7 @@ type AppMainColumnProps = {
   projectDrafts: Record<string, ProjectInput>
   projectActivity: ProjectActivity | null
   projectActivityError: string
-  projectRightPane: "files" | "artifacts" | "settings" | null
+  projectRightPane: ProjectRightPaneMode
   factoryRuns: FactoryRunDetail[]
   openStreamIdsByProject: Record<string, string[]>
   focusedStreamId: string | null
@@ -78,7 +75,7 @@ type AppMainColumnProps = {
   onProjectSaved: (saved: Project) => void
   onSaveProject: (input: ProjectInput, existingId?: string) => Promise<Project>
   onSetProjectDraft: (projectId: string, draftInput: ProjectInput) => void
-  onSetProjectRightPane: (pane: "files" | "artifacts" | "settings" | null) => void
+  onSetProjectRightPane: (pane: ProjectRightPaneMode) => void
   onToggleProjectFiles: () => void
   onToggleProjectSettings: () => void
   onCloseProjectSettings: () => void
@@ -88,7 +85,6 @@ type AppMainColumnProps = {
   onOpenSession: (id: string) => void
   onClearUnread: (id: string) => void
   onOpenNewSession: (projectId?: string, issue?: GitHubIssue) => void
-  /** New session was opened from this issue. */
   newSessionIssue?: GitHubIssue | null
   onOpenAddProject: () => void
   onOpenEnvironmentPalette: () => void
@@ -105,17 +101,14 @@ type AppMainColumnProps = {
   onAttachFiles: (files: FileList | null) => void
   onRemoveAttachment: (id: string) => void
   onSendMessage: (text: string) => void
-  /** Send a prompt ADE wrote (review feedback, CI logs, conflicts) to the active session's agent. */
   onAskAgent: (text: string) => Promise<void>
   onSteerSession: (text: string, mode: "steer" | "follow-up") => void
   onAbortSession: () => void
   onCompactSession: () => void
   onReviewArtifact: (artifact: SessionArtifact, decision: "approved" | "changes_requested", feedback?: string) => Promise<void>
-  /** Inbox state per session (status dots, tags, project session list). */
   inboxEntries: Record<string, InboxEntry>
   onOpenSessionConversation: (session: Conversation) => void
   onArchiveSession: (sessionId: string) => void
-  /** Best of N: the attempt group shown on the "attempts" screen. */
   attemptsGroup: string | null
   onOpenAttempts: (group: string) => void
   onBackFromAttempts: () => void
@@ -124,66 +117,25 @@ type AppMainColumnProps = {
   onSessionContextMenu?: (session: Conversation, x: number, y: number) => void
 }
 
-const PROJECT_PANE_STANDARD = 320
-
 export function AppMainColumn(props: AppMainColumnProps) {
-  // The project page's right panel (files, artefacts, settings): one width, resizable and remembered.
-  const [projectPaneWidth, setProjectPaneWidth] = useState(() => {
-    try {
-      const saved = Number(localStorage.getItem("ade.project-pane-width"))
-      return saved >= 260 && saved <= 760 ? saved : PROJECT_PANE_STANDARD
-    } catch {
-      return PROJECT_PANE_STANDARD
-    }
-  })
-  const projectPaneRef = useRef<HTMLElement | null>(null)
   const {
-    screen,
-    newSessionOpen,
-    settings,
-    resolved,
-    settingsError,
-    runtimeError,
-    runtime,
-    matchingRuntime,
-    providerName,
-    selectedModel,
-    effectiveProvider,
-    effectiveCatalog,
-    sending,
-    sessions,
-    activeSession,
-    codingTasks,
-    archivedIds,
-    projects,
-    visibleProjects,
-    projectsError,
-    selectedProjectId,
-    selectedProject,
-    projectDrafts,
-    projectActivity,
-    projectActivityError,
-    projectRightPane,
-    factoryRuns,
-    openStreamIdsByProject,
-    focusedStreamId,
-    connections,
-    worktrees,
-    stream,
-    activeEnvironmentId,
-    activeEnvironmentName,
-    settingsCategory,
-    settingsAutoOpenAddEnv,
-    creatingSession,
-    launchError,
-    draft,
-    attachments,
-    externalOpenRequest,
-    composerRef,
-    update,
+    screen, newSessionOpen, settings, resolved, settingsError, runtimeError, runtime, matchingRuntime,
+    providerName, selectedModel, effectiveProvider, effectiveCatalog, sending, sessions, activeSession,
+    codingTasks, archivedIds, projects, visibleProjects, projectsError, selectedProjectId, selectedProject,
+    projectDrafts, projectActivity, projectActivityError, projectRightPane, factoryRuns, openStreamIdsByProject,
+    focusedStreamId, connections, worktrees, stream, activeEnvironmentId, activeEnvironmentName, settingsCategory,
+    settingsAutoOpenAddEnv, creatingSession, launchError, draft, attachments, externalOpenRequest, composerRef, update,
   } = props
 
-  const resolvedKeybindings = resolveKeybindings(settings.keybindings)
+  const resolvedKeybindings = useMemo(() => resolveKeybindings(settings.keybindings), [settings.keybindings])
+  const activeProject = useMemo(
+    () => projects.find(p => p.id === activeSession.projectId),
+    [projects, activeSession.projectId],
+  )
+  const activeEntry = props.inboxEntries[activeSession.id]
+  const activeStateLabel = activeEntry && activeEntry.state !== "idle" && activeEntry.state !== "replied"
+    ? sessionStateInfo[activeEntry.state]
+    : undefined
 
   return (
     <div className="ade-main-column">
@@ -197,9 +149,7 @@ export function AppMainColumn(props: AppMainColumnProps) {
 
       {screen === "inbox" ? (
         <InboxView
-          sessions={sessions}
-          projects={projects}
-          entries={props.inboxEntries}
+          sessions={sessions} projects={projects} entries={props.inboxEntries}
           onOpenSession={props.onOpenSessionConversation}
           onOpenExternal={url => void stream.openExternalBrowser(url)}
           onArchive={props.onArchiveSession}
@@ -209,62 +159,37 @@ export function AppMainColumn(props: AppMainColumnProps) {
         />
       ) : screen === "settings" ? (
         <SettingsView
-          sessionLabels={Object.fromEntries(props.sessions.map(item => [item.id, item.label]))}
-          settings={settings}
-          resolved={resolved}
-          error={settingsError}
-          runtimeError={runtimeError}
-          runtime={runtime}
-          matchingRuntime={matchingRuntime}
-          providerName={providerName}
-          selectedModel={selectedModel}
-          selectedProvider={effectiveProvider}
-          modelCatalog={effectiveCatalog}
-          onModelsChanged={props.onModelsChanged}
-          sending={sending}
+          sessionLabels={Object.fromEntries(sessions.map(item => [item.id, item.label]))}
+          settings={settings} resolved={resolved} error={settingsError} runtimeError={runtimeError}
+          runtime={runtime} matchingRuntime={matchingRuntime} providerName={providerName}
+          selectedModel={selectedModel} selectedProvider={effectiveProvider} modelCatalog={effectiveCatalog}
+          onModelsChanged={props.onModelsChanged} sending={sending}
           credentialChangesBlocked={sessions.some(s => s.status === "working")}
-          connections={connections}
-          projects={projects}
-          activeEnvironmentName={activeEnvironmentName}
-          initialCategory={settingsCategory}
-          autoOpenAddEnvironment={settingsAutoOpenAddEnv}
-          update={update}
-          onBack={props.onBackFromSettings}
+          connections={connections} projects={projects} activeEnvironmentName={activeEnvironmentName}
+          initialCategory={settingsCategory} autoOpenAddEnvironment={settingsAutoOpenAddEnv}
+          update={update} onBack={props.onBackFromSettings}
           onOpenProjects={() => props.onOpenScreen("projects")}
           onWorktreeDiagnostics={() => props.onOpenScreen("worktrees")}
           onEnvironmentChanged={props.onEnvironmentChanged}
-          mcpServers={stream.mcpServers}
-          approvalPolicy={stream.approvalPolicy}
-          approvalRules={stream.approvalRules}
-          browserState={stream.browserState}
-          skillsCatalog={stream.skillsCatalog}
+          mcpServers={stream.mcpServers} approvalPolicy={stream.approvalPolicy} approvalRules={stream.approvalRules}
+          browserState={stream.browserState} skillsCatalog={stream.skillsCatalog}
           onRefreshMcp={() => void stream.refreshMcp()}
           onChangeApprovalPolicy={p => stream.setApprovalPolicy(p)}
-          onDeleteApprovalRule={stream.deleteApprovalRule}
-          onAddApprovalRule={stream.addApprovalRule}
+          onDeleteApprovalRule={stream.deleteApprovalRule} onAddApprovalRule={stream.addApprovalRule}
         />
       ) : screen === "factory" ? (
         <FactoryView
-          projects={projects}
-          selectedProjectId={selectedProjectId}
-          modelCatalog={effectiveCatalog}
-          githubLogin={connections.githubConnection?.login ?? null}
-          environmentId={activeEnvironmentId}
-          terminalFontSize={settings.terminalFontSize}
-          terminalScrollback={settings.terminalScrollback}
-          browserState={stream.browserState}
-          onSelectProject={props.onSelectProject}
-          onProjectSaved={props.onProjectSaved}
-          onBrowserStateChange={stream.setBrowserState}
+          projects={projects} selectedProjectId={selectedProjectId} modelCatalog={effectiveCatalog}
+          githubLogin={connections.githubConnection?.login ?? null} environmentId={activeEnvironmentId}
+          terminalFontSize={settings.terminalFontSize} terminalScrollback={settings.terminalScrollback}
+          browserState={stream.browserState} onSelectProject={props.onSelectProject}
+          onProjectSaved={props.onProjectSaved} onBrowserStateChange={stream.setBrowserState}
           onOpenExternal={stream.openExternalBrowser}
         />
       ) : screen === "attempts" && props.attemptsGroup ? (
         <AttemptsView
-          group={props.attemptsGroup}
-          sessions={sessions}
-          entries={props.inboxEntries}
-          onOpenSession={props.onOpenSessionConversation}
-          onArchive={props.onArchiveAttempt}
+          group={props.attemptsGroup} sessions={sessions} entries={props.inboxEntries}
+          onOpenSession={props.onOpenSessionConversation} onArchive={props.onArchiveAttempt}
           onBack={props.onBackFromAttempts}
         />
       ) : screen === "worktrees" ? (
@@ -277,13 +202,9 @@ export function AppMainColumn(props: AppMainColumnProps) {
             archivedSessions={codingTasks.filter(t => t.projectId === selectedProject.id && archivedIds.includes(t.id))}
             factoryRuns={factoryRuns.filter(r => r.run.projectId === selectedProject.id)}
             openStreamIds={openStreamIdsByProject[selectedProject.id] ?? []}
-            focusedStreamId={focusedStreamId}
-            activity={projectActivity}
-            activityError={projectActivityError}
-            filesOpen={projectRightPane === "files"}
-            settingsOpen={projectRightPane === "settings"}
-            onToggleFiles={props.onToggleProjectFiles}
-            onToggleSettings={props.onToggleProjectSettings}
+            focusedStreamId={focusedStreamId} activity={projectActivity} activityError={projectActivityError}
+            filesOpen={projectRightPane === "files"} settingsOpen={projectRightPane === "settings"}
+            onToggleFiles={props.onToggleProjectFiles} onToggleSettings={props.onToggleProjectSettings}
             onFocusStream={props.onFocusStream}
             onCloseStreamPane={streamId => props.onCloseStreamPane(selectedProject.id, streamId)}
             onOpenStreamPane={streamId => props.onOpenStreamPane(selectedProject.id, streamId)}
@@ -291,18 +212,13 @@ export function AppMainColumn(props: AppMainColumnProps) {
             onOpenStartedSession={async id => { await props.onReloadSessions(); props.onOpenSession(id) }}
             onMaximizeFactoryRun={() => { props.onSelectProject(selectedProject.id); props.onOpenScreen("factory") }}
             onQuickStartStream={async prompt => {
-              if (!prompt.trim()) {
-                props.onOpenNewSession(selectedProject.id)
-                return
-              }
+              if (!prompt.trim()) { props.onOpenNewSession(selectedProject.id); return }
               await props.onQuickStartStream(selectedProject, prompt)
             }}
             onSendQuickMessage={props.onSendQuickMessage}
             onStartFactoryRun={opts => props.onStartFactoryRun(selectedProject, opts)}
-            onFactoryRunAction={props.onFactoryRunAction}
-            onUnarchiveSession={props.onUnarchiveSession}
-            inboxEntries={props.inboxEntries}
-            onSessionContextMenu={props.onSessionContextMenu}
+            onFactoryRunAction={props.onFactoryRunAction} onUnarchiveSession={props.onUnarchiveSession}
+            inboxEntries={props.inboxEntries} onSessionContextMenu={props.onSessionContextMenu}
             onOpenExternal={url => void stream.openExternalBrowser(url)}
             onStartSessionFromIssue={async issue => {
               const kind = selectedProject.repository ? settings.defaultWorkspaceKind : "none"
@@ -320,113 +236,29 @@ export function AppMainColumn(props: AppMainColumnProps) {
               props.onOpenExternalRequest({ id: `subagent:${agent.id}`, kind: "subagent", title: agent.name, subagentId: agent.id })
             }}
           />
-          {projectRightPane ? (
-            <PaneResizer
-              width={projectPaneWidth}
-              min={260}
-              max={760}
-              standard={PROJECT_PANE_STANDARD}
-              paneRef={projectPaneRef}
-              label="Resize the project panel"
-              onChange={width => {
-                setProjectPaneWidth(width)
-                try { localStorage.setItem("ade.project-pane-width", String(width)) } catch { /* private mode */ }
-              }}
-            />
-          ) : null}
-          <aside
-            ref={projectRightPane !== "settings" ? projectPaneRef : undefined}
-            style={{ width: projectPaneWidth }}
-            id="project-files-panel"
-            className="inspector ade-project-files-inspector"
-            aria-label={projectRightPane === "artifacts" ? "Project artefacts" : "Project files"}
-            hidden={projectRightPane !== "files" && projectRightPane !== "artifacts"}
-          >
-            <div className="ade-project-right-head">
-              <div className="ade-project-right-tabs" role="tablist" aria-label="Right panel view">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={projectRightPane === "files"}
-                  className={`ade-project-right-tab ${projectRightPane === "files" ? "is-active" : ""}`}
-                  onClick={() => props.onSetProjectRightPane("files")}
-                >
-                  <FolderTree className="size-3.5" /> Files
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={projectRightPane === "artifacts"}
-                  className={`ade-project-right-tab ${projectRightPane === "artifacts" ? "is-active" : ""}`}
-                  onClick={() => props.onSetProjectRightPane("artifacts")}
-                >
-                  <Layers className="size-3.5" /> Artefacts
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={false}
-                  className="ade-project-right-tab"
-                  onClick={() => props.onSetProjectRightPane("settings")}
-                >
-                  <Settings2 className="size-3.5" /> Settings
-                </button>
-              </div>
-              <button
-                type="button"
-                className="ade-icon-btn"
-                aria-label="Close right panel"
-                title="Close panel"
-                onClick={props.onCloseProjectSettings}
-              >
-                <PanelRight className="size-4" />
-              </button>
-            </div>
-            {projectRightPane === "artifacts" ? (
-              <ArtefactsBrowserPanel
-                key={`proj-artefacts:${selectedProject.id}`}
-                scope="project"
-                projectId={selectedProject.id}
-                workspacePath={selectedProject.repository ?? null}
-                onOpenSession={id => { props.onClearUnread(id); props.onOpenSession(id) }}
-              />
-            ) : (
-              <FilesPanel
-                key={selectedProject.id}
-                projectId={selectedProject.id}
-                workspacePath={selectedProject.repository ?? null}
-                onOpenSettings={() => props.onSetProjectRightPane("settings")}
-              />
-            )}
-          </aside>
-          <ProjectSettings
-            key={selectedProject.id}
-            width={projectPaneWidth}
-            paneRef={projectRightPane === "settings" ? projectPaneRef : undefined}
+          <ProjectRightInspector
             project={selectedProject}
-            environmentName={activeEnvironmentName}
+            pane={projectRightPane}
+            activeEnvironmentName={activeEnvironmentName}
             initialDraft={projectDrafts[selectedProject.id]}
-            open={projectRightPane === "settings"}
             githubConnection={connections.githubConnection}
             githubStatusError={connections.githubStatusError}
-            onOpenSettings={draftInput => {
+            onSetPane={props.onSetProjectRightPane}
+            onClose={props.onCloseProjectSettings}
+            onClearUnread={props.onClearUnread}
+            onOpenSession={props.onOpenSession}
+            onOpenGitHubSettings={draftInput => {
               props.onSetProjectDraft(selectedProject.id, draftInput)
               props.onOpenSettingsSection("github", false)
             }}
-            onSearchRepositories={searchGitHubRepositories}
-            onClose={props.onCloseProjectSettings}
-            onSave={input => props.onSaveProject(input, selectedProject.id)}
+            onSaveProject={input => props.onSaveProject(input, selectedProject.id)}
           />
         </div>
       ) : screen === "projects" ? (
         <div className="flex flex-1 min-h-0 overflow-hidden">
           <ProjectsView
-            projects={visibleProjects}
-            project={null}
-            features={[]}
-            error={projectsError}
-            activity={null}
-            activityError=""
+            projects={visibleProjects} project={null} features={[]} error={projectsError}
+            activity={null} activityError=""
             onSelect={id => props.onOpenProject(id, false)}
             onBack={() => { props.onSelectProject(null); props.onOpenScreen("projects") }}
             onOpenFeature={props.onOpenSession}
@@ -438,33 +270,21 @@ export function AppMainColumn(props: AppMainColumnProps) {
         </div>
       ) : newSessionOpen ? (
         <NewSessionView
-          initialIssue={props.newSessionIssue ?? null}
-          projects={visibleProjects}
-          selectedProjectId={selectedProjectId}
-          onSelectProject={props.onSelectProject}
+          initialIssue={props.newSessionIssue ?? null} projects={visibleProjects}
+          selectedProjectId={selectedProjectId} onSelectProject={props.onSelectProject}
           onAddProject={props.onOpenAddProject}
           onConfigureProject={projectId => props.onOpenProject(projectId, true)}
           onOpenEnvironmentPalette={props.onOpenEnvironmentPalette}
-          environmentName={activeEnvironmentName}
-          keybindings={resolvedKeybindings}
-          modelCatalog={effectiveCatalog}
-          selectedProvider={effectiveProvider}
-          selectedModel={selectedModel}
+          environmentName={activeEnvironmentName} keybindings={resolvedKeybindings}
+          modelCatalog={effectiveCatalog} selectedProvider={effectiveProvider} selectedModel={selectedModel}
           onSelectModel={(provider, id) => update({ provider, model: id })}
-          reasoning={settings.reasoning}
-          onSelectReasoning={level => update({ reasoning: level })}
-          approvalPolicy={stream.approvalPolicy}
-          onChangeApprovalPolicy={p => void stream.setApprovalPolicy(p)}
-          skillsCatalog={stream.skillsCatalog}
-          onOpenSettings={() => props.onOpenSettingsSection("models")}
-          starting={creatingSession}
-          error={launchError}
-          onStart={props.onStartNewSession}
+          reasoning={settings.reasoning} onSelectReasoning={level => update({ reasoning: level })}
+          approvalPolicy={stream.approvalPolicy} onChangeApprovalPolicy={p => void stream.setApprovalPolicy(p)}
+          skillsCatalog={stream.skillsCatalog} onOpenSettings={() => props.onOpenSettingsSection("models")}
+          starting={creatingSession} error={launchError} onStart={props.onStartNewSession}
           onLookupIssue={async (projectId, url) => {
             const res = await request<{ issue: GitHubIssue }>("/api/github/issues/lookup", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ projectId, url }),
+              method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectId, url }),
             })
             return res.issue
           }}
@@ -473,61 +293,35 @@ export function AppMainColumn(props: AppMainColumnProps) {
         <SplitWorkspace
           onStartFromIssue={issue => props.onOpenNewSession(activeSession.projectId ?? undefined, issue)}
           session={activeSession}
-          projectName={projects.find(p => p.id === activeSession.projectId)?.name}
-          blueprintLocked={Boolean(projects.find(p => p.id === activeSession.projectId)?.blueprintLocked)}
+          projectName={activeProject?.name}
+          blueprintLocked={Boolean(activeProject?.blueprintLocked)}
           onOpenProject={activeSession.projectId ? () => props.onOpenProject(activeSession.projectId!, false) : undefined}
           onOpenProjectSettings={activeSession.projectId ? () => props.onOpenProject(activeSession.projectId!, true) : undefined}
-          stateLabel={(() => {
-            const entry = props.inboxEntries[activeSession.id]
-            return entry && entry.state !== "idle" && entry.state !== "replied" ? sessionStateInfo[entry.state] : undefined
-          })()}
-          timeline={stream.timeline}
-          subagentTimelines={stream.subagentTimelines}
-          subagents={stream.subagents}
-          approvals={stream.approvals}
-          approvalPolicy={stream.approvalPolicy}
-          processes={stream.processes}
-          gitSummary={stream.gitSummary}
-          artifacts={stream.artifacts}
-          tasks={stream.tasks}
-          skillsCatalog={stream.skillsCatalog}
-          browserState={stream.browserState}
-          onBrowserStateChange={stream.setBrowserState}
-          modelCatalog={effectiveCatalog}
-          selectedProvider={effectiveProvider}
-          selectedModel={selectedModel}
+          stateLabel={activeStateLabel}
+          timeline={stream.timeline} subagentTimelines={stream.subagentTimelines} subagents={stream.subagents}
+          approvals={stream.approvals} approvalPolicy={stream.approvalPolicy} processes={stream.processes}
+          gitSummary={stream.gitSummary} artifacts={stream.artifacts} tasks={stream.tasks}
+          skillsCatalog={stream.skillsCatalog} browserState={stream.browserState}
+          onBrowserStateChange={stream.setBrowserState} modelCatalog={effectiveCatalog}
+          selectedProvider={effectiveProvider} selectedModel={selectedModel}
           onSelectModel={(provider, id) => update({ provider, model: id })}
-          reasoning={settings.reasoning}
-          onSelectReasoning={level => update({ reasoning: level })}
+          reasoning={settings.reasoning} onSelectReasoning={level => update({ reasoning: level })}
           onOpenSettings={() => props.onOpenSettingsSection("models")}
-          draft={draft}
-          onDraftChange={props.onDraftChange}
-          attachments={attachments}
-          onAttachFiles={props.onAttachFiles}
-          onRemoveAttachment={props.onRemoveAttachment}
-          onSendMessage={props.onSendMessage}
-          onAskAgent={props.onAskAgent}
-          onOpenAttempts={props.onOpenAttempts}
-          onSteerSession={props.onSteerSession}
-          onAbortSession={props.onAbortSession}
-          onCompactSession={props.onCompactSession}
-          onResolveApproval={stream.resolveApproval}
+          draft={draft} onDraftChange={props.onDraftChange} attachments={attachments}
+          onAttachFiles={props.onAttachFiles} onRemoveAttachment={props.onRemoveAttachment}
+          onSendMessage={props.onSendMessage} onAskAgent={props.onAskAgent} onOpenAttempts={props.onOpenAttempts}
+          onSteerSession={props.onSteerSession} onAbortSession={props.onAbortSession}
+          onCompactSession={props.onCompactSession} onResolveApproval={stream.resolveApproval}
           onChangeApprovalPolicy={p => void stream.setApprovalPolicy(p, activeSession.id)}
           onKillProcess={stream.killProcess}
           onRefreshProcesses={() => void stream.refreshProcesses(activeSession.id)}
           onRefreshGit={() => void stream.refreshGit(activeSession.id)}
-          onMessageSubagent={stream.messageSubagent}
-          onStopSubagent={stream.stopSubagent}
-          onOpenExternalBrowser={stream.openExternalBrowser}
-          onReviewArtifact={props.onReviewArtifact}
-          terminalFontSize={settings.terminalFontSize}
-          terminalScrollback={settings.terminalScrollback}
-          terminalAutoStart={settings.terminalAutoStart}
-          prDraftDefault={settings.prDraft}
-          environmentId={activeEnvironmentId}
-          externalOpenRequest={externalOpenRequest}
-          onClearExternalOpenRequest={props.onClearExternalOpenRequest}
-          textareaRef={composerRef}
+          onMessageSubagent={stream.messageSubagent} onStopSubagent={stream.stopSubagent}
+          onOpenExternalBrowser={stream.openExternalBrowser} onReviewArtifact={props.onReviewArtifact}
+          terminalFontSize={settings.terminalFontSize} terminalScrollback={settings.terminalScrollback}
+          terminalAutoStart={settings.terminalAutoStart} prDraftDefault={settings.prDraft}
+          environmentId={activeEnvironmentId} externalOpenRequest={externalOpenRequest}
+          onClearExternalOpenRequest={props.onClearExternalOpenRequest} textareaRef={composerRef}
           keybindings={resolvedKeybindings}
         />
       )}

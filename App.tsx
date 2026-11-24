@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type {
   GitHubIssue, Conversation, Screen, SessionArtifact, WorkspaceTab } from "./app-types"
 import type { SettingsCategory } from "./SettingsView"
+import { ConfirmProvider } from "./components/ui/index.ts"
 import { useConnections } from "./useConnections"
 import { useSettings } from "./useSettings"
 import { useWorktrees } from "./useWorktrees"
 import { EventStreamProvider } from "./src/hooks/EventStreamContext"
 import { useEventStream } from "./src/hooks/useEventStream"
 import { useEnvironments } from "./src/hooks/useEnvironments"
+import { useGlobalKeybindings } from "./src/hooks/useGlobalKeybindings"
 import { useModelSelection } from "./src/hooks/useModelSelection"
 import { useProjects } from "./src/hooks/useProjects"
 import { useRuntimeStream } from "./src/hooks/useRuntimeStream"
@@ -19,7 +21,7 @@ import type { ContextMenuTarget } from "./src/sidebar/SidebarContextMenu"
 import { AppMainColumn } from "./src/layout/AppMainColumn"
 import { AppOverlays } from "./src/layout/AppOverlays"
 import type { AddProjectSource } from "./src/projects/AddProjectWizard"
-import { isEditableTarget, matchesChord, resolveKeybindings } from "./src/keybindings"
+import { resolveKeybindings } from "./src/keybindings"
 import { MobileAuthGate, type MobileSessionState } from "./src/mobile/MobileAuthGate"
 import { MobileAppShell } from "./src/mobile/MobileAppShell"
 import { useIsMobile } from "./src/mobile/useIsMobile"
@@ -38,11 +40,14 @@ function readLastView(): LastView {
     return {}
   }
 }
+
 export default function App() {
   return (
-    <EventStreamProvider>
-      <AppInner />
-    </EventStreamProvider>
+    <ConfirmProvider>
+      <EventStreamProvider>
+        <AppInner />
+      </EventStreamProvider>
+    </ConfirmProvider>
   )
 }
 
@@ -158,6 +163,12 @@ function AppInner() {
     setExpandedProjects(prev => (prev.includes(projectId) ? prev : [...prev, projectId]))
   }, [])
 
+  const handleSessionArchived = useCallback(() => setActiveSessionId("coding"), [])
+  const handleProjectArchived = useCallback(() => {
+    setSelectedProjectId(null)
+    setScreen("work")
+  }, [])
+
   const sess = useSessions({
     activeSessionId,
     selectedProjectId,
@@ -171,8 +182,8 @@ function AppInner() {
     modelSetupMessage: model.modelSetupMessage,
     onLoadProjects: proj.loadProjects,
     onOpenSession: openSessionInWork,
-    onSessionArchived: () => setActiveSessionId("coding"),
-    onProjectArchived: () => { setSelectedProjectId(null); setScreen("work") },
+    onSessionArchived: handleSessionArchived,
+    onProjectArchived: handleProjectArchived,
     onExpandProject: expandProject,
     onOpenAttempts: openAttempts,
     onOpenStreamPane: proj.openStreamPane,
@@ -191,16 +202,17 @@ function AppInner() {
 
   const inbox = useInbox(sess.sessions)
   const markSeen = inbox.markSeen
+  const clearUnread = sess.clearUnread
   /** Open any session or chat in the session view (marks it seen in the Inbox). */
   const openSession = useCallback((target: Conversation) => {
-    sess.clearUnread(target.id)
+    clearUnread(target.id)
     void markSeen(target.id)
     if (target.projectId) {
       setSelectedProjectId(target.projectId)
       expandProject(target.projectId)
     }
     openSessionInWork(target.id)
-  }, [sess, markSeen, expandProject, openSessionInWork])
+  }, [clearUnread, markSeen, expandProject, openSessionInWork])
 
   // The session on screen counts as seen, including when its state changes while you watch it.
   const activeEntry = inbox.entries[activeSessionId]
@@ -230,98 +242,43 @@ function AppInner() {
     }
   }, [settings.restoreLastView, screen, activeSessionId, selectedProjectId, expandedProjects])
 
-  const keybindings = resolveKeybindings(settings.keybindings)
+  const keybindings = useMemo(() => resolveKeybindings(settings.keybindings), [settings.keybindings])
 
-  // Dynamic global keyboard shortcuts (built-in + user-defined custom keybindings).
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return
-      const editing = isEditableTarget(e.target)
-      const hasModifier = e.metaKey || e.ctrlKey || e.altKey
-
-      if (matchesChord(e, keybindings.commandCenter)) {
-        e.preventDefault()
-        setCommandOpen(v => !v)
-        return
-      }
-      if (matchesChord(e, keybindings.focusComposer)) {
-        e.preventDefault()
-        composerRef.current?.focus()
-        return
-      }
-      if (matchesChord(e, keybindings.addProject)) {
-        e.preventDefault()
-        setAddProjectInitialSource("menu")
-        setAddProjectOpen(true)
-        return
-      }
-      if (!e.shiftKey && !e.altKey && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
-        e.preventDefault()
-        setCreateWorktreeOpen(true)
-        return
-      }
-      if (matchesChord(e, keybindings.openInbox)) {
-        e.preventDefault()
-        setScreen("inbox")
-        return
-      }
-      if (matchesChord(e, keybindings.switchEnvironment)) {
-        e.preventDefault()
-        setEnvPaletteOpen(v => !v)
-        return
-      }
-      if (matchesChord(e, keybindings.openSettings)) {
-        e.preventDefault()
-        setScreen(prev => {
-          if (prev === "settings") return previousScreen.current === "settings" ? "work" : previousScreen.current
-          previousScreen.current = prev
-          return "settings"
-        })
-        return
-      }
-      if (matchesChord(e, keybindings.pinSession)) {
-        e.preventDefault()
-        if (screen === "project" && selectedProjectId) {
-          sess.togglePin(`project:${selectedProjectId}`)
-        } else if (sess.activeSession?.id) {
-          sess.togglePin(sess.activeSession.id)
-        }
-        return
-      }
-
-      // User-defined custom shortcuts
-      for (const custom of settings.customKeybindings) {
-        if (!custom.chord) continue
-        if (editing && !hasModifier) continue
-        if (!matchesChord(e, custom.chord)) continue
-        e.preventDefault()
-        if (custom.action === "new-session") {
-          setNewSessionOpen(true)
-          setScreen("work")
-        } else if (custom.action === "new-chat") {
-          void sess.createChatThread("coding")
-        } else if (custom.action === "toggle-theme") {
-          update({ theme: resolved === "dark" ? "light" : "dark" })
-        } else if (custom.action === "slash") {
-          const cmd = (custom.arg || "/plan").trim()
-          if (cmd) {
-            setNewSessionOpen(false)
-            setScreen("work")
-            void sess.sendMessage(cmd, id => void stream.refreshTimeline(id))
-          }
-        } else if (custom.action.startsWith("panel:")) {
-          const kind = custom.action.slice("panel:".length) as WorkspaceTab["kind"]
-          const title = kind === "pr" ? "Pull Request" : kind[0].toUpperCase() + kind.slice(1)
-          setNewSessionOpen(false)
-          setScreen("work")
-          setExternalOpenRequest({ id: kind, kind, title })
-        }
-        return
-      }
-    }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [keybindings, settings.customKeybindings, screen, selectedProjectId, sess, stream, resolved, update])
+  useGlobalKeybindings({
+    keybindings,
+    customKeybindings: settings.customKeybindings,
+    screen,
+    selectedProjectId,
+    activeSessionId: sess.activeSession?.id,
+    resolvedTheme: resolved,
+    onToggleCommandCenter: () => setCommandOpen(v => !v),
+    onFocusComposer: () => composerRef.current?.focus(),
+    onOpenAddProject: () => { setAddProjectInitialSource("menu"); setAddProjectOpen(true) },
+    onOpenCreateWorktree: () => setCreateWorktreeOpen(true),
+    onOpenInbox: () => setScreen("inbox"),
+    onToggleEnvironmentPalette: () => setEnvPaletteOpen(v => !v),
+    onToggleSettings: () => {
+      setScreen(prev => {
+        if (prev === "settings") return previousScreen.current === "settings" ? "work" : previousScreen.current
+        previousScreen.current = prev
+        return "settings"
+      })
+    },
+    onTogglePin: sess.togglePin,
+    onNewSession: () => { setNewSessionOpen(true); setScreen("work") },
+    onNewChat: () => void sess.createChatThread("coding"),
+    onToggleTheme: next => update({ theme: next }),
+    onRunSlashCommand: cmd => {
+      setNewSessionOpen(false)
+      setScreen("work")
+      void sess.sendMessage(cmd, id => void stream.refreshTimeline(id))
+    },
+    onOpenPanel: tab => {
+      setNewSessionOpen(false)
+      setScreen("work")
+      setExternalOpenRequest(tab)
+    },
+  })
 
   const openSettingsSection = useCallback((category: SettingsCategory, autoOpenAdd = false) => {
     previousScreen.current = screen
@@ -330,15 +287,16 @@ function AppInner() {
     setScreen("settings")
   }, [screen])
 
+  const setProjectsError = proj.setProjectsError
   const openProject = useCallback((projectId: string, openSettings = false) => {
-    proj.setProjectsError("")
+    setProjectsError("")
     setSelectedProjectId(projectId)
     expandProject(projectId)
     setProjectRightPane(openSettings ? "settings" : "files")
     setScreen("project")
-  }, [proj, expandProject])
+  }, [setProjectsError, expandProject])
 
-  const handleReviewArtifact = async (artifact: SessionArtifact, decision: "approved" | "changes_requested", feedback?: string) => {
+  const handleReviewArtifact = useCallback(async (artifact: SessionArtifact, decision: "approved" | "changes_requested", feedback?: string) => {
     await stream.reviewArtifact(artifact.id, decision, feedback)
     const msg = decision === "approved"
       ? `I have approved the artifact "${artifact.title}". Please proceed with the implementation.`
@@ -348,36 +306,135 @@ function AppInner() {
     } else {
       await sess.sendMessage(msg, id => void stream.refreshTimeline(id))
     }
-  }
+  }, [stream, sess])
 
-  const sortPinnedFirst = (list: Conversation[]) =>
-    [...list].sort((a, b) => Number(sess.pinnedIds.includes(b.id)) - Number(sess.pinnedIds.includes(a.id)))
+  // Memoized derived sidebar & project selectors so unrelated state changes don't rebuild lists
+  const visibleProjects = useMemo(() => {
+    const archivedSet = new Set(sess.archivedIds)
+    return proj.projects
+      .filter(p => !archivedSet.has(`project:${p.id}`))
+      .sort((a, b) => {
+        const aIdx = sess.pinnedIds.indexOf(`project:${a.id}`)
+        const bIdx = sess.pinnedIds.indexOf(`project:${b.id}`)
+        const aPinned = aIdx !== -1
+        const bPinned = bIdx !== -1
+        if (aPinned && bPinned) return aIdx - bIdx
+        if (aPinned) return -1
+        if (bPinned) return 1
+        return 0
+      })
+  }, [proj.projects, sess.archivedIds, sess.pinnedIds])
 
-  const visibleProjects = [...proj.projects.filter(p => !sess.archivedIds.includes(`project:${p.id}`))].sort((a, b) => {
-    const aIdx = sess.pinnedIds.indexOf(`project:${a.id}`)
-    const bIdx = sess.pinnedIds.indexOf(`project:${b.id}`)
-    const aPinned = aIdx !== -1
-    const bPinned = bIdx !== -1
-    if (aPinned && bPinned) return aIdx - bIdx
-    if (aPinned) return -1
-    if (bPinned) return 1
-    return 0
-  })
-  const codingTasks = sess.sessions.filter(s => s.id !== "coding" && s.id !== "personal" && !s.chatThread)
-  const personalChats = sortPinnedFirst(sess.sessions.filter(s => s.mode === "personal" && !sess.archivedIds.includes(s.id)))
-  const generalChats = sortPinnedFirst(sess.sessions.filter(s => (s.id === "coding" || (s.chatThread && s.mode === "coding")) && !sess.archivedIds.includes(s.id)))
-  const archivedProjects = proj.projects.filter(p => p.archivedAt)
-  const archivedSessions = sess.sessions.filter(s => s.archivedAt)
-  const ungroupedTasks = sortPinnedFirst(codingTasks.filter(s => !s.projectId && !sess.archivedIds.includes(s.id)))
-  const selectedProject = proj.projects.find(p => p.id === selectedProjectId) ?? null
-  const inboxCount = Object.values(inbox.entries).filter(entry => entry.needsYou && !sess.archivedIds.includes(entry.sessionId)).length
-  const sidebarSelection: SidebarSelection =
-    screen === "inbox" ? { kind: "inbox" }
-      : screen === "settings" ? { kind: "settings" }
-        : screen === "project" && selectedProjectId ? { kind: "project", projectId: selectedProjectId }
-          : screen === "work" && newSessionOpen ? { kind: "new-session" }
-            : screen === "work" ? { kind: "session", sessionId: sess.activeSession.id }
-              : { kind: "other" }
+  const codingTasks = useMemo(
+    () => sess.sessions.filter(s => s.id !== "coding" && s.id !== "personal" && !s.chatThread),
+    [sess.sessions],
+  )
+
+  const sidebarChats = useMemo(() => {
+    const archivedSet = new Set(sess.archivedIds)
+    const pinnedSet = new Set(sess.pinnedIds)
+    const sortPinned = (list: Conversation[]) =>
+      list.sort((a, b) => Number(pinnedSet.has(b.id)) - Number(pinnedSet.has(a.id)))
+    const general = sortPinned(
+      sess.sessions.filter(s => (s.id === "coding" || (s.chatThread && s.mode === "coding")) && !archivedSet.has(s.id)),
+    )
+    const personal = sortPinned(
+      sess.sessions.filter(s => s.mode === "personal" && !archivedSet.has(s.id)),
+    )
+    return [...general, ...personal]
+  }, [sess.sessions, sess.archivedIds, sess.pinnedIds])
+
+  const archivedProjects = useMemo(() => proj.projects.filter(p => p.archivedAt), [proj.projects])
+  const archivedSessions = useMemo(() => sess.sessions.filter(s => s.archivedAt), [sess.sessions])
+
+  const ungroupedTasks = useMemo(() => {
+    const archivedSet = new Set(sess.archivedIds)
+    const pinnedSet = new Set(sess.pinnedIds)
+    return codingTasks
+      .filter(s => !s.projectId && !archivedSet.has(s.id))
+      .sort((a, b) => Number(pinnedSet.has(b.id)) - Number(pinnedSet.has(a.id)))
+  }, [codingTasks, sess.archivedIds, sess.pinnedIds])
+
+  const selectedProject = useMemo(
+    () => proj.projects.find(p => p.id === selectedProjectId) ?? null,
+    [proj.projects, selectedProjectId],
+  )
+
+  const inboxCount = useMemo(() => {
+    const archivedSet = new Set(sess.archivedIds)
+    return Object.values(inbox.entries).filter(entry => entry.needsYou && !archivedSet.has(entry.sessionId)).length
+  }, [inbox.entries, sess.archivedIds])
+
+  const sidebarSelection = useMemo<SidebarSelection>(
+    () =>
+      screen === "inbox" ? { kind: "inbox" }
+        : screen === "settings" ? { kind: "settings" }
+          : screen === "project" && selectedProjectId ? { kind: "project", projectId: selectedProjectId }
+            : screen === "work" && newSessionOpen ? { kind: "new-session" }
+              : screen === "work" ? { kind: "session", sessionId: sess.activeSession.id }
+                : { kind: "other" },
+    [screen, selectedProjectId, newSessionOpen, sess.activeSession.id],
+  )
+
+  // Stable callbacks for React.memo(AppSidebar)
+  const handleCancelRename = useCallback(() => setRenamingId(null), [])
+  const renameSession = sess.renameSession
+  const handleSubmitRename = useCallback(async (s: Conversation) => {
+    setRenamingId(null)
+    await renameSession(s, renameText)
+  }, [renameSession, renameText])
+  const handleOpenNewSession = useCallback((projectId?: string, issue?: GitHubIssue) => {
+    if (projectId) setSelectedProjectId(projectId)
+    setNewSessionIssue(issue ?? null)
+    setNewSessionOpen(true)
+    setScreen("work")
+  }, [])
+  const handleOpenCreateWorktree = useCallback(() => setCreateWorktreeOpen(true), [])
+  const handleOpenCommandCenter = useCallback(() => setCommandOpen(true), [])
+  const handleOpenInbox = useCallback(() => setScreen("inbox"), [])
+  const handleOpenAddProject = useCallback((src?: AddProjectSource) => {
+    setAddProjectInitialSource(src ?? "menu")
+    setAddProjectOpen(true)
+  }, [])
+  const markAllRead = sess.markAllRead
+  const handleMarkAllRead = useCallback(() => {
+    markAllRead()
+    for (const entry of Object.values(inbox.entries)) {
+      if (entry.needsYou) void markSeen(entry.sessionId)
+    }
+  }, [markAllRead, inbox.entries, markSeen])
+  const toggleArchive = sess.toggleArchive
+  const handleClearCompleted = useCallback(() => {
+    const archivedSet = new Set(sess.archivedIds)
+    const idleTasks = codingTasks.filter(s => s.status !== "working" && !archivedSet.has(s.id))
+    for (const t of idleTasks) void toggleArchive(t.id, false)
+  }, [codingTasks, sess.archivedIds, toggleArchive])
+  const handleOpenProjectSidebar = useCallback((projectId: string) => openProject(projectId, false), [openProject])
+  const handleToggleExpandProject = useCallback((id: string) => {
+    setExpandedProjects(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]))
+  }, [])
+  const openStreamPane = proj.openStreamPane
+  const handleOpenFactoryRun = useCallback((projectId: string, runId: string) => {
+    setSelectedProjectId(projectId)
+    openStreamPane(projectId, `factory:${runId}`)
+    setScreen("project")
+  }, [openStreamPane])
+  const createChatThread = sess.createChatThread
+  const handleCreateChatThread = useCallback((mode: "coding" | "personal") => {
+    void createChatThread(mode)
+  }, [createChatThread])
+  const handleToggleArchive = useCallback((id: string, archivedNow?: boolean) => {
+    void toggleArchive(id, archivedNow)
+  }, [toggleArchive])
+  const handleOpenSettings = useCallback(() => {
+    previousScreen.current = screen
+    setScreen("settings")
+  }, [screen])
+  const handleOpenMobilePairing = useMemo(
+    () => (mobileSession?.mobileBridge ? undefined : () => openSettingsSection("mobile", false)),
+    [mobileSession?.mobileBridge, openSettingsSection],
+  )
+  const handleOpenEnvPalette = useCallback(() => setEnvPaletteOpen(true), [])
 
   if (mobileSession?.mobileBridge && !mobileSession.paired) {
     return (
@@ -445,7 +502,7 @@ function AppInner() {
           onReviewArtifact={handleReviewArtifact}
           onRefreshGit={() => void stream.refreshGit(sess.activeSession.id)}
           onRefreshSessions={sess.loadSessions}
-          onCreateChatThread={mode => void sess.createChatThread(mode)}
+          onCreateChatThread={handleCreateChatThread}
           onStartNewSession={sess.startNewSession}
           onOpenExternalBrowser={url => void stream.openExternalBrowser(url)}
         />
@@ -469,7 +526,7 @@ function AppInner() {
           visibleProjects={visibleProjects}
           codingTasks={codingTasks}
           ungroupedTasks={ungroupedTasks}
-          chats={[...generalChats, ...personalChats]}
+          chats={sidebarChats}
           archivedProjects={archivedProjects}
           archivedSessions={archivedSessions}
           archivedIds={sess.archivedIds}
@@ -485,37 +542,25 @@ function AppInner() {
           renamingId={renamingId}
           renameText={renameText}
           onChangeRenameText={setRenameText}
-          onCancelRename={() => setRenamingId(null)}
-          onSubmitRename={async s => { setRenamingId(null); await sess.renameSession(s, renameText) }}
-          onOpenNewSession={(projectId?: string, issue?: GitHubIssue) => { if (projectId) setSelectedProjectId(projectId); setNewSessionIssue(issue ?? null); setNewSessionOpen(true); setScreen("work") }}
-          onOpenCreateWorktree={() => setCreateWorktreeOpen(true)}
-          onOpenCommandCenter={() => setCommandOpen(true)}
-          onOpenInbox={() => setScreen("inbox")}
-          onOpenAddProject={src => { setAddProjectInitialSource(src ?? "menu"); setAddProjectOpen(true) }}
-          onMarkAllRead={() => {
-            sess.markAllRead()
-            for (const entry of Object.values(inbox.entries)) {
-              if (entry.needsYou) void markSeen(entry.sessionId)
-            }
-          }}
-          onClearCompleted={() => {
-            const idleTasks = codingTasks.filter(s => s.status !== "working" && !sess.archivedIds.includes(s.id))
-            for (const t of idleTasks) void sess.toggleArchive(t.id, false)
-          }}
-          onOpenProject={projectId => openProject(projectId, false)}
-          onToggleExpandProject={id => setExpandedProjects(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]))}
+          onCancelRename={handleCancelRename}
+          onSubmitRename={handleSubmitRename}
+          onOpenNewSession={handleOpenNewSession}
+          onOpenCreateWorktree={handleOpenCreateWorktree}
+          onOpenCommandCenter={handleOpenCommandCenter}
+          onOpenInbox={handleOpenInbox}
+          onOpenAddProject={handleOpenAddProject}
+          onMarkAllRead={handleMarkAllRead}
+          onClearCompleted={handleClearCompleted}
+          onOpenProject={handleOpenProjectSidebar}
+          onToggleExpandProject={handleToggleExpandProject}
           onOpenSession={openSession}
-          onOpenFactoryRun={(projectId, runId) => {
-            setSelectedProjectId(projectId)
-            proj.openStreamPane(projectId, `factory:${runId}`)
-            setScreen("project")
-          }}
-          onCreateChatThread={mode => void sess.createChatThread(mode)}
-          onToggleArchive={(id, archivedNow) => void sess.toggleArchive(id, archivedNow)}
+          onOpenFactoryRun={handleOpenFactoryRun}
+          onCreateChatThread={handleCreateChatThread}
+          onToggleArchive={handleToggleArchive}
           onOpenContextMenu={setContextMenu}
-          onOpenSettings={() => { previousScreen.current = screen; setScreen("settings") }}
-          onOpenMobilePairing={mobileSession?.mobileBridge ? undefined : () => openSettingsSection("mobile", false)}
-          onOpenEnvironmentPalette={() => setEnvPaletteOpen(true)}
+          onOpenSettings={handleOpenSettings}
+          onOpenMobilePairing={handleOpenMobilePairing}
+          onOpenEnvironmentPalette={handleOpenEnvPalette}
         />
       )}
 
@@ -583,9 +628,9 @@ function AppInner() {
         onOpenStreamPane={proj.openStreamPane}
         onOpenSession={openSessionInWork}
         onClearUnread={sess.clearUnread}
-        onOpenNewSession={(projectId?: string, issue?: GitHubIssue) => { if (projectId) setSelectedProjectId(projectId); setNewSessionIssue(issue ?? null); setNewSessionOpen(true); setScreen("work") }}
+        onOpenNewSession={handleOpenNewSession}
         onOpenAddProject={() => setAddProjectOpen(true)}
-        onOpenEnvironmentPalette={() => setEnvPaletteOpen(true)}
+        onOpenEnvironmentPalette={handleOpenEnvPalette}
         newSessionIssue={newSessionIssue}
         onQuickStartStream={sess.quickStartStream}
         onSendQuickMessage={sess.sendQuickStreamMessage}
@@ -651,7 +696,7 @@ function AppInner() {
         onNewSession={projectId => { if (projectId) setSelectedProjectId(projectId); setNewSessionOpen(true); setScreen("work") }}
         onOpenPanel={tab => { setNewSessionOpen(false); setScreen("work"); setExternalOpenRequest(tab) }}
         onOpenExternalBrowser={url => void stream.openExternalBrowser(url)}
-        onOpenSettings={() => { previousScreen.current = screen; setScreen("settings") }}
+        onOpenSettings={handleOpenSettings}
         onOpenSettingsSection={openSettingsSection}
         onProjectCreated={(saved, opts) => { proj.upsertProject(saved); openProject(saved.id, Boolean(opts?.openSettings)) }}
         onSelectEnvironment={env.selectEnvironment}

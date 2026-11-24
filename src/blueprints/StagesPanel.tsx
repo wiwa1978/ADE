@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Check, CircleDashed, CircleSlash, Eye, Loader2, PauseCircle, RotateCcw, Users, XCircle } from "lucide-react"
 import { request } from "../../api"
+import { useConfirm } from "../../components/ui/index.ts"
 import { shortBlueprintName, useBlueprintOptions, VIBE_ID } from "./blueprint-options"
 import { stageStatusLabel, type SessionStages, type StageStatus, type StageView } from "./session-stages"
 
@@ -144,16 +145,28 @@ export function WayOfWorkingSelect({ sessionId, current, currentName, locked, bu
   busy: boolean
   onChanged: (next: SessionStages) => void
 }) {
+  const { confirm } = useConfirm()
   const options = useBlueprintOptions()
   const [switching, setSwitching] = useState(false)
   const [error, setError] = useState("")
   const switchTo = async (blueprintId: string) => {
     if (blueprintId === current) return
     const target = options.find(option => option.id === blueprintId)
-    const question = blueprintId === VIBE_ID
-      ? "Switch to Vibe coding? The stages stop; files they wrote stay."
-      : `Switch to ${target ? shortBlueprintName(target.name) : blueprintId}? It starts at its first stage, with the work so far as context.`
-    if (!window.confirm(question)) return
+    const targetName = target ? shortBlueprintName(target.name) : blueprintId
+    const confirmed = await confirm(
+      blueprintId === VIBE_ID
+        ? {
+            title: "Switch to Vibe coding?",
+            description: "The stages stop; files they wrote stay.",
+            confirmLabel: "Switch",
+          }
+        : {
+            title: `Switch to ${targetName}?`,
+            description: "It starts at its first stage, with the work so far as context.",
+            confirmLabel: "Switch",
+          },
+    )
+    if (!confirmed) return
     setSwitching(true)
     setError("")
     try {

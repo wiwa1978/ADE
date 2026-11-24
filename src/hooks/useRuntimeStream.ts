@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { z } from "zod"
 import { request } from "../../api"
 import { useEventStream } from "./useEventStream"
+import { usePolling } from "./usePolling"
 import type {
   ApprovalPolicy,
   ApprovalRule,
@@ -47,7 +49,83 @@ const EMPTY_SKILLS: SkillsAndRulesCatalog = {
   commands: [],
 }
 
-function reportStreamWarning(scope: string, error: unknown) {
+const TimelineToolCallSchema = z.object({
+  callId: z.string(),
+  name: z.string(),
+  arguments: z.record(z.string(), z.unknown()),
+  status: z.enum(["pending", "running", "sleeping", "waiting", "done", "error"]),
+  output: z.string(),
+  isError: z.boolean(),
+  details: z.unknown().optional(),
+})
+
+const TimelineItemSchema = z.discriminatedUnion("kind", [
+  z.object({ id: z.string(), kind: z.literal("user"), content: z.string(), createdAt: z.number() }),
+  z.object({
+    id: z.string(),
+    kind: z.literal("assistant"),
+    thinking: z.string(),
+    text: z.string(),
+    toolCalls: z.array(TimelineToolCallSchema),
+    streaming: z.boolean().optional(),
+    createdAt: z.number(),
+  }),
+  z.object({ id: z.string(), kind: z.literal("compaction"), summary: z.string(), createdAt: z.number() }),
+  z.object({ id: z.string(), kind: z.literal("error"), message: z.string(), createdAt: z.number() }),
+])
+
+const TimelineSnapshotPayloadSchema = z.object({
+  sessionId: z.string(),
+  conversationId: z.string(),
+  busy: z.boolean(),
+  items: z.array(TimelineItemSchema),
+  liveTools: z.array(TimelineToolCallSchema),
+  runFailure: z.object({ reason: z.string(), detail: z.string().optional() }).nullable().optional(),
+  usage: z.object({ inputTokens: z.number(), outputTokens: z.number(), totalCost: z.number().optional() }).nullable().optional(),
+  isSubagent: z.boolean().optional(),
+})
+
+const BrowserStatePayloadSchema = z.object({
+  available: z.boolean(),
+  chromePath: z.string().nullable(),
+  running: z.boolean(),
+  url: z.string(),
+  title: z.string(),
+  loading: z.boolean(),
+  canGoBack: z.boolean(),
+  canGoForward: z.boolean(),
+  agentDriving: z.boolean(),
+  viewport: z.object({
+    width: z.number(),
+    height: z.number(),
+    preset: z.enum(["desktop", "tablet", "mobile"]),
+  }),
+  lastFrame: z.string().nullable(),
+  error: z.string().nullable(),
+})
+
+const McpServerStatusSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  transport: z.enum(["stdio", "http"]),
+  command: z.string().optional(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  url: z.string().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  enabled: z.boolean(),
+  status: z.enum(["disconnected", "connecting", "connected", "error"]),
+  error: z.string().nullable(),
+  tools: z.array(z.object({ name: z.string(), description: z.string() })),
+})
+
+function isAbortError(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true
+  return error instanceof DOMException && error.name === "AbortError"
+}
+
+function reportStreamWarning(scope: string, error: unknown, signal?: AbortSignal) {
+  if (isAbortError(error, signal)) return
   console.warn(`[ADE runtime stream] ${scope}:`, error instanceof Error ? error.message : String(error))
 }
 
@@ -96,138 +174,149 @@ export function useRuntimeStream(opts: {
     sessionIdRef.current = sessionId
   })
 
-  const refreshTimeline = useCallback(async (targetId: string) => {
+  const refreshTimeline = useCallback(async (targetId: string, signal?: AbortSignal) => {
     try {
-      const snap = await request<ConversationTimelineSnapshot>(`/api/sessions/${encodeURIComponent(targetId)}/timeline`)
-      if (sessionIdRef.current === targetId) setTimeline(snap)
+      const snap = await request<ConversationTimelineSnapshot>(`/api/sessions/${encodeURIComponent(targetId)}/timeline`, { signal })
+      if (!signal?.aborted && sessionIdRef.current === targetId) setTimeline(snap)
     } catch (error) {
-      reportStreamWarning("refreshTimeline", error)
+      reportStreamWarning("refreshTimeline", error, signal)
     }
   }, [])
 
-  const refreshSubagents = useCallback(async (targetId: string) => {
+  const refreshSubagents = useCallback(async (targetId: string, signal?: AbortSignal) => {
     try {
-      const data = await request<{ agents: SubagentInfo[] }>(`/api/coding-tasks/${encodeURIComponent(targetId)}/agents`)
-      if (sessionIdRef.current === targetId) setSubagents(data.agents ?? [])
+      const data = await request<{ agents: SubagentInfo[] }>(`/api/coding-tasks/${encodeURIComponent(targetId)}/agents`, { signal })
+      if (!signal?.aborted && sessionIdRef.current === targetId) setSubagents(data.agents ?? [])
     } catch (error) {
-      reportStreamWarning("refreshSubagents", error)
+      reportStreamWarning("refreshSubagents", error, signal)
     }
   }, [])
 
-  const refreshApprovals = useCallback(async (targetId: string | null) => {
+  const refreshApprovals = useCallback(async (targetId: string | null, signal?: AbortSignal) => {
     try {
       const qs = targetId ? `?sessionId=${encodeURIComponent(targetId)}` : ""
-      const data = await request<{ pending: PendingApproval[]; policy: ApprovalPolicy; rules: ApprovalRule[] }>(`/api/approvals${qs}`)
+      const data = await request<{ pending: PendingApproval[]; policy: ApprovalPolicy; rules: ApprovalRule[] }>(`/api/approvals${qs}`, { signal })
+      if (signal?.aborted) return
       setApprovals(data.pending ?? [])
       if (data.policy) setApprovalPolicyState(data.policy)
       setApprovalRules(data.rules ?? [])
     } catch (error) {
-      reportStreamWarning("refreshApprovals", error)
+      reportStreamWarning("refreshApprovals", error, signal)
     }
   }, [])
 
-  const refreshProcesses = useCallback(async (targetId: string | null) => {
+  const refreshProcesses = useCallback(async (targetId: string | null, signal?: AbortSignal) => {
     try {
       const qs = targetId ? `?sessionId=${encodeURIComponent(targetId)}` : ""
-      const data = await request<{ processes: ManagedProcessSummary[] }>(`/api/processes${qs}`)
-      setProcesses(data.processes ?? [])
+      const data = await request<{ processes: ManagedProcessSummary[] }>(`/api/processes${qs}`, { signal })
+      if (!signal?.aborted) setProcesses(data.processes ?? [])
     } catch (error) {
-      reportStreamWarning("refreshProcesses", error)
+      reportStreamWarning("refreshProcesses", error, signal)
     }
   }, [])
 
-  const refreshGit = useCallback(async (targetId: string) => {
+  const refreshGit = useCallback(async (targetId: string, signal?: AbortSignal) => {
     try {
-      const data = await request<WorkspaceGitSummary>(`/api/workspace/git?sessionId=${encodeURIComponent(targetId)}`)
-      if (sessionIdRef.current === targetId) setGitSummary(data)
+      const data = await request<WorkspaceGitSummary>(`/api/workspace/git?sessionId=${encodeURIComponent(targetId)}`, { signal })
+      if (!signal?.aborted && sessionIdRef.current === targetId) setGitSummary(data)
     } catch (error) {
-      reportStreamWarning("refreshGit", error)
+      if (isAbortError(error, signal)) return
+      reportStreamWarning("refreshGit", error, signal)
       if (sessionIdRef.current === targetId) setGitSummary(EMPTY_GIT)
     }
   }, [])
 
-  const refreshArtifactsAndTasks = useCallback(async (targetId: string) => {
+  const refreshArtifactsAndTasks = useCallback(async (targetId: string, signal?: AbortSignal) => {
     try {
       const [artRes, taskRes] = await Promise.all([
-        request<{ artifacts: SessionArtifact[] }>(`/api/sessions/${encodeURIComponent(targetId)}/artifacts`),
-        request<{ tasks: SessionTaskItem[] }>(`/api/sessions/${encodeURIComponent(targetId)}/tasks`),
+        request<{ artifacts: SessionArtifact[] }>(`/api/sessions/${encodeURIComponent(targetId)}/artifacts`, { signal }),
+        request<{ tasks: SessionTaskItem[] }>(`/api/sessions/${encodeURIComponent(targetId)}/tasks`, { signal }),
       ])
-      if (sessionIdRef.current === targetId) {
+      if (!signal?.aborted && sessionIdRef.current === targetId) {
         setArtifacts(artRes.artifacts ?? [])
         setTasks(taskRes.tasks ?? [])
       }
     } catch (error) {
-      reportStreamWarning("refreshArtifactsAndTasks", error)
+      reportStreamWarning("refreshArtifactsAndTasks", error, signal)
     }
   }, [])
 
-  const refreshMcp = useCallback(async () => {
+  const refreshMcp = useCallback(async (signal?: AbortSignal) => {
     try {
-      const data = await request<{ servers: McpServerStatus[] }>("/api/mcp")
-      setMcpServers(data.servers ?? [])
+      const data = await request<{ servers: McpServerStatus[] }>("/api/mcp", { signal })
+      if (!signal?.aborted) setMcpServers(data.servers ?? [])
     } catch (error) {
-      reportStreamWarning("refreshMcp", error)
+      reportStreamWarning("refreshMcp", error, signal)
     }
   }, [])
 
-  // Initial load on session / environment switch
+  // Load environment-wide state once per environment; live updates arrive over SSE.
   useEffect(() => {
-    let cancelled = false
+    const controller = new AbortController()
+    const { signal } = controller
+    void request<BrowserState>("/api/browser/status", { signal })
+      .then(data => { if (!signal.aborted) setBrowserState(data) })
+      .catch(error => reportStreamWarning("refreshBrowser", error, signal))
+    void request<{ servers: McpServerStatus[] }>("/api/mcp", { signal })
+      .then(data => { if (!signal.aborted) setMcpServers(data.servers ?? []) })
+      .catch(error => reportStreamWarning("refreshMcp", error, signal))
+    return () => controller.abort()
+  }, [environmentVersion])
+
+  // Initial load on session / environment switch (aborts stale in-flight fetches)
+  useEffect(() => {
+    const controller = new AbortController()
+    const { signal } = controller
     const qs = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""
-    void request<{ pending: PendingApproval[]; policy: ApprovalPolicy; rules: ApprovalRule[] }>(`/api/approvals${qs}`)
+    void request<{ pending: PendingApproval[]; policy: ApprovalPolicy; rules: ApprovalRule[] }>(`/api/approvals${qs}`, { signal })
       .then(data => {
-        if (cancelled) return
+        if (signal.aborted) return
         setApprovals(data.pending ?? [])
         if (data.policy) setApprovalPolicyState(data.policy)
         setApprovalRules(data.rules ?? [])
       })
-      .catch(error => reportStreamWarning("refreshApprovals", error))
-    void request<{ processes: ManagedProcessSummary[] }>(`/api/processes${qs}`)
-      .then(data => { if (!cancelled) setProcesses(data.processes ?? []) })
-      .catch(error => reportStreamWarning("refreshProcesses", error))
-    void request<SkillsAndRulesCatalog>(`/api/skills${qs}`)
-      .then(data => { if (!cancelled) setSkillsCatalog(data) })
-      .catch(error => reportStreamWarning("refreshSkills", error))
-    void request<BrowserState>("/api/browser/status")
-      .then(data => { if (!cancelled) setBrowserState(data) })
-      .catch(error => reportStreamWarning("refreshBrowser", error))
-    void request<{ servers: McpServerStatus[] }>("/api/mcp")
-      .then(data => { if (!cancelled) setMcpServers(data.servers ?? []) })
-      .catch(error => reportStreamWarning("refreshMcp", error))
-    if (!sessionId) return () => { cancelled = true }
-    void request<ConversationTimelineSnapshot>(`/api/sessions/${encodeURIComponent(sessionId)}/timeline`)
-      .then(snap => { if (!cancelled) setTimeline(snap) })
-      .catch(error => reportStreamWarning("refreshTimeline", error))
+      .catch(error => reportStreamWarning("refreshApprovals", error, signal))
+    void request<{ processes: ManagedProcessSummary[] }>(`/api/processes${qs}`, { signal })
+      .then(data => { if (!signal.aborted) setProcesses(data.processes ?? []) })
+      .catch(error => reportStreamWarning("refreshProcesses", error, signal))
+    void request<SkillsAndRulesCatalog>(`/api/skills${qs}`, { signal })
+      .then(data => { if (!signal.aborted) setSkillsCatalog(data) })
+      .catch(error => reportStreamWarning("refreshSkills", error, signal))
+    if (!sessionId) return () => controller.abort()
+    void request<ConversationTimelineSnapshot>(`/api/sessions/${encodeURIComponent(sessionId)}/timeline`, { signal })
+      .then(snap => { if (!signal.aborted) setTimeline(snap) })
+      .catch(error => reportStreamWarning("refreshTimeline", error, signal))
     void Promise.all([
-      request<{ artifacts: SessionArtifact[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/artifacts`),
-      request<{ tasks: SessionTaskItem[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/tasks`),
+      request<{ artifacts: SessionArtifact[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/artifacts`, { signal }),
+      request<{ tasks: SessionTaskItem[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/tasks`, { signal }),
     ])
       .then(([artRes, taskRes]) => {
-        if (cancelled) return
+        if (signal.aborted) return
         setArtifacts(artRes.artifacts ?? [])
         setTasks(taskRes.tasks ?? [])
       })
-      .catch(error => reportStreamWarning("refreshArtifactsAndTasks", error))
+      .catch(error => reportStreamWarning("refreshArtifactsAndTasks", error, signal))
     if (isCodingTask) {
-      void request<{ agents: SubagentInfo[] }>(`/api/coding-tasks/${encodeURIComponent(sessionId)}/agents`)
-        .then(data => { if (!cancelled) setSubagents(data.agents ?? []) })
-        .catch(error => reportStreamWarning("refreshSubagents", error))
+      void request<{ agents: SubagentInfo[] }>(`/api/coding-tasks/${encodeURIComponent(sessionId)}/agents`, { signal })
+        .then(data => { if (!signal.aborted) setSubagents(data.agents ?? []) })
+        .catch(error => reportStreamWarning("refreshSubagents", error, signal))
     }
     if (hasWorkspace) {
-      void request<WorkspaceGitSummary>(`/api/workspace/git?sessionId=${encodeURIComponent(sessionId)}`)
-        .then(data => { if (!cancelled) setGitSummary(data) })
+      void request<WorkspaceGitSummary>(`/api/workspace/git?sessionId=${encodeURIComponent(sessionId)}`, { signal })
+        .then(data => { if (!signal.aborted) setGitSummary(data) })
         .catch(error => {
-          reportStreamWarning("refreshGit", error)
-          if (!cancelled) setGitSummary(EMPTY_GIT)
+          if (isAbortError(error, signal)) return
+          reportStreamWarning("refreshGit", error, signal)
+          setGitSummary(EMPTY_GIT)
         })
     }
-    return () => { cancelled = true }
+    return () => controller.abort()
   }, [sessionId, hasWorkspace, isCodingTask, environmentVersion])
 
-  // Subscribe to the shared EventSource stream by event type
+  // Subscribe to the shared EventSource stream with Zod-validated payloads
   useEffect(() => {
     const unsubs = [
-      eventStream.subscribe("sessions.changed", () => {
+      eventStream.subscribeTyped("sessions.changed", () => {
         callbacksRef.current.onSessionsChanged?.()
         const sid = sessionIdRef.current
         if (sid) {
@@ -235,110 +324,77 @@ export function useRuntimeStream(opts: {
           if (hasWorkspace) void refreshGit(sid)
         }
       }),
-      eventStream.subscribe("timeline.update", (ev) => {
-        try {
-          const parsed = JSON.parse(ev.data)
-          const snap = parsed.payload as ConversationTimelineSnapshot
-          if (!snap || snap.sessionId !== sessionIdRef.current) return
-          if (snap.isSubagent) {
-            setSubagentTimelines(prev => ({ ...prev, [snap.conversationId]: snap }))
-          } else {
-            setTimeline(snap)
+      eventStream.subscribeTyped("timeline.update", (ev) => {
+        const parsed = TimelineSnapshotPayloadSchema.safeParse(ev.payload)
+        if (!parsed.success) {
+          reportStreamWarning("timeline.update schema", new Error(parsed.error.issues[0]?.message ?? "invalid snapshot"))
+          return
+        }
+        const snap = parsed.data
+        if (snap.sessionId !== sessionIdRef.current) return
+        if (snap.isSubagent) {
+          setSubagentTimelines(prev => ({ ...prev, [snap.conversationId]: snap }))
+        } else {
+          setTimeline(snap)
+        }
+      }),
+      eventStream.subscribeTyped("subagents.update", (ev) => {
+        const sid = sessionIdRef.current
+        const eventSessionId = ev.sessionId ?? ev.payload.sessionId
+        if (sid && (!eventSessionId || eventSessionId === sid)) {
+          void refreshSubagents(sid)
+        }
+      }),
+      eventStream.subscribeTyped("approval.requested", (ev) => {
+        const item = ev.payload
+        setApprovals(prev => (prev.some(p => p.id === item.id) ? prev : [...prev, item]))
+      }),
+      eventStream.subscribeTyped("approval.resolved", (ev) => {
+        const item = ev.payload
+        setApprovals(prev => prev.filter(p => p.id !== item.id))
+        void refreshApprovals(sessionIdRef.current)
+      }),
+      eventStream.subscribeTyped("processes.update", (ev) => {
+        if ("processes" in ev.payload && (!ev.sessionId || ev.sessionId === sessionIdRef.current)) {
+          setProcesses(ev.payload.processes)
+        }
+      }),
+      eventStream.subscribeTyped("artifacts.update", (ev) => {
+        const eventSessionId = ev.sessionId ?? ev.payload.sessionId
+        if (eventSessionId === sessionIdRef.current) {
+          setArtifacts(ev.payload.artifacts)
+          if (ev.payload.activeArtifactId) {
+            callbacksRef.current.onArtifactUpdated?.(ev.payload.activeArtifactId)
           }
-        } catch (error) {
-          reportStreamWarning("timeline.update parse", error)
         }
       }),
-      eventStream.subscribe("subagents.update", (ev) => {
-        try {
-          const parsed = JSON.parse(ev.data)
-          const sid = sessionIdRef.current
-          if (sid && (!parsed.sessionId || parsed.sessionId === sid)) {
-            void refreshSubagents(sid)
-          }
-        } catch (error) {
-          reportStreamWarning("subagents.update parse", error)
+      eventStream.subscribeTyped("tasks.update", (ev) => {
+        const eventSessionId = ev.sessionId ?? ev.payload.sessionId
+        if (eventSessionId === sessionIdRef.current) {
+          setTasks(ev.payload.tasks)
         }
       }),
-      eventStream.subscribe("approval.requested", (ev) => {
-        try {
-          const parsed = JSON.parse(ev.data)
-          const item = parsed.payload as PendingApproval
-          setApprovals(prev => (prev.some(p => p.id === item.id) ? prev : [...prev, item]))
-        } catch (error) {
-          reportStreamWarning("approval.requested parse", error)
+      eventStream.subscribeTyped("browser.update", (ev) => {
+        const parsed = BrowserStatePayloadSchema.safeParse(ev.payload)
+        if (!parsed.success) {
+          reportStreamWarning("browser.update schema", new Error(parsed.error.issues[0]?.message ?? "invalid browser state"))
+          return
+        }
+        setBrowserState(parsed.data)
+        if (parsed.data.agentDriving) callbacksRef.current.onAgentBrowserDriving?.()
+      }),
+      eventStream.subscribeTyped("browser.frame", (ev) => {
+        if (ev.payload.frame) {
+          setBrowserState(prev => ({ ...prev, lastFrame: ev.payload.frame }))
         }
       }),
-      eventStream.subscribe("approval.resolved", (ev) => {
-        try {
-          const parsed = JSON.parse(ev.data)
-          const item = parsed.payload as PendingApproval
-          setApprovals(prev => prev.filter(p => p.id !== item.id))
-          void refreshApprovals(sessionIdRef.current)
-        } catch (error) {
-          reportStreamWarning("approval.resolved parse", error)
+      eventStream.subscribeTyped("mcp.update", (ev) => {
+        const parsed = z.array(McpServerStatusSchema).safeParse(ev.payload.servers)
+        if (!parsed.success) {
+          reportStreamWarning("mcp.update schema", new Error(parsed.error.issues[0]?.message ?? "invalid mcp servers"))
+          return
         }
-      }),
-      eventStream.subscribe("processes.update", (ev) => {
-        try {
-          const parsed = JSON.parse(ev.data)
-          if (!parsed.sessionId || parsed.sessionId === sessionIdRef.current) {
-            setProcesses(parsed.payload?.processes ?? [])
-          }
-        } catch (error) {
-          reportStreamWarning("processes.update parse", error)
-        }
-      }),
-      eventStream.subscribe("artifacts.update", (ev) => {
-        try {
-          const parsed = JSON.parse(ev.data)
-          if (parsed.sessionId === sessionIdRef.current) {
-            setArtifacts(parsed.payload?.artifacts ?? [])
-            if (parsed.payload?.activeArtifactId) {
-              callbacksRef.current.onArtifactUpdated?.(parsed.payload.activeArtifactId)
-            }
-          }
-        } catch (error) {
-          reportStreamWarning("artifacts.update parse", error)
-        }
-      }),
-      eventStream.subscribe("tasks.update", (ev) => {
-        try {
-          const parsed = JSON.parse(ev.data)
-          if (parsed.sessionId === sessionIdRef.current) {
-            setTasks(parsed.payload?.tasks ?? [])
-          }
-        } catch (error) {
-          reportStreamWarning("tasks.update parse", error)
-        }
-      }),
-      eventStream.subscribe("browser.update", (ev) => {
-        try {
-          const parsed = JSON.parse(ev.data)
-          const next = parsed.payload as BrowserState
-          setBrowserState(next)
-          if (next.agentDriving) callbacksRef.current.onAgentBrowserDriving?.()
-        } catch (error) {
-          reportStreamWarning("browser.update parse", error)
-        }
-      }),
-      eventStream.subscribe("browser.frame", (ev) => {
-        try {
-          const parsed = JSON.parse(ev.data)
-          if (parsed.payload?.frame) {
-            setBrowserState(prev => ({ ...prev, lastFrame: parsed.payload.frame }))
-          }
-        } catch (error) {
-          reportStreamWarning("browser.frame parse", error)
-        }
-      }),
-      eventStream.subscribe("mcp.update", (ev) => {
-        try {
-          const parsed = JSON.parse(ev.data)
-          setMcpServers(parsed.payload?.servers ?? [])
-        } catch (error) {
-          reportStreamWarning("mcp.update parse", error)
-        }
+        setMcpServers(parsed.data)
       }),
     ]
     return () => {
@@ -346,14 +402,14 @@ export function useRuntimeStream(opts: {
     }
   }, [eventStream, hasWorkspace, refreshApprovals, refreshGit, refreshSubagents, refreshTimeline])
 
-  // Periodic light git refresh when workspace is open
-  useEffect(() => {
-    if (!sessionId || !hasWorkspace) return
-    const timer = setInterval(() => {
-      void refreshGit(sessionId)
-    }, 8000)
-    return () => clearInterval(timer)
-  }, [sessionId, hasWorkspace, refreshGit])
+  // Periodic light git refresh when workspace is open (visibility-aware)
+  usePolling(
+    (signal) => {
+      if (sessionId) return refreshGit(sessionId, signal)
+    },
+    8_000,
+    { enabled: Boolean(sessionId && hasWorkspace), immediate: false },
+  )
 
   const resolveApproval = useCallback(async (id: string, decision: { allow: boolean; alwaysAllow?: boolean; prefix?: string; reason?: string }) => {
     await request(`/api/approvals/${encodeURIComponent(id)}/resolve`, {
