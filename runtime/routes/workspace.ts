@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import { notFound } from "../http-error.ts";
 import type { Router } from "../router.ts";
 import { discoverSkillsAndRules } from "../skills.ts";
@@ -16,13 +17,33 @@ import {
 	gitDiscardFile,
 	gitStageFiles,
 	gitUnstageFiles,
-	listWorkspaceDirectory,
-	readWorkspaceFile,
-	readWorkspaceFileRaw,
-	writeWorkspaceFile,
+	listWorkspaceDirectoryAsync,
+	readWorkspaceFileAsync,
+	readWorkspaceFileRawAsync,
+	writeWorkspaceFileAsync,
 } from "../workspace-files.ts";
 import { inspectWorktrees } from "../worktrees.ts";
 import type { RouteDeps } from "./context.ts";
+
+const INLINE_SAFE_MIME_TYPES = new Set([
+	"image/png",
+	"image/jpeg",
+	"image/webp",
+	"image/gif",
+	"image/avif",
+	"image/x-icon",
+]);
+
+function isInlineSafeMedia(mimeType: string): boolean {
+	const normalized = mimeType.split(";", 1)[0].trim().toLowerCase();
+	if (INLINE_SAFE_MIME_TYPES.has(normalized)) return true;
+	return normalized.startsWith("audio/") || normalized.startsWith("video/");
+}
+
+function safeDownloadFilename(relPath: string): string {
+	const name = basename(relPath).replace(/[\r\n"\\]/g, "_").trim();
+	return name || "download";
+}
 
 export function registerWorkspaceRoutes(router: Router, { host, worktreeManager }: RouteDeps): void {
 	router.get("/api/worktree-operations", (ctx) => {
@@ -56,27 +77,29 @@ export function registerWorkspaceRoutes(router: Router, { host, worktreeManager 
 		return ctx.requireWorkspace(ctx.url.searchParams.get("sessionId") ?? "");
 	};
 
-	router.get("/api/workspace/tree", (ctx) => {
+	router.get("/api/workspace/tree", async (ctx) => {
 		const workspace = resolveTreeRoot(ctx);
-		ctx.json(200, { entries: listWorkspaceDirectory(workspace, ctx.url.searchParams.get("path") ?? ".") });
+		ctx.json(200, { entries: await listWorkspaceDirectoryAsync(workspace, ctx.url.searchParams.get("path") ?? ".") });
 	});
 
-	router.get("/api/workspace/file", (ctx) => {
+	router.get("/api/workspace/file", async (ctx) => {
 		const workspace = resolveTreeRoot(ctx);
-		ctx.json(200, readWorkspaceFile(workspace, ctx.url.searchParams.get("path") ?? ""));
+		ctx.json(200, await readWorkspaceFileAsync(workspace, ctx.url.searchParams.get("path") ?? ""));
 	});
 
-	router.get("/api/workspace/raw", (ctx) => {
+	router.get("/api/workspace/raw", async (ctx) => {
 		const workspace = resolveTreeRoot(ctx);
-		const raw = readWorkspaceFileRaw(workspace, ctx.url.searchParams.get("path") ?? "");
+		const raw = await readWorkspaceFileRawAsync(workspace, ctx.url.searchParams.get("path") ?? "");
+		const inlineSafe = isInlineSafeMedia(raw.mimeType);
 		const headers: Record<string, string | number> = {
-			"content-type": raw.mimeType,
+			"content-type": inlineSafe ? raw.mimeType : "application/octet-stream",
 			"content-length": raw.buffer.length,
 			"cache-control": "no-cache",
+			"content-security-policy": "default-src 'none'; sandbox",
 			"x-content-type-options": "nosniff",
 		};
-		if (raw.mimeType.includes("svg") || raw.mimeType.includes("html")) {
-			headers["content-security-policy"] = "sandbox";
+		if (!inlineSafe) {
+			headers["content-disposition"] = `attachment; filename="${safeDownloadFilename(raw.path)}"`;
 		}
 		ctx.response.writeHead(200, headers);
 		ctx.response.end(raw.buffer);
@@ -87,7 +110,7 @@ export function registerWorkspaceRoutes(router: Router, { host, worktreeManager 
 		async (ctx) => {
 			const input = validateWorkspaceFileWrite(await ctx.readBody(2_500_000));
 			const workspace = ctx.requireWorkspace(input.sessionId);
-			ctx.json(200, writeWorkspaceFile(workspace, input.path, input.content));
+			ctx.json(200, await writeWorkspaceFileAsync(workspace, input.path, input.content));
 		},
 		{ originError: "Use ADE to edit workspace files.", maxBody: 2_500_000 },
 	);

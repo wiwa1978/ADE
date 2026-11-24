@@ -79,7 +79,8 @@ test("approval gates pause risky shell commands and resume on approval + always-
 		await sendPromise;
 
 		assert.equal(host.approvals.listPending(taskId).length, 0);
-		assert.ok(host.approvals.hasAllowRule("run_command", "echo approved-hello > created.txt"));
+		assert.ok(host.approvals.hasAllowRule("run_command", "echo approved-hello"));
+		assert.equal(host.approvals.hasAllowRule("run_command", "echo approved-hello > created.txt"), false);
 		const created = readWorkspaceFile(repoDir, "created.txt");
 		assert.match(created.content, /approved-hello/);
 	} finally {

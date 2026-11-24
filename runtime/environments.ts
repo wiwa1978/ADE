@@ -1,10 +1,10 @@
 import { spawn as spawnProcess, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
-import { createServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { httpError } from "./http-error.ts";
+import { getFreePort } from "./net-utils.ts";
 
 const DEFAULT_REMOTE_PORT = 4319;
 const DEFAULT_SSH_PORT = 22;
@@ -99,17 +99,6 @@ function remoteHealth(localPort: number, remotePort: number): Promise<boolean> {
 		request.once("error", reject);
 		request.end();
 	});
-}
-
-async function allocatePort(): Promise<number> {
-	const server = createServer();
-	await new Promise<void>((resolve, reject) => {
-		server.once("error", reject);
-		server.listen(0, "127.0.0.1", resolve);
-	});
-	const port = (server.address() as AddressInfo).port;
-	await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-	return port;
 }
 
 export class EnvironmentManager {
@@ -210,7 +199,7 @@ export class EnvironmentManager {
 	}
 
 	async #openTunnel(environment: SavedSshEnvironment): Promise<ActiveTunnel> {
-		const localPort = await allocatePort();
+		const localPort = await getFreePort();
 		const args = [
 			"-N", "-T", "-L", `127.0.0.1:${localPort}:127.0.0.1:${environment.remotePort}`,
 			"-o", "BatchMode=yes",

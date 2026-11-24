@@ -21,10 +21,24 @@ type ManagedProcess = ManagedProcessSummary & {
 };
 
 const MAX_OUTPUT_CHARS = 80_000;
+const MAX_EXITED_PROCESSES = 100;
 
 function trimOutput(text: string): string {
 	if (text.length <= MAX_OUTPUT_CHARS) return text;
 	return `...[truncated]\n${text.slice(-MAX_OUTPUT_CHARS)}`;
+}
+
+/** Length of the longest suffix of `text` that could still be the prefix of a secret value split across chunks. */
+function trailingSecretPrefixLen(text: string, secretValues: string[], maxOverlap: number): number {
+	if (!maxOverlap || !text) return 0;
+	const maxLen = Math.min(maxOverlap, text.length);
+	for (let len = maxLen; len >= 1; len--) {
+		const suffix = text.slice(text.length - len);
+		for (const secret of secretValues) {
+			if (secret.startsWith(suffix)) return len;
+		}
+	}
+	return 0;
 }
 
 function buildShellInvocation(command: string, cwd: string, sandbox: boolean): { file: string; args: string[] } {
@@ -61,16 +75,38 @@ export class ProcessManager {
 			.map(({ child: _c, output, ...summary }) => ({ ...summary, outputTail: output.slice(-4000) }));
 	}
 
-	getOutput(id: string): { summary: ManagedProcessSummary; output: string } {
+	#lookup(id: string, sessionId?: string): ManagedProcess {
 		const proc = this.#processes.get(id);
-		if (!proc) throw notFound("Process not found.");
+		if (!proc || (sessionId !== undefined && proc.sessionId !== sessionId)) {
+			throw notFound("Process not found.");
+		}
+		return proc;
+	}
+
+	#pruneExited(): void {
+		let exitedCount = 0;
+		for (const proc of this.#processes.values()) {
+			if (proc.status !== "running") exitedCount++;
+		}
+		if (exitedCount <= MAX_EXITED_PROCESSES) return;
+		let toRemove = exitedCount - MAX_EXITED_PROCESSES;
+		for (const [id, proc] of this.#processes) {
+			if (toRemove <= 0) break;
+			if (proc.status !== "running") {
+				this.#processes.delete(id);
+				toRemove--;
+			}
+		}
+	}
+
+	getOutput(id: string, sessionId?: string): { summary: ManagedProcessSummary; output: string } {
+		const proc = this.#lookup(id, sessionId);
 		const { child: _c, output, ...summary } = proc;
 		return { summary: { ...summary, outputTail: output.slice(-4000) }, output };
 	}
 
-	sendInput(id: string, input: string): ManagedProcessSummary {
-		const proc = this.#processes.get(id);
-		if (!proc) throw notFound("Process not found.");
+	sendInput(id: string, input: string, sessionId?: string): ManagedProcessSummary {
+		const proc = this.#lookup(id, sessionId);
 		if (proc.status !== "running" || !proc.child.stdin?.writable) {
 			throw conflict("Process is not accepting input.");
 		}
@@ -79,9 +115,8 @@ export class ProcessManager {
 		return { ...summary, outputTail: output.slice(-4000) };
 	}
 
-	kill(id: string): ManagedProcessSummary {
-		const proc = this.#processes.get(id);
-		if (!proc) throw notFound("Process not found.");
+	kill(id: string, sessionId?: string): ManagedProcessSummary {
+		const proc = this.#lookup(id, sessionId);
 		if (proc.status === "running") {
 			proc.status = "killed";
 			proc.endedAt = Date.now();
@@ -103,6 +138,7 @@ export class ProcessManager {
 					logger.warn("SIGTERM failed for managed process", { error, sessionId: proc.sessionId, context: { processId: id } });
 				}
 			}
+			this.#pruneExited();
 			this.#emitUpdate(proc.sessionId);
 		}
 		const { child: _c, output, ...summary } = proc;
@@ -145,12 +181,15 @@ export class ProcessManager {
 			...(remote ? { remotePidFile: pidFile } : {}),
 		};
 		this.#processes.set(id, proc);
+		this.#pruneExited();
 		this.#emitUpdate(opts.sessionId);
 
 		let lastEmit = 0;
-		// Project secrets are in the environment; keep their values out of the transcript.
-		const append = (buf: Buffer) => {
-			const text = redact(buf.toString("utf8"), secrets);
+		const secretValues = Object.values(secrets).filter(v => v.length >= 4);
+		const maxOverlap = secretValues.length ? Math.min(Math.max(...secretValues.map(v => v.length)) - 1, 4096) : 0;
+		let pendingTail = "";
+		const emitSafe = (text: string) => {
+			if (!text) return;
 			proc.output = trimOutput(proc.output + text);
 			proc.outputTail = proc.output.slice(-4000);
 			opts.onChunk?.(text);
@@ -160,24 +199,44 @@ export class ProcessManager {
 				this.#emitUpdate(opts.sessionId);
 			}
 		};
+		const flushPending = () => {
+			if (!pendingTail) return;
+			const finalPart = redact(pendingTail, secrets);
+			pendingTail = "";
+			emitSafe(finalPart);
+		};
+		// Project secrets are in the environment; sliding overlap catches secrets split across chunk boundaries.
+		const append = (buf: Buffer) => {
+			const combined = redact(pendingTail + buf.toString("utf8"), secrets);
+			const hold = trailingSecretPrefixLen(combined, secretValues, maxOverlap);
+			const safePart = hold > 0 ? combined.slice(0, combined.length - hold) : combined;
+			pendingTail = hold > 0 ? combined.slice(combined.length - hold) : "";
+			emitSafe(safePart);
+		};
 
 		child.stdout?.on("data", append);
 		child.stderr?.on("data", append);
 
 		const done = new Promise<{ exitCode: number | null; output: string }>((resolve) => {
 			child.once("error", (err) => {
-				proc.output = trimOutput(`${proc.output}\n[spawn error] ${err.message}`);
+				flushPending();
+				proc.output = trimOutput(redact(`${proc.output}\n[spawn error] ${err.message}`, secrets));
+				proc.outputTail = proc.output.slice(-4000);
 				proc.status = "exited";
 				proc.exitCode = -1;
 				proc.endedAt = Date.now();
+				this.#pruneExited();
 				this.#emitUpdate(opts.sessionId);
 				resolve({ exitCode: -1, output: proc.output });
 			});
 			child.once("close", (code) => {
+				flushPending();
 				proc.output = redact(proc.output, secrets);
+				proc.outputTail = proc.output.slice(-4000);
 				if (proc.status === "running") proc.status = "exited";
 				proc.exitCode = code;
 				proc.endedAt = Date.now();
+				this.#pruneExited();
 				this.#emitUpdate(opts.sessionId);
 				resolve({ exitCode: code, output: proc.output });
 			});
@@ -299,15 +358,15 @@ export function createShellTools(opts: {
 			}
 			if (!args.processId) throw new Error("Provide processId for this action.");
 			if (args.action === "output") {
-				const { summary, output } = opts.processes.getOutput(args.processId);
+				const { summary, output } = opts.processes.getOutput(args.processId, opts.sessionId);
 				return { output: [{ type: "text", text: `Status: ${summary.status} (exit: ${summary.exitCode ?? "-"})\n\n${output.slice(-12_000) || "(no output)"}` }] };
 			}
 			if (args.action === "send_input") {
-				opts.processes.sendInput(args.processId, args.input ?? "");
+				opts.processes.sendInput(args.processId, args.input ?? "", opts.sessionId);
 				return { output: [{ type: "text", text: `Sent input to process ${args.processId}.` }] };
 			}
 			if (args.action === "kill") {
-				opts.processes.kill(args.processId);
+				opts.processes.kill(args.processId, opts.sessionId);
 				return { output: [{ type: "text", text: `Killed process ${args.processId}.` }] };
 			}
 			throw new Error("Unknown manage_process action. Use list, output, send_input, or kill.");

@@ -14,12 +14,14 @@
 //   and copied back after it (ignored files such as node_modules stay where they are). Git commands
 //   run on this computer, where the repository is.
 import { execFile, execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
+import { z } from "zod";
 import { badRequest, httpError } from "./http-error.ts";
-import { freePort } from "./project-scripts.ts";
+import { getFreePort } from "./net-utils.ts";
 
 const execute = promisify(execFile);
 
@@ -153,9 +155,124 @@ function validHost(value: unknown) {
 function validRemoteRoot(value: unknown) {
 	if (typeof value !== "string" || !value.trim()) return DEFAULT_REMOTE_ROOT;
 	const root = value.trim().replace(/\/+$/, "");
-	if (root.length > 300 || root.includes("..") || /[\0'"`$\\]/.test(root)) throw badRequest("Enter a folder like ade-workspaces or /srv/ade.");
+	if (
+		!root ||
+		root.length > 300 ||
+		root.split("/").includes("..") ||
+		!/^\/?[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/.test(root)
+	) {
+		throw badRequest("Enter a folder like ade-workspaces or /srv/ade.");
+	}
 	return root;
 }
+
+const SAFE_LOCAL_GIT_SUBCOMMANDS = new Set([
+	"status", "diff", "log", "show", "branch", "rev-parse", "add", "commit",
+	"checkout", "switch", "restore", "reset", "stash", "fetch", "pull", "push",
+	"merge", "rebase", "cherry-pick", "tag", "remote", "rev-list", "ls-files",
+	"blame", "shortlog", "describe", "clean", "rm", "mv", "grep", "diff-tree",
+	"merge-base", "symbolic-ref", "for-each-ref",
+]);
+
+const FORBIDDEN_GIT_FLAGS = new Set([
+	"-c", "--config-env", "--exec-path", "--git-dir", "--work-tree",
+	"--upload-pack", "--receive-pack", "--ext-diff", "--textconv", "-C",
+]);
+
+/**
+ * Strictly parse a single-line plain `git` command into argv without invoking a shell.
+ * Rejects newlines, shell metacharacters, config/exec-path flags, and non-allowlisted subcommands.
+ * Returns null if the command must NOT run locally.
+ */
+function parseSafeLocalGit(command: string): string[] | null {
+	if (/[\r\n\0;&|`$<>()\\]/.test(command)) return null;
+	const tokens: string[] = [];
+	let current = "";
+	let quote: "'" | '"' | null = null;
+	for (let i = 0; i < command.length; i++) {
+		const ch = command[i];
+		if (quote) {
+			if (ch === quote) quote = null;
+			else current += ch;
+		} else if (ch === "'" || ch === '"') {
+			quote = ch;
+		} else if (/\s/.test(ch)) {
+			if (current) {
+				tokens.push(current);
+				current = "";
+			}
+		} else {
+			current += ch;
+		}
+	}
+	if (quote) return null;
+	if (current) tokens.push(current);
+	if (tokens.length < 2 || tokens[0] !== "git") return null;
+
+	const subcommand = tokens[1];
+	if (subcommand.startsWith("-") || !SAFE_LOCAL_GIT_SUBCOMMANDS.has(subcommand)) return null;
+
+	for (let i = 1; i < tokens.length; i++) {
+		const tok = tokens[i];
+		if (FORBIDDEN_GIT_FLAGS.has(tok)) return null;
+		if (
+			tok.startsWith("-c") && tok.length > 2 ||
+			tok.startsWith("--config-env=") ||
+			tok.startsWith("--exec-path=") ||
+			tok.startsWith("--git-dir=") ||
+			tok.startsWith("--work-tree=") ||
+			tok.startsWith("--upload-pack=") ||
+			tok.startsWith("--receive-pack=") ||
+			tok.startsWith("--ext-diff") ||
+			tok.startsWith("--textconv")
+		) {
+			return null;
+		}
+	}
+	return tokens.slice(1);
+}
+
+let cachedRsyncProtectArgs: boolean | null = null;
+function rsyncProtectArgsFlag(): string {
+	if (cachedRsyncProtectArgs === null) {
+		try {
+			const out = execFileSync("rsync", ["--version"], { encoding: "utf8", timeout: 3000, windowsHide: true });
+			const match = /version\s+(\d+)\.(\d+)/i.exec(out);
+			cachedRsyncProtectArgs = Boolean(match && Number(match[1]) >= 3 && !/openrsync/i.test(out));
+		} catch {
+			cachedRsyncProtectArgs = false;
+		}
+	}
+	return cachedRsyncProtectArgs ? "--protect-args " : "";
+}
+
+const RunTargetSchema = z.enum(["local", "docker", "wsl", "ssh", "boat"]);
+const TargetStateSchema = z.enum(["absent", "preparing", "running", "stopped", "failed"]);
+const TargetSettingsSchema = z.object({
+	target: RunTargetSchema.default("local"),
+	image: z.string().default(DEFAULT_DOCKER_IMAGE),
+	wslDistro: z.string().default(""),
+	sshHost: z.string().default(""),
+	remoteRoot: z.string().default(DEFAULT_REMOTE_ROOT),
+});
+const SessionTargetSchema = TargetSettingsSchema.extend({
+	container: z.string().nullable().default(null),
+	port: z.number().int().nullable().default(null),
+	mounts: z.array(z.string()).default([]),
+	boatId: z.string().nullable().default(null),
+	sshEndpoint: z.object({
+		host: z.string(),
+		port: z.number().int(),
+		user: z.string(),
+	}).nullable().default(null),
+	state: TargetStateSchema.default("absent"),
+	message: z.string().default(""),
+	updatedAt: z.number().default(0),
+});
+const StoredSchema = z.object({
+	sessions: z.record(z.string(), SessionTargetSchema).default({}),
+	projects: z.record(z.string(), TargetSettingsSchema).default({}),
+});
 
 function validDistro(value: unknown) {
 	if (typeof value !== "string" || !value.trim()) return "";
@@ -203,8 +320,8 @@ export class ExecutionTargets {
 	#load(): Stored {
 		try {
 			if (existsSync(this.#file)) {
-				const parsed = JSON.parse(readFileSync(this.#file, "utf8")) as Partial<Stored>;
-				return { sessions: parsed.sessions ?? {}, projects: parsed.projects ?? {} };
+				const parsed = StoredSchema.safeParse(JSON.parse(readFileSync(this.#file, "utf8")));
+				if (parsed.success) return parsed.data;
 			}
 		} catch {
 			// Start over if the file is damaged.
@@ -214,8 +331,8 @@ export class ExecutionTargets {
 
 	#save() {
 		mkdirSync(dirname(this.#file), { recursive: true });
-		const temp = `${this.#file}.tmp`;
-		writeFileSync(temp, JSON.stringify(this.#data, null, 2));
+		const temp = `${this.#file}.${randomUUID()}.tmp`;
+		writeFileSync(temp, JSON.stringify(this.#data, null, 2), { mode: 0o600 });
 		renameSync(temp, this.#file);
 	}
 
@@ -347,21 +464,35 @@ export class ExecutionTargets {
 		}
 		// Subagents create their own worktrees next to the session's; mount that folder too.
 		if (this.#worktreesRoot && existsSync(this.#worktreesRoot)) mounts.add(realpathSync(this.#worktreesRoot));
-		// Claude Code and Codex keep their sign-in and conversations here; mount them so they work inside.
+		// Claude Code and Codex keep their sign-in and conversations here; mount them read-only so they work inside.
 		const home = homedir();
-		const agentHomes = [join(home, ".codex"), join(home, ".claude")].filter(path => existsSync(path)).map(path => realpathSync(path));
-		const agentFiles = [join(home, ".claude.json")].filter(path => existsSync(path));
+		const safeExistingReal = (path: string): string | null => {
+			try {
+				return existsSync(path) ? realpathSync(path) : null;
+			} catch {
+				return null;
+			}
+		};
+		const agentHomes = [join(home, ".codex"), join(home, ".claude")]
+			.map(safeExistingReal)
+			.filter((path): path is string => Boolean(path));
+		const agentFiles = [join(home, ".claude.json")]
+			.map(safeExistingReal)
+			.filter((path): path is string => Boolean(path));
 		const list = [...mounts].sort((a, b) => a.length - b.length).filter((path, index, all) => !all.slice(0, index).some(parent => inside(path, parent)));
-		const port = record.port ?? await freePort();
+		const port = record.port ?? await getFreePort();
 		const name = `ade-${sessionId.replace(/[^a-z0-9]/gi, "").slice(0, 12)}`;
 		await this.#docker(["rm", "-f", name]).catch(() => undefined);
 		const user = this.#platform === "linux" && typeof process.getuid === "function" ? ["--user", `${process.getuid()}:${process.getgid?.() ?? process.getuid()}`] : [];
 		await this.#docker([
 			"run", "-d", "--init", "--name", name,
+			"--cap-drop=ALL",
+			"--security-opt=no-new-privileges:true",
+			"--pids-limit=256",
 			"--label", "ade.session=" + sessionId,
 			...list.flatMap(path => ["-v", `${path}:${path}`]),
-			...agentHomes.flatMap(path => ["-v", `${path}:${path}`]),
-			...agentFiles.flatMap(path => ["-v", `${path}:${path}`]),
+			...agentHomes.flatMap(path => ["-v", `${path}:${path}:ro`]),
+			...agentFiles.flatMap(path => ["-v", `${path}:${path}:ro`]),
 			"-w", workspace,
 			"-p", `127.0.0.1:${port}:${port}`,
 			"-e", `PORT=${port}`,
@@ -373,6 +504,29 @@ export class ExecutionTargets {
 			record.image, "sleep", "infinity",
 		], { timeout: 15 * 60_000 });
 		return this.#update(sessionId, { container: name, port, mounts: list, state: "running", message: "" });
+	}
+
+	#updateBoatKnownHosts(boatId: string, hostKey: string | null) {
+		const knownHostsFile = join(this.#stateDirectory, "boat_known_hosts");
+		mkdirSync(this.#stateDirectory, { recursive: true });
+		let lines: string[] = [];
+		try {
+			if (existsSync(knownHostsFile)) {
+				lines = readFileSync(knownHostsFile, "utf8").split(/\r?\n/).filter(Boolean);
+			}
+		} catch {
+			lines = [];
+		}
+		const prefix = `${boatId} `;
+		const next = lines.filter(line => !line.startsWith(prefix));
+		if (hostKey !== null) {
+			const cleanId = boatId.replace(/[\r\n]/g, "");
+			const cleanKey = hostKey.replace(/[\r\n]/g, "");
+			next.push(`${cleanId} ${cleanKey}`);
+		}
+		const temp = `${knownHostsFile}.${randomUUID()}.tmp`;
+		writeFileSync(temp, next.length ? `${next.join("\n")}\n` : "", { mode: 0o600 });
+		renameSync(temp, knownHostsFile);
 	}
 
 	async #ensureBoat(sessionId: string, record: SessionTarget): Promise<SessionTarget> {
@@ -399,7 +553,7 @@ export class ExecutionTargets {
 		// Authorize ADE's key and pin the VM's host key (it changes after every resume).
 		const key = this.#boatKey();
 		const access = await api.authorizeKey(boatId, readFileSync(`${key}.pub`, "utf8").trim());
-		writeFileSync(join(this.#stateDirectory, "boat_known_hosts"), `${boatId} ${access.hostKey}\n`, { mode: 0o600 });
+		this.#updateBoatKnownHosts(boatId, access.hostKey);
 		return this.#update(sessionId, { boatId, sshEndpoint: { host: access.host, port: access.port, user: "user" } });
 	}
 
@@ -427,7 +581,10 @@ export class ExecutionTargets {
 		const record = this.#data.sessions[sessionId];
 		if (!record) return;
 		if (record.container) await this.#docker(["rm", "-f", record.container]).catch(() => undefined);
-		if (record.boatId) await this.#boat?.()?.remove(record.boatId).catch(() => undefined);
+		if (record.boatId) {
+			await this.#boat?.()?.remove(record.boatId).catch(() => undefined);
+			this.#updateBoatKnownHosts(record.boatId, null);
+		}
 		delete this.#data.sessions[sessionId];
 		this.#save();
 	}
@@ -488,7 +645,9 @@ export class ExecutionTargets {
 		}
 		const file = join(this.#stateDirectory, "sync-excludes", `${basename(base)}.txt`);
 		mkdirSync(dirname(file), { recursive: true });
-		writeFileSync(file, `${lines.join("\n")}\n`);
+		const temp = `${file}.${randomUUID()}.tmp`;
+		writeFileSync(temp, `${lines.join("\n")}\n`);
+		renameSync(temp, file);
 		return file;
 	}
 
@@ -498,10 +657,11 @@ export class ExecutionTargets {
 		const ssh = ["ssh", ...this.#sshOptions(record)].map(q).join(" ");
 		const destination = q(this.#sshDestination(record));
 		const excludes = q(this.#excludeFile(remote.base));
-		const rsyncUp = `rsync -az --delete --exclude-from=${excludes} -e ${q(["ssh", ...this.#sshOptions(record)].join(" "))} ${q(`${remote.base}/`)} ${destination}:${q(`${remote.remoteBase}/`)}`;
+		const protectArgs = rsyncProtectArgsFlag();
+		const rsyncUp = `RSYNC_PROTECT_ARGS=1 rsync -az ${protectArgs}--delete --exclude-from=${excludes} -e ${q(["ssh", ...this.#sshOptions(record)].join(" "))} ${q(`${remote.base}/`)} ${destination}:${q(`${remote.remoteBase}/`)}`;
 		// Foreground commands also bring deletions back; background ones only bring new and changed
 		// files, so they never undo edits made on this computer while they ran.
-		const rsyncDown = `rsync -azu ${options.background ? "" : "--delete "}--exclude-from=${excludes} -e ${q(["ssh", ...this.#sshOptions(record)].join(" "))} ${destination}:${q(`${remote.remoteBase}/`)} ${q(`${remote.base}/`)}`;
+		const rsyncDown = `RSYNC_PROTECT_ARGS=1 rsync -azu ${protectArgs}${options.background ? "" : "--delete "}--exclude-from=${excludes} -e ${q(["ssh", ...this.#sshOptions(record)].join(" "))} ${destination}:${q(`${remote.remoteBase}/`)} ${q(`${remote.base}/`)}`;
 		const remoteDir = this.#remoteExpr(remote.remoteCwd);
 		const pid = options.pidFile ? `echo $$ > ${q(options.pidFile)}; ` : "";
 		if (options.interactive) {
@@ -542,8 +702,10 @@ export class ExecutionTargets {
 			const args = [...(full.wslDistro ? ["-d", full.wslDistro] : []), "--cd", toWslPath(cwd), "--", "bash", "-lc", `${pid}${command}`];
 			return { file: "wsl.exe", args, env: { WSLENV: wslEnv(envNames, process.env.WSLENV) } };
 		}
-		// SSH and Boat: Git runs here, where the repository is; everything else runs remotely.
-		if (/^\s*git(\s|$)/.test(command) && !/[;&|`$<>]/.test(command)) return null;
+		// SSH and Boat: strictly validated plain git commands run directly via execFile (no shell);
+		// everything else runs remotely.
+		const localGitArgs = parseSafeLocalGit(command);
+		if (localGitArgs) return { file: "git", args: localGitArgs };
 		return this.#sshInvocation(full, cwd, command, envNames, options.workspaces ?? [], options);
 	}
 

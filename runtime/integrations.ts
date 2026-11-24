@@ -1,18 +1,30 @@
 // Integrations (roadmap R14): Slack notifications through an incoming webhook, and Linear as a
-// source of issues for new sessions. Credentials are stored 0600 in ADE's state directory and are
-// never returned to the UI; only whether they are set.
+// source of issues for new sessions. Credentials are stored 0600 in ADE's state directory (with
+// optional OS SecretStore protection) and are never returned to the UI; only whether they are set.
+import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { badRequest, httpError } from "./http-error.ts";
+import { z } from "zod";
 import { createBoatApi } from "./boat.ts";
+import { createSecretStore, isSecretStoreAvailable, type SecretStore } from "./copilot-auth.ts";
+import { badRequest, httpError } from "./http-error.ts";
 
 export type SlackEvents = { finished: boolean; needsApproval: boolean; failed: boolean; automations: boolean };
 
-type Stored = {
-	slack?: { webhook: string; events: SlackEvents };
-	linear?: { apiKey: string; viewer: string | null };
-	boat?: { apiKey: string };
-};
+const SlackEventsSchema = z.object({
+	finished: z.boolean(),
+	needsApproval: z.boolean(),
+	failed: z.boolean(),
+	automations: z.boolean(),
+});
+
+const StoredIntegrationsSchema = z.object({
+	slack: z.object({ webhook: z.string(), events: SlackEventsSchema }).optional(),
+	linear: z.object({ apiKey: z.string(), viewer: z.string().nullable() }).optional(),
+	boat: z.object({ apiKey: z.string() }).optional(),
+});
+
+type Stored = z.infer<typeof StoredIntegrationsSchema>;
 
 export type IntegrationStatus = {
 	slack: { configured: boolean; events: SlackEvents };
@@ -27,10 +39,16 @@ type Fetch = typeof fetch;
 const DEFAULT_EVENTS: SlackEvents = { finished: true, needsApproval: true, failed: true, automations: true };
 
 function isLoopback(url: URL) {
-	return ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+	return ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname.toLowerCase());
 }
 
-export function validateWebhook(value: unknown) {
+function allowsLocalWebhooksByDefault(): boolean {
+	if (process.env.ADE_ALLOW_LOCAL_WEBHOOKS === "1") return true;
+	if (process.env.ADE_ALLOW_LOCAL_WEBHOOKS === "0") return false;
+	return Boolean(process.env.NODE_TEST_CONTEXT);
+}
+
+export function validateWebhook(value: unknown, opts?: { allowLoopback?: boolean }) {
 	if (typeof value !== "string") throw badRequest("Paste the Slack incoming webhook URL.");
 	let url: URL;
 	try {
@@ -38,25 +56,67 @@ export function validateWebhook(value: unknown) {
 	} catch {
 		throw badRequest("That isn't a valid URL.");
 	}
-	// Slack webhooks are https; plain http is only accepted for a local test receiver.
-	if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback(url))) throw badRequest("The webhook must be an https:// URL, like https://hooks.slack.com/services/…");
+	const allowLoopback = opts?.allowLoopback ?? allowsLocalWebhooksByDefault();
+	if (url.protocol === "http:" && isLoopback(url) && allowLoopback) {
+		return url.toString();
+	}
+	if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "hooks.slack.com") {
+		throw badRequest("The webhook must be an https://hooks.slack.com/ URL, like https://hooks.slack.com/services/…");
+	}
 	return url.toString();
 }
+
+export type IntegrationsOptions = {
+	fetch?: Fetch;
+	secretStore?: SecretStore | null;
+};
 
 export class Integrations {
 	#file: string;
 	#data: Stored;
 	#fetch: Fetch;
+	#secretStore: SecretStore | null;
 
-	constructor(stateDirectory: string, fetchImpl: Fetch = fetch) {
+	constructor(stateDirectory: string, fetchOrOptions: Fetch | IntegrationsOptions = fetch) {
 		this.#file = join(stateDirectory, "integrations.json");
-		this.#fetch = fetchImpl;
+		if (typeof fetchOrOptions === "function") {
+			this.#fetch = fetchOrOptions;
+			this.#secretStore = null;
+		} else {
+			this.#fetch = fetchOrOptions.fetch ?? fetch;
+			this.#secretStore = fetchOrOptions.secretStore ?? null;
+		}
 		this.#data = this.#load();
+	}
+
+	async hydrateFromProtectedStore(): Promise<void> {
+		const store = this.#secretStore ?? (isSecretStoreAvailable() ? createSecretStore() : null);
+		if (!store || store.backend === "unsupported") return;
+		this.#secretStore = store;
+		if (!existsSync(this.#file)) return;
+		try {
+			const raw = await store.read(this.#file);
+			const parsed = StoredIntegrationsSchema.safeParse(JSON.parse(raw));
+			if (parsed.success) this.#data = parsed.data;
+		} catch {
+			// Fall back to existing file if not yet migrated.
+		}
+	}
+
+	async flushProtectedStore(): Promise<boolean> {
+		const store = this.#secretStore ?? (isSecretStoreAvailable() ? createSecretStore() : null);
+		if (!store || store.backend === "unsupported") return false;
+		this.#secretStore = store;
+		mkdirSync(dirname(this.#file), { recursive: true });
+		await store.write(this.#file, JSON.stringify(this.#data));
+		return true;
 	}
 
 	#load(): Stored {
 		try {
-			if (existsSync(this.#file)) return JSON.parse(readFileSync(this.#file, "utf8")) as Stored;
+			if (!existsSync(this.#file)) return {};
+			const parsed = StoredIntegrationsSchema.safeParse(JSON.parse(readFileSync(this.#file, "utf8")));
+			if (parsed.success) return parsed.data;
 		} catch {
 			// Start empty if unreadable.
 		}
@@ -65,10 +125,13 @@ export class Integrations {
 
 	#save() {
 		mkdirSync(dirname(this.#file), { recursive: true });
-		const temp = `${this.#file}.tmp`;
+		const temp = `${this.#file}.${randomUUID()}.tmp`;
 		writeFileSync(temp, JSON.stringify(this.#data), { mode: 0o600 });
 		renameSync(temp, this.#file);
 		chmodSync(this.#file, 0o600);
+		if (this.#secretStore && this.#secretStore.backend !== "unsupported") {
+			void this.#secretStore.write(this.#file, JSON.stringify(this.#data)).catch(() => undefined);
+		}
 	}
 
 	status(): IntegrationStatus {

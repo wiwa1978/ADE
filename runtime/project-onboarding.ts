@@ -220,6 +220,12 @@ export async function openInExternalApp(
 	if (!existsSync(target)) {
 		throw notFound(`Folder does not exist: ${target}`);
 	}
+	if (!statSync(target).isDirectory()) {
+		throw badRequest(`Path is not a directory: ${target}`);
+	}
+	if (app === "finder" && process.platform === "darwin" && /\.(?:app|pkg|mpkg|workflow|action|scptd|prefPane|command)$/i.test(target)) {
+		throw badRequest(`Refusing to launch executable bundle as a folder: ${target}`);
+	}
 	const platform = process.platform;
 	const tryCmd = async (bin: string, args: string[]) => {
 		await execFileAsync(bin, args, { timeout: 10_000, windowsHide: true });

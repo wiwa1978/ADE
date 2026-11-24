@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { ChevronLeft, ChevronRight, Copy, Download, MessageSquare, RotateCcw, Sparkles, TriangleAlert, Wrench } from "lucide-react"
-import { resolveCaptainUrl } from "../../api"
+import { getCaptainEndpoint, resolveCaptainUrl } from "../../api"
 import type { TimelineItem } from "../../app-types"
 import { describeToolCall, replaySteps, type ReplayStep, type TranscriptItem } from "../../packages/protocol/transcript.ts"
 
@@ -24,7 +24,8 @@ export function TranscriptPanel({
   const relative = (text: string) => (workspacePath ? text.split(`${workspacePath}/`).join("") : text)
   const steps = replaySteps(items as TranscriptItem[])
   const [selected, setSelected] = useState<number | null>(null)
-  const [notice, setNotice] = useState("")
+  const [notice, setNotice] = useState<{ text: string; tone: "ok" | "error" } | null>(null)
+  const [exporting, setExporting] = useState<"copy" | "md" | "json" | null>(null)
   const listRef = useRef<HTMLOListElement>(null)
   // Follow the latest step until the user picks one.
   const index = selected === null ? steps.length - 1 : Math.min(selected, steps.length - 1)
@@ -36,15 +37,56 @@ export function TranscriptPanel({
 
   const exportUrl = (format: "md" | "json") => resolveCaptainUrl(`/api/sessions/${encodeURIComponent(sessionId)}/transcript?format=${format}`)
 
+  const fetchTranscript = async (format: "md" | "json"): Promise<Response> => {
+    const endpoint = getCaptainEndpoint()
+    const headers = new Headers()
+    if (endpoint.authToken) {
+      headers.set("authorization", `Bearer ${endpoint.authToken}`)
+    }
+    const response = await fetch(exportUrl(format), { headers })
+    if (!response.ok) throw new Error(`The export failed (${response.status}).`)
+    return response
+  }
+
   const copyMarkdown = async () => {
-    setNotice("")
+    setNotice(null)
+    setExporting("copy")
     try {
-      const response = await fetch(exportUrl("md"))
-      if (!response.ok) throw new Error(`The export failed (${response.status}).`)
+      const response = await fetchTranscript("md")
       await navigator.clipboard.writeText(await response.text())
-      setNotice("Copied the transcript as Markdown.")
+      setNotice({ text: "Copied the transcript as Markdown.", tone: "ok" })
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Could not copy.")
+      setNotice({ text: err instanceof Error ? err.message : "Could not copy.", tone: "error" })
+    } finally {
+      setExporting(null)
+    }
+  }
+
+  const downloadExport = async (format: "md" | "json") => {
+    setNotice(null)
+    setExporting(format)
+    try {
+      const response = await fetchTranscript(format)
+      const content = await response.text()
+      const mimeType = format === "json" ? "application/json;charset=utf-8" : "text/markdown;charset=utf-8"
+      const blob = new Blob([content], { type: mimeType })
+      const objectUrl = URL.createObjectURL(blob)
+      try {
+        const safeSessionId = sessionId.replace(/[^a-zA-Z0-9._-]+/g, "_") || "session"
+        const link = document.createElement("a")
+        link.href = objectUrl
+        link.download = `transcript-${safeSessionId}.${format}`
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+      } finally {
+        URL.revokeObjectURL(objectUrl)
+      }
+      setNotice({ text: `Downloaded transcript as .${format}.`, tone: "ok" })
+    } catch (err) {
+      setNotice({ text: err instanceof Error ? err.message : "Could not download transcript.", tone: "error" })
+    } finally {
+      setExporting(null)
     }
   }
 
@@ -62,12 +104,16 @@ export function TranscriptPanel({
           ) : null}
         </div>
         <div className="ade-toolbar-actions">
-          <button type="button" className="ade-chip-btn" onClick={() => void copyMarkdown()} title="Copy the whole session as Markdown"><Copy className="size-3" /> Copy</button>
-          <a className="ade-chip-btn" href={exportUrl("md")} download title="Download as Markdown"><Download className="size-3" /> .md</a>
-          <a className="ade-chip-btn" href={exportUrl("json")} download title="Download as JSON"><Download className="size-3" /> .json</a>
+          <button type="button" className="ade-chip-btn" disabled={exporting !== null} onClick={() => void copyMarkdown()} title="Copy the whole session as Markdown"><Copy className="size-3" /> Copy</button>
+          <button type="button" className="ade-chip-btn" disabled={exporting !== null} onClick={() => void downloadExport("md")} title="Download as Markdown"><Download className="size-3" /> .md</button>
+          <button type="button" className="ade-chip-btn" disabled={exporting !== null} onClick={() => void downloadExport("json")} title="Download as JSON"><Download className="size-3" /> .json</button>
         </div>
       </div>
-      {notice ? <div className="ade-banner-ok" role="status">{notice}</div> : null}
+      {notice ? (
+        <div className={notice.tone === "error" ? "ade-banner-error" : "ade-banner-ok"} role={notice.tone === "error" ? "alert" : "status"}>
+          {notice.text}
+        </div>
+      ) : null}
       {!steps.length ? <div className="ade-pane-empty"><p>Nothing has happened in this session yet.</p></div> : (
         <div className="ade-transcript-body">
           <ol className="ade-transcript-steps" ref={listRef} aria-label="Steps">

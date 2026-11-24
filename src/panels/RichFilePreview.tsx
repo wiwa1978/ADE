@@ -282,9 +282,21 @@ export function RichFilePreview({
             ) : null}
           </div>
         ) : previewKind === "pdf" ? (
-          <iframe src={rawUrl} title={filePath} className="ade-artifact-html-frame" />
+          <iframe
+            src={rawUrl}
+            title={filePath}
+            className="ade-artifact-html-frame"
+            sandbox="allow-scripts"
+            referrerPolicy="no-referrer"
+          />
         ) : previewKind === "html" && viewMode === "preview" ? (
-          <iframe srcDoc={content} title={filePath} className="ade-artifact-html-frame" sandbox="allow-scripts" />
+          <iframe
+            srcDoc={content}
+            title={filePath}
+            className="ade-artifact-html-frame"
+            sandbox="allow-scripts"
+            referrerPolicy="no-referrer"
+          />
         ) : previewKind === "markdown" && viewMode === "preview" ? (
           <div className="ade-msg-markdown">
             <MessageContent content={content} />

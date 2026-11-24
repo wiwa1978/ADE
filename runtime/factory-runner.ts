@@ -105,6 +105,7 @@ export class LocalFactoryRunner {
   readonly github: LocalGitHubProvider;
   readonly #runs = new Map<string, FactoryRunDetail>();
   readonly #autoLoops = new Map<string, Promise<void>>();
+  readonly #stepLocks = new Map<string, Promise<void>>();
   readonly #delegate?: StageExecutorDelegate;
 
   constructor(params: {
@@ -122,12 +123,32 @@ export class LocalFactoryRunner {
         mode: params.sandboxMode ?? "auto",
       });
     this.github = params.github ?? new LocalGitHubProvider();
-    this.captain = new CaptainCore({
-      host: params.captain.host,
-      sandbox: this.sandbox,
-      github: this.github,
-    });
+    // Reuse the single CaptainCore instance so host.factory and factoryRunner.captain share state.
+    this.captain = params.captain;
+    if (!this.captain.sandbox) {
+      Object.assign(this.captain, { sandbox: this.sandbox });
+    }
+    if (!this.captain.github) {
+      Object.assign(this.captain, { github: this.github });
+    }
     this.#delegate = params.stageExecutor;
+  }
+
+  async #withRunLock<T>(runId: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.#stepLocks.get(runId) ?? Promise.resolve();
+    let release!: () => void;
+    const next = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const chained = prev.catch(() => undefined).then(() => next);
+    this.#stepLocks.set(runId, chained);
+    await prev.catch(() => undefined);
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (this.#stepLocks.get(runId) === chained) this.#stepLocks.delete(runId);
+    }
   }
 
   async hydrateFromStorage(): Promise<void> {
@@ -318,6 +339,10 @@ export class LocalFactoryRunner {
   }
 
   async stepRun(runId: string): Promise<FactoryRunDetail> {
+    return this.#withRunLock(runId, () => this.#stepRunUnlocked(runId));
+  }
+
+  async #stepRunUnlocked(runId: string): Promise<FactoryRunDetail> {
     const detail = this.#requireDetail(runId);
     if (detail.pausedByHuman) {
       throw new Error(`Run "${runId}" is paused by user. Resume or release takeover before stepping.`);
@@ -521,17 +546,19 @@ export class LocalFactoryRunner {
     cardId?: string,
     note?: string,
   ): Promise<FactoryRunDetail> {
-    const detail = this.#requireDetail(runId);
-    detail.run = await this.captain.approveCurrentStage({
-      runId,
-      blueprint: detail.blueprint,
-      decision,
-      cardId,
-      note,
+    return this.#withRunLock(runId, async () => {
+      const detail = this.#requireDetail(runId);
+      detail.run = await this.captain.approveCurrentStage({
+        runId,
+        blueprint: detail.blueprint,
+        decision,
+        cardId,
+        note,
+      });
+      this.#log(detail, "approval", "info", `Human decision: ${decision}${note ? ` (${note})` : ""}`);
+      await this.#persistAndBroadcast(detail);
+      return this.#snapshot(detail);
     });
-    this.#log(detail, "approval", "info", `Human decision: ${decision}${note ? ` (${note})` : ""}`);
-    await this.#persistAndBroadcast(detail);
-    return this.#snapshot(detail);
   }
 
   async pauseRun(runId: string): Promise<FactoryRunDetail> {

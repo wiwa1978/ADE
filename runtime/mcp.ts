@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { map, unknown } from "@earendil-works/pi-schema";
+import { z } from "zod";
 import type { RuntimeEventBus } from "./events.ts";
 import { runHostMigrations } from "./db/migrations.ts";
 import { isErrorCode, logger } from "./log.ts";
@@ -50,13 +51,76 @@ type McpServerRow = {
 	createdAt: number;
 };
 
-type StoredMcpConfig = {
-	command?: string;
-	args?: string[];
-	env?: Record<string, string>;
-	url?: string;
-	headers?: Record<string, string>;
-};
+const StoredMcpConfigSchema = z.object({
+	command: z.string().optional(),
+	args: z.array(z.string()).optional(),
+	env: z.record(z.string(), z.string()).optional(),
+	url: z.string().optional(),
+	headers: z.record(z.string(), z.string()).optional(),
+});
+
+type StoredMcpConfig = z.infer<typeof StoredMcpConfigSchema>;
+
+const DiskMcpFileSchema = z.object({
+	mcpServers: z.record(z.string(), z.unknown()).optional(),
+	servers: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const MCP_SECRET_REDACTED = "••••••••";
+
+function redactSecretRecord(record: Record<string, string> | undefined): Record<string, string> {
+	if (!record) return {};
+	return Object.fromEntries(Object.keys(record).map((key) => [key, MCP_SECRET_REDACTED]));
+}
+
+function mergeWithExistingSecrets(
+	incoming: Record<string, string> | undefined,
+	existing: Record<string, string> | undefined,
+): Record<string, string> {
+	if (!incoming) return {};
+	const out: Record<string, string> = {};
+	for (const [key, value] of Object.entries(incoming)) {
+		if (typeof value !== "string") continue;
+		out[key] = value === MCP_SECRET_REDACTED && existing && key in existing ? existing[key] : value;
+	}
+	return out;
+}
+
+export function validateMcpHttpUrl(raw: string): string {
+	const trimmed = raw.trim();
+	let parsed: URL;
+	try {
+		parsed = new URL(trimmed);
+	} catch {
+		throw badRequest("Provide a valid http:// or https:// URL for HTTP MCP servers.");
+	}
+	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+		throw badRequest("HTTP MCP server URLs must use http:// or https://.");
+	}
+	const host = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase().replace(/\.+$/, "");
+	if (
+		host === "metadata" ||
+		host === "metadata.google.internal" ||
+		host === "metadata.goog" ||
+		/^169\.254\.\d{1,3}\.\d{1,3}$/.test(host) ||
+		/^::ffff:(?:a9fe:[0-9a-f]{1,4}|169\.254\.\d{1,3}\.\d{1,3})$/i.test(host) ||
+		/^(?:fe[89ab][0-9a-f]|f[cd][0-9a-f]{2})(?::|$)/i.test(host)
+	) {
+		throw badRequest("HTTP MCP server URL cannot target link-local or cloud metadata addresses.");
+	}
+	return parsed.toString();
+}
+
+function parseStoredConfig(configJson: string, context: { serverId: string; name: string }): StoredMcpConfig {
+	try {
+		const parsed = StoredMcpConfigSchema.safeParse(JSON.parse(configJson));
+		if (parsed.success) return parsed.data;
+		logger.warn("Invalid configJson schema for MCP server", { context });
+	} catch (error) {
+		logger.warn("Malformed configJson for MCP server", { error, context });
+	}
+	return {};
+}
 
 class StdioMcpClient {
 	#child: ChildProcess;
@@ -69,6 +133,19 @@ class StdioMcpClient {
 			env: { ...process.env, ...(env ?? {}) },
 			stdio: ["pipe", "pipe", "pipe"],
 		});
+		const rejectAll = (reason: Error) => {
+			for (const p of this.#pending.values()) p.reject(reason);
+			this.#pending.clear();
+		};
+		this.#child.on("error", (error) => {
+			logger.warn("Stdio MCP server process failed", { error, context: { command } });
+			rejectAll(new Error(`Failed to start MCP server "${command}": ${error.message}`));
+		});
+		this.#child.stdin?.on("error", (error) => {
+			logger.debug("Stdio MCP stdin error", { error, context: { command } });
+		});
+		// Drain stderr so the OS pipe buffer never deadlocks the MCP child process.
+		this.#child.stderr?.resume();
 		this.#child.stdout?.on("data", (chunk: Buffer) => {
 			this.#buffer += chunk.toString("utf8");
 			const lines = this.#buffer.split("\n");
@@ -78,11 +155,13 @@ class StdioMcpClient {
 				if (!trimmed) continue;
 				try {
 					const msg = JSON.parse(trimmed) as JsonRpcResponse;
-					if (msg.id !== undefined && this.#pending.has(msg.id)) {
-						const p = this.#pending.get(msg.id)!;
-						this.#pending.delete(msg.id);
-						if (msg.error) p.reject(new Error(msg.error.message || "MCP error"));
-						else p.resolve(msg.result);
+					if (msg.id !== undefined) {
+						const p = this.#pending.get(msg.id);
+						if (p) {
+							this.#pending.delete(msg.id);
+							if (msg.error) p.reject(new Error(msg.error.message || "MCP error"));
+							else p.resolve(msg.result);
+						}
 					}
 				} catch (error) {
 					// MCP stdio servers occasionally emit non-JSON diagnostic lines on stdout.
@@ -91,8 +170,7 @@ class StdioMcpClient {
 			}
 		});
 		this.#child.once("exit", () => {
-			for (const p of this.#pending.values()) p.reject(new Error("MCP server process exited."));
-			this.#pending.clear();
+			rejectAll(new Error("MCP server process exited."));
 		});
 	}
 
@@ -137,7 +215,7 @@ class HttpMcpClient {
 	#sessionId: string | null = null;
 
 	constructor(url: string, headers: Record<string, string> = {}) {
-		this.#url = url;
+		this.#url = validateMcpHttpUrl(url);
 		this.#headers = headers;
 	}
 
@@ -203,14 +281,25 @@ export class McpManager {
 		const path = join(homedir(), ".ade", "mcp.json");
 		if (!existsSync(path)) return;
 		try {
-			const parsed = JSON.parse(readFileSync(path, "utf8")) as { mcpServers?: unknown; servers?: unknown };
-			const servers = parsed?.mcpServers ?? parsed?.servers;
-			if (!servers || typeof servers !== "object") return;
-			for (const [name, rawDef] of Object.entries(servers as Record<string, unknown>)) {
-				const def = (rawDef && typeof rawDef === "object" ? rawDef : {}) as StoredMcpConfig;
+			const parsedFile = DiskMcpFileSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
+			if (!parsedFile.success) return;
+			const servers = parsedFile.data.mcpServers ?? parsedFile.data.servers;
+			if (!servers) return;
+			for (const [name, rawDef] of Object.entries(servers)) {
+				const parsedDef = StoredMcpConfigSchema.safeParse(rawDef);
+				if (!parsedDef.success) continue;
+				const def = parsedDef.data;
 				const exists = this.#db.prepare("SELECT 1 FROM mcp_servers WHERE name=?").get(name);
 				if (exists) continue;
 				const transport = def.url ? "http" : "stdio";
+				if (transport === "http" && def.url) {
+					try {
+						validateMcpHttpUrl(def.url);
+					} catch {
+						logger.warn("Skipped invalid MCP HTTP URL from ~/.ade/mcp.json", { context: { name } });
+						continue;
+					}
+				}
 				this.#db.prepare("INSERT INTO mcp_servers (id, name, transport, configJson, enabled, createdAt) VALUES (?, ?, ?, ?, 1, ?)")
 					.run(randomUUID(), name, transport, JSON.stringify({
 						command: def.command,
@@ -225,15 +314,17 @@ export class McpManager {
 		}
 	}
 
+	#getRawRow(id: string): (McpServerRow & { cfg: StoredMcpConfig }) | null {
+		const row = this.#db.prepare("SELECT * FROM mcp_servers WHERE id=?").get(id) as McpServerRow | undefined;
+		if (!row) return null;
+		return { ...row, cfg: parseStoredConfig(row.configJson, { serverId: row.id, name: row.name }) };
+	}
+
+	/** List configured MCP servers with secret `env` and `headers` values masked. */
 	list(): McpServerStatus[] {
 		const rows = this.#db.prepare("SELECT * FROM mcp_servers ORDER BY createdAt ASC").all() as unknown as McpServerRow[];
 		return rows.map(row => {
-			let cfg: StoredMcpConfig = {};
-			try {
-				cfg = JSON.parse(row.configJson) as StoredMcpConfig;
-			} catch (error) {
-				logger.warn("Malformed configJson for MCP server", { error, context: { serverId: row.id, name: row.name } });
-			}
+			const cfg = parseStoredConfig(row.configJson, { serverId: row.id, name: row.name });
 			const rt = this.#runtime.get(row.id);
 			return {
 				id: row.id,
@@ -241,9 +332,9 @@ export class McpManager {
 				transport: row.transport,
 				command: cfg.command,
 				args: cfg.args ?? [],
-				env: cfg.env ?? {},
+				env: redactSecretRecord(cfg.env),
 				url: cfg.url,
-				headers: cfg.headers ?? {},
+				headers: redactSecretRecord(cfg.headers),
 				enabled: Boolean(row.enabled),
 				status: rt?.status ?? "disconnected",
 				error: rt?.error ?? null,
@@ -259,19 +350,21 @@ export class McpManager {
 		if (transport === "stdio" && !input.command?.trim()) {
 			throw badRequest("Provide a command for stdio MCP servers.");
 		}
-		if (transport === "http" && !input.url?.trim()) {
-			throw badRequest("Provide a URL for HTTP MCP servers.");
+		let validatedUrl: string | undefined;
+		if (transport === "http") {
+			if (!input.url?.trim()) throw badRequest("Provide a URL for HTTP MCP servers.");
+			validatedUrl = validateMcpHttpUrl(input.url);
 		}
 		const id = input.id || randomUUID();
+		const existing = this.#getRawRow(id);
 		const configJson = JSON.stringify({
 			command: input.command?.trim() || undefined,
 			args: Array.isArray(input.args) ? input.args.map(String) : [],
-			env: input.env ?? {},
-			url: input.url?.trim() || undefined,
-			headers: input.headers ?? {},
+			env: mergeWithExistingSecrets(input.env, existing?.cfg.env),
+			url: validatedUrl,
+			headers: mergeWithExistingSecrets(input.headers, existing?.cfg.headers),
 		});
 		const enabled = input.enabled === false ? 0 : 1;
-		const existing = this.#db.prepare("SELECT id FROM mcp_servers WHERE id=?").get(id);
 		if (existing) {
 			this.#db.prepare("UPDATE mcp_servers SET name=?, transport=?, configJson=?, enabled=? WHERE id=?")
 				.run(name, transport, configJson, enabled, id);
@@ -290,12 +383,12 @@ export class McpManager {
 	}
 
 	async connect(id: string): Promise<McpServerStatus> {
-		const server = this.list().find(s => s.id === id);
-		if (!server) throw notFound("MCP server not found.");
+		const raw = this.#getRawRow(id);
+		if (!raw) throw notFound("MCP server not found.");
 		this.disconnect(id);
-		const client = server.transport === "http"
-			? new HttpMcpClient(server.url!, server.headers)
-			: new StdioMcpClient(server.command!, server.args ?? [], server.env);
+		const client = raw.transport === "http"
+			? new HttpMcpClient(raw.cfg.url ?? "", raw.cfg.headers ?? {})
+			: new StdioMcpClient(raw.cfg.command ?? "", raw.cfg.args ?? [], raw.cfg.env ?? {});
 		const state: ConnectedServer = { client, status: "connecting", error: null, tools: [] };
 		this.#runtime.set(id, state);
 		this.#events.emit("mcp.update", { servers: this.list() });

@@ -1,11 +1,37 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import type { CaptainEvent, ModelProfileId } from "../protocol/index.ts";
 import { getBlueprint, listBlueprints } from "../blueprints/index.ts";
 import { CaptainCore, listModelProfiles } from "../captain-core/index.ts";
 import { createNodeSqliteCaptainHost } from "../host-node/index.ts";
 import type { SandboxProvider } from "../protocol/index.ts";
+
+const MAX_SSE_CLIENTS = 64;
+
+const GitHubWebhookPayloadSchema = z.object({
+  action: z.string().optional(),
+  label: z.object({ name: z.string().optional() }).optional(),
+  repository: z.object({ full_name: z.string().min(1).max(200).optional() }).optional(),
+  issue: z.object({
+    number: z.number().int().positive().optional(),
+    title: z.string().max(500).optional(),
+    html_url: z.string().max(1000).optional(),
+  }).optional(),
+});
+
+const CreateFactoryRunBodySchema = z.object({
+  runId: z.string().trim().min(1).max(120).optional(),
+  projectId: z.string().trim().min(1).max(200).optional(),
+  blueprintId: z.string().trim().min(1).max(120).optional(),
+  issueRef: z.object({
+    repository: z.string().min(1).max(200),
+    number: z.number().int().positive(),
+    title: z.string().max(500),
+    url: z.string().max(1000),
+  }).optional(),
+});
 
 export type RemoteCaptainServerOptions = {
   dbPath: string;
@@ -24,6 +50,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown, origin?: s
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
     ...(origin ? { "access-control-allow-origin": origin } : {}),
   });
   res.end(JSON.stringify(body));
@@ -107,8 +134,9 @@ export function createRemoteCaptainServer(options: RemoteCaptainServerOptions): 
 
   const server = createServer(async (req, res) => {
     const originHeader = req.headers.origin;
+    // Never reflect arbitrary origins by default: only allow explicitly configured origins.
     const allowedOrigin =
-      originHeader && (!options.allowedOrigins || options.allowedOrigins.includes(originHeader))
+      originHeader && Array.isArray(options.allowedOrigins) && options.allowedOrigins.includes(originHeader)
         ? originHeader
         : undefined;
 
@@ -126,24 +154,32 @@ export function createRemoteCaptainServer(options: RemoteCaptainServerOptions): 
     const path = url.pathname;
 
     try {
-      // GitHub Webhook intake (authenticated via HMAC-SHA256, not bearer token)
+      // GitHub Webhook intake (authenticated via HMAC-SHA256; fails closed if secret is unset)
       if (req.method === "POST" && path === "/api/webhooks/github") {
-        const raw = await readRawBody(req);
-        if (options.githubWebhookSecret) {
-          const ok = verifyGitHubWebhookSignature(
-            raw,
-            req.headers["x-hub-signature-256"] as string | undefined,
-            options.githubWebhookSecret,
-          );
-          if (!ok) return sendJson(res, 401, { error: "Invalid GitHub webhook signature." });
+        const webhookSecret = options.githubWebhookSecret?.trim();
+        if (!webhookSecret) {
+          return sendJson(res, 503, { error: "GitHub webhook intake is disabled because githubWebhookSecret is not configured." });
         }
+        const raw = await readRawBody(req);
+        const ok = verifyGitHubWebhookSignature(
+          raw,
+          req.headers["x-hub-signature-256"] as string | undefined,
+          webhookSecret,
+        );
+        if (!ok) return sendJson(res, 401, { error: "Invalid GitHub webhook signature." });
+
         const eventName = req.headers["x-github-event"];
-        const payload = JSON.parse(raw.toString("utf8")) as {
-          action?: string;
-          label?: { name?: string };
-          repository?: { full_name?: string };
-          issue?: { number?: number; title?: string; html_url?: string };
-        };
+        let parsedJson: unknown;
+        try {
+          parsedJson = JSON.parse(raw.toString("utf8"));
+        } catch {
+          return sendJson(res, 400, { error: "Invalid JSON webhook payload." });
+        }
+        const validated = GitHubWebhookPayloadSchema.safeParse(parsedJson);
+        if (!validated.success) {
+          return sendJson(res, 400, { error: "Malformed GitHub webhook payload." });
+        }
+        const payload = validated.data;
 
         if (
           eventName === "issues" &&
@@ -186,6 +222,9 @@ export function createRemoteCaptainServer(options: RemoteCaptainServerOptions): 
 
       // Multi-device live SSE stream (Desktop + Web + iPhone/Android PWA)
       if (req.method === "GET" && path === "/api/events") {
+        if (sseClients.size >= MAX_SSE_CLIENTS) {
+          return sendJson(res, 503, { error: "Too many active event stream connections." }, allowedOrigin);
+        }
         res.writeHead(200, {
           "content-type": "text/event-stream; charset=utf-8",
           "cache-control": "no-cache, no-transform",
@@ -223,17 +262,22 @@ export function createRemoteCaptainServer(options: RemoteCaptainServerOptions): 
 
       if (req.method === "POST" && path === "/api/factory/runs") {
         const raw = await readRawBody(req);
-        const input = JSON.parse(raw.toString("utf8")) as {
-          runId?: string;
-          projectId?: string;
-          blueprintId?: string;
-          issueRef?: { repository: string; number: number; title: string; url: string };
-        };
+        let parsedJson: unknown;
+        try {
+          parsedJson = JSON.parse(raw.toString("utf8"));
+        } catch {
+          return sendJson(res, 400, { error: "Invalid JSON request body." }, allowedOrigin);
+        }
+        const validated = CreateFactoryRunBodySchema.safeParse(parsedJson);
+        if (!validated.success) {
+          return sendJson(res, 400, { error: validated.error.issues[0]?.message ?? "Invalid factory run payload." }, allowedOrigin);
+        }
+        const input = validated.data;
         const bp = getBlueprint(input.blueprintId ?? options.defaultBlueprintId ?? "automated-factory");
         if (!bp) return sendJson(res, 400, { error: "Unknown blueprint." }, allowedOrigin);
         const run = await captain.startBlueprintRun({
-          runId: input.runId?.trim() || `remote_${Date.now()}`,
-          projectId: input.projectId?.trim() || "default",
+          runId: input.runId || `remote_${Date.now()}`,
+          projectId: input.projectId || "default",
           blueprint: bp,
           issueRef: input.issueRef,
         });

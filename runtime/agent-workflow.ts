@@ -32,6 +32,7 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	const secrets = new ProjectSecrets(stateDirectory);
 	/** The project a working directory belongs to: a session's worktree or a project checkout (or a folder inside one). */
 	const projectForCwd = (cwd: string): string | null => {
+		if (typeof host.findProjectForCwd === "function") return host.findProjectForCwd(cwd);
 		const real = (path: string) => { try { return realpathSync(path); } catch { return resolve(path); } };
 		const target = real(cwd);
 		const inside = (root: string | null | undefined) => {
@@ -48,8 +49,7 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	const scriptRunner = new ScriptRunner({ events: host.events });
 	const checkpoints = createCheckpoints();
 	const engines = new EngineManager({ stateDirectory, events: host.events });
-	/** Sessions as the UI sees them: sessions run by Claude Code or Codex report that engine's status. */
-	const viewSessions = (): Conversation[] => host.sessions().map(session => {
+	const overlayEngine = (session: Conversation): Conversation => {
 		const engine = engines.get(session.id);
 		if (!engine) return session;
 		const working = engines.isWorking(session.id);
@@ -60,7 +60,24 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 			updatedAt: Math.max(session.updatedAt ?? 0, engine.updatedAt),
 			lastTurnStatus: working ? "pending" : engine.lastStatus,
 		};
-	});
+	};
+	/** Sessions as the UI sees them: sessions run by Claude Code or Codex report that engine's status. */
+	const viewSessions = (): Conversation[] => host.sessions().map(overlayEngine);
+	/** O(1) single-session view without scanning all sessions and turns. */
+	const viewSession = (sessionId: string): Conversation | undefined => {
+		const session = typeof host.getSession === "function"
+			? host.getSession(sessionId)
+			: host.sessions?.().find(item => item.id === sessionId);
+		return session ? overlayEngine(session) : undefined;
+	};
+	const sessionWorkspaces = () => (typeof host.listSessionWorkspaces === "function"
+		? host.listSessionWorkspaces()
+		: (host.sessions?.() ?? []).map(item => ({
+			id: item.id,
+			path: item.workspace?.path ?? null,
+			repository: item.workspace?.repository ?? "",
+			archivedAt: item.archivedAt ?? null,
+		})));
 	const inbox = createInbox({
 		sessions: viewSessions,
 		getWorkspacePath: id => host.getWorkspacePath(id),
@@ -73,13 +90,18 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	const executionTargets = new ExecutionTargets(stateDirectory, { worktreesRoot: worktreeManager?.root ?? null, boat: () => integrations.boatApi() });
 	setExecutionTargets(
 		executionTargets,
-		cwd => executionTargets.sessionForPath(cwd, (host.sessions?.() ?? []).map(item => ({ id: item.id, path: item.workspace?.path }))),
-		sessionId => [host.sessions?.().find(item => item.id === sessionId)?.workspace?.path].filter((path): path is string => Boolean(path)),
+		cwd => executionTargets.sessionForPath(cwd, sessionWorkspaces()),
+		sessionId => {
+			const path = typeof host.getWorkspacePath === "function"
+				? host.getWorkspacePath(sessionId)
+				: host.sessions?.().find(item => item.id === sessionId)?.workspace?.path ?? null;
+			return path ? [path] : [];
+		},
 	);
 	// Containers stop when the computer restarts; start them again for Docker sessions that are still open.
-	for (const session of host.sessions?.() ?? []) {
-		if (executionTargets.isDocker(session.id) && session.workspace?.path && !session.archivedAt) {
-			void executionTargets.ensure(session.id, { workspace: session.workspace.path, repository: session.workspace.repository }).catch(() => undefined);
+	for (const session of sessionWorkspaces()) {
+		if (executionTargets.isDocker(session.id) && session.path && !session.archivedAt) {
+			void executionTargets.ensure(session.id, { workspace: session.path, repository: session.repository }).catch(() => undefined);
 		}
 	}
 
@@ -114,10 +136,25 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		if (engines.get(sessionId)) {
 			if (!workspace) throw Object.assign(new Error("Session has no ready workspace."), { statusCode: 404 });
 			engines.send(sessionId, workspace, content, host.approvals.policy(sessionId), null);
-			return viewSessions().find(item => item.id === sessionId);
+			return viewSession(sessionId);
 		}
 		return host.send("coding", { ...options, content }, sessionId);
 	}
+
+	const unsubscribers: Array<() => void> = [];
+	const pendingTimers = new Set<ReturnType<typeof setTimeout>>();
+	const subscribeEvent = (listener: Parameters<NonNullable<typeof host.events>["subscribe"]>[0]) => {
+		const unsub = host.events?.subscribe?.(listener);
+		if (typeof unsub === "function") unsubscribers.push(unsub);
+	};
+	const scheduleOnce = (fn: () => void, ms: number) => {
+		const timer = setTimeout(() => {
+			pendingTimers.delete(timer);
+			fn();
+		}, ms);
+		timer.unref?.();
+		pendingTimers.add(timer);
+	};
 
 	// Hook: after an agent turn ends, run the project's check command (lint, typecheck, tests) in the
 	// workspace. With auto-fix on, a failing check goes back to the agent, at most twice in a row.
@@ -128,12 +165,12 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		const key = `${sessionId}:${event}`;
 		if (Date.now() - (lastNotified.get(key) ?? 0) < 30_000) return;
 		lastNotified.set(key, Date.now());
-		const session = viewSessions().find(item => item.id === sessionId);
+		const session = viewSession(sessionId);
 		if (!session || session.id === "coding" || session.id === "personal") return;
 		const project = host.projects?.().find(item => item?.id === session.projectId)?.name ?? "No project";
 		void integrations.notify(describe(session.label, project)).catch(() => undefined);
 	};
-	host.events?.subscribe?.(event => {
+	subscribeEvent(event => {
 		if (event.type === "approval.requested" && event.sessionId) notify("needsApproval", event.sessionId, (label, project) => `⏸ *${label}* (${project}) is waiting for your approval in ADE.`);
 		// A blueprint stage waits for Approve / Request changes.
 		if (event.type === "stages.update" && event.sessionId) {
@@ -146,7 +183,7 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	const agentBusy = new Map<string, boolean>();
 	const autoFixStreak = new Map<string, number>();
 	function runCheck(sessionId: string) {
-		const session = viewSessions().find(item => item.id === sessionId);
+		const session = viewSession(sessionId);
 		const workspace = host.getWorkspacePath(sessionId);
 		const project = session?.projectId ? host.projects().find(item => item?.id === session.projectId) : null;
 		if (!session || !workspace || !project) return;
@@ -165,7 +202,7 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 			void sendToAgent(sessionId, checkFailedPrompt(effective.check, state.output)).catch(() => undefined);
 		}).catch(() => undefined);
 	}
-	host.events?.subscribe?.(event => {
+	subscribeEvent(event => {
 		if (event.type !== "timeline.update" || !event.sessionId) return;
 		const payload = event.payload as { busy?: unknown; isSubagent?: unknown } | null;
 		if (!payload || payload.isSubagent) return;
@@ -186,15 +223,15 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 			const sessionId = event.sessionId;
 			// Give the turn's final status a moment to be stored before reading it.
 			if (integrations.wants("finished") || integrations.wants("failed")) {
-				setTimeout(() => {
+				scheduleOnce(() => {
 					try {
-						const failed = viewSessions().find(item => item.id === sessionId)?.lastTurnStatus === "failed";
+						const failed = viewSession(sessionId)?.lastTurnStatus === "failed";
 						if (failed) notify("failed", sessionId, (label, project) => `❌ *${label}* (${project}): the agent's turn failed.`);
 						else notify("finished", sessionId, (label, project) => `✅ *${label}* (${project}) is done and ready to review.`);
 					} catch {
 						// The runtime may be shutting down.
 					}
-				}, 1500).unref?.();
+				}, 1500);
 			}
 		}
 	});
@@ -263,7 +300,7 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	/** A session's agent finished: on a usage limit, wait or fall back; otherwise reset the count. */
 	function afterRun(sessionId: string) {
 		// Give the turn's final status a moment to be stored before reading it.
-		setTimeout(() => {
+		scheduleOnce(() => {
 			try {
 				if (limitGuard.stopped(sessionId)) return;
 				const engine = engines.get(sessionId);
@@ -277,14 +314,19 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 			} catch {
 				// The runtime may be shutting down.
 			}
-		}, 1000).unref?.();
+		}, 1000);
 	}
 	const projectOf = new Map<string, string | null>();
-	host.events?.subscribe?.(event => {
+	subscribeEvent(event => {
 		if (event.type !== "timeline.update" || !event.sessionId) return;
 		const payload = event.payload as { conversationId?: unknown; usage?: unknown } | null;
 		if (!payload?.usage) return;
-		if (!projectOf.has(event.sessionId)) projectOf.set(event.sessionId, host.sessions().find(item => item.id === event.sessionId)?.projectId ?? null);
+		if (!projectOf.has(event.sessionId)) {
+			const session = typeof host.getSession === "function"
+				? host.getSession(event.sessionId)
+				: host.sessions?.().find(item => item.id === event.sessionId);
+			projectOf.set(event.sessionId, session?.projectId ?? null);
+		}
 		usage.record(event.sessionId, String(payload.conversationId ?? "0"), payload.usage, projectOf.get(event.sessionId) ?? null);
 	});
 	// Claude Code / Codex sessions keep their totals on disk; count any that predate the ledger.
@@ -308,10 +350,41 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	/** Runs on this machine's memory: here, in Docker or in WSL2 (not on an SSH host or Boat.dev VM). */
 	const countsHere = (sessionId: string) => !["ssh", "boat"].includes(sessionTarget(sessionId));
 	const subagentStarts = new Map<string, Promise<boolean>>();
-	host.events?.subscribe?.(event => {
+	const cleanupSessionState = (sessionId: string) => {
+		agentBusy.delete(sessionId);
+		autoFixStreak.delete(sessionId);
+		projectOf.delete(sessionId);
+		usageWaiter.cancel(sessionId);
+		limitGuard.finished(sessionId);
+		const notifyPrefix = `${sessionId}:`;
+		for (const key of [...lastNotified.keys()]) {
+			if (key.startsWith(notifyPrefix)) lastNotified.delete(key);
+		}
+		const subPrefix = subagentKey(sessionId, "");
+		for (const key of [...subagentStarts.keys()]) {
+			if (key.startsWith(subPrefix)) subagentStarts.delete(key);
+		}
+		for (const [key, resolveResume] of [...resumeSubagent.entries()]) {
+			if (key.startsWith(subPrefix)) {
+				resumeSubagent.delete(key);
+				resolveResume(false);
+			}
+		}
+		scheduler.cancelMatching(subPrefix);
+	};
+	subscribeEvent(event => {
 		if (event.type !== "sessions.changed") return;
-		const id = (event.payload as { id?: unknown } | null)?.id;
-		if (typeof id === "string" && id.startsWith("sub-") && !engines.isWorking(id)) scheduler.finished(id);
+		const payload = event.payload as { id?: unknown; archivedAt?: unknown; deleted?: unknown } | null;
+		const id = payload?.id;
+		if (typeof id === "string") {
+			if (id.startsWith("sub-") && !engines.isWorking(id)) {
+				scheduler.finished(id);
+				subagentStarts.delete(id);
+			}
+			if (payload?.deleted === true || (typeof payload?.archivedAt === "number" && payload.archivedAt > 0)) {
+				cleanupSessionState(id);
+			}
+		}
 	});
 	const subagentModel = (engine: string) => {
 		const policy = subagentPolicies.get();
@@ -388,5 +461,24 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 			notify("automations", sessionId, (label, project) => `🤖 Automation started *${label}* (${project}).`);
 		},
 	});
-	return { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner, integrations, executionTargets, subagentPolicies, subagentKey, limitGuard, usageWaiter, scheduler };
+	const dispose = () => {
+		for (const unsub of unsubscribers.splice(0)) unsub();
+		for (const timer of pendingTimers) clearTimeout(timer);
+		pendingTimers.clear();
+		limitGuard.stopTimer();
+		scheduler.stop();
+		usageWaiter.stop();
+		scriptRunner.stopAll();
+		engines.abortAll();
+		usage.flush();
+		automationRunner.stop();
+		for (const resolveResume of resumeSubagent.values()) resolveResume(false);
+		resumeSubagent.clear();
+		lastNotified.clear();
+		agentBusy.clear();
+		autoFixStreak.clear();
+		projectOf.clear();
+		subagentStarts.clear();
+	};
+	return { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner, integrations, executionTargets, subagentPolicies, subagentKey, limitGuard, usageWaiter, scheduler, dispose };
 }

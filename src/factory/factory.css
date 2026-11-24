@@ -1,3 +1,9 @@
+@keyframes sf-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@layer components {
 /* ADE Software Factory — Impeccable-Aligned Design System
    Uses ADE's live palette variables (--background, --surface, --surface-raised,
    --field, --nav, --border, --foreground, --muted, --primary, --primary-foreground).
@@ -560,10 +566,6 @@
 }
 
 /* Status Pulse */
-@keyframes sf-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
 
 .sf-pulse-dot {
   width: 8px;
@@ -576,4 +578,5 @@
 @media (prefers-reduced-motion: reduce) {
   .sf-pulse-dot { animation: none; }
   .sf-kanban-card:hover { transform: none; }
+}
 }

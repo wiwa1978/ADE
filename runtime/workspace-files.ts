@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { lstat, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import type { GitFileChange, WorkspaceEntry, WorkspaceGitSummary } from "../packages/protocol/index.ts";
@@ -125,6 +126,59 @@ export type WorkspaceFlatFile = {
 	mimeType: string;
 };
 
+function isBinaryContent(buf: Buffer): boolean {
+	for (let i = 0; i < Math.min(buf.length, 4096); i++) {
+		if (buf[i] === 0) return true;
+	}
+	return false;
+}
+
+export async function listWorkspaceFilesFlatAsync(root: string, maxFiles = 300): Promise<WorkspaceFlatFile[]> {
+	const results: WorkspaceFlatFile[] = [];
+	const queue: string[] = [root];
+	let visitedDirs = 0;
+
+	while (queue.length > 0 && visitedDirs < 600 && results.length < maxFiles * 2) {
+		const dir = queue.shift()!;
+		visitedDirs++;
+		let entries;
+		try {
+			entries = await readdir(dir, { withFileTypes: true });
+		} catch {
+			continue;
+		}
+		for (const entry of entries) {
+			if (entry.isSymbolicLink()) continue;
+			if (entry.isDirectory()) {
+				if (SKIP_ARTEFACT_WALK.has(entry.name)) continue;
+				queue.push(join(dir, entry.name));
+				continue;
+			}
+			if (!entry.isFile()) continue;
+			const full = join(dir, entry.name);
+			let fileStat;
+			try {
+				fileStat = await stat(full);
+			} catch {
+				continue;
+			}
+			const rel = relative(root, full).replace(/\\/g, "/");
+			const ext = extname(entry.name).slice(1).toLowerCase();
+			results.push({
+				path: rel,
+				name: entry.name,
+				ext,
+				size: fileStat.size,
+				modifiedAt: Math.round(fileStat.mtimeMs),
+				mimeType: detectMimeType(rel),
+			});
+		}
+	}
+
+	results.sort((a, b) => b.modifiedAt - a.modifiedAt || a.path.localeCompare(b.path));
+	return results.slice(0, maxFiles);
+}
+
 export function listWorkspaceFilesFlat(root: string, maxFiles = 300): WorkspaceFlatFile[] {
 	const results: WorkspaceFlatFile[] = [];
 	const queue: string[] = [root];
@@ -148,9 +202,9 @@ export function listWorkspaceFilesFlat(root: string, maxFiles = 300): WorkspaceF
 			}
 			if (!entry.isFile()) continue;
 			const full = join(dir, entry.name);
-			let stat;
+			let fileStat;
 			try {
-				stat = statSync(full);
+				fileStat = statSync(full);
 			} catch {
 				continue;
 			}
@@ -160,8 +214,8 @@ export function listWorkspaceFilesFlat(root: string, maxFiles = 300): WorkspaceF
 				path: rel,
 				name: entry.name,
 				ext,
-				size: stat.size,
-				modifiedAt: Math.round(stat.mtimeMs),
+				size: fileStat.size,
+				modifiedAt: Math.round(fileStat.mtimeMs),
 				mimeType: detectMimeType(rel),
 			});
 		}
@@ -169,6 +223,39 @@ export function listWorkspaceFilesFlat(root: string, maxFiles = 300): WorkspaceF
 
 	results.sort((a, b) => b.modifiedAt - a.modifiedAt || a.path.localeCompare(b.path));
 	return results.slice(0, maxFiles);
+}
+
+export async function listWorkspaceDirectoryAsync(root: string, relPath = "."): Promise<WorkspaceEntry[]> {
+	const target = relPath === "." || !relPath ? root : workspacePath(root, relPath, { mustExist: true });
+	const rawEntries = await readdir(target, { withFileTypes: true });
+	const entries = rawEntries
+		.filter(e => !SKIP_EXPLORER.has(e.name) && !e.isSymbolicLink())
+		.sort((a, b) => {
+			if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+			return a.name.localeCompare(b.name);
+		})
+		.slice(0, 400);
+
+	return Promise.all(entries.map(async (entry) => {
+		const full = join(target, entry.name);
+		const rel = relative(root, full).replace(/\\/g, "/");
+		let size: number | undefined;
+		if (entry.isFile()) {
+			try {
+				size = (await stat(full)).size;
+			} catch (error) {
+				if (!isErrorCode(error, "ENOENT", "EACCES", "EPERM")) {
+					logger.debug("Could not stat workspace file during directory listing", { error, context: { path: full } });
+				}
+			}
+		}
+		return {
+			name: entry.name,
+			path: rel,
+			kind: entry.isDirectory() ? "directory" : "file",
+			...(size !== undefined ? { size } : {}),
+		};
+	}));
 }
 
 export function listWorkspaceDirectory(root: string, relPath = "."): WorkspaceEntry[] {
@@ -202,14 +289,14 @@ export function listWorkspaceDirectory(root: string, relPath = "."): WorkspaceEn
 	});
 }
 
-export function readWorkspaceFile(root: string, relPath: string): { path: string; content: string; language: string; size: number; binary: boolean; mimeType: string } {
+export async function readWorkspaceFileAsync(root: string, relPath: string): Promise<{ path: string; content: string; language: string; size: number; binary: boolean; mimeType: string }> {
 	const full = workspacePath(root, relPath, { mustExist: true });
-	const stat = lstatSync(full);
-	if (!stat.isFile()) throw badRequest("Path is not a file.");
+	const fileStat = await lstat(full);
+	if (fileStat.isSymbolicLink() || !fileStat.isFile()) throw badRequest("Path is not a file.");
 	const mimeType = detectMimeType(relPath);
 	const isPreviewableBinary = mimeType.startsWith("image/") || mimeType === "application/pdf";
 	const maxSize = isPreviewableBinary ? 15_000_000 : 2_000_000;
-	if (stat.size > maxSize) throw payloadTooLarge(`File is too large to open (${isPreviewableBinary ? ">15MB" : ">2MB"}).`);
+	if (fileStat.size > maxSize) throw payloadTooLarge(`File is too large to open (${isPreviewableBinary ? ">15MB" : ">2MB"}).`);
 	const ext = extname(relPath).slice(1).toLowerCase();
 	const isSvg = ext === "svg";
 	if (isPreviewableBinary && !isSvg) {
@@ -217,41 +304,88 @@ export function readWorkspaceFile(root: string, relPath: string): { path: string
 			path: relPath.replace(/\\/g, "/"),
 			content: "",
 			language: ext || "binary",
-			size: stat.size,
+			size: fileStat.size,
 			binary: true,
 			mimeType,
 		};
 	}
-	const buf = readFileSync(full);
-	let binary = false;
-	for (let i = 0; i < Math.min(buf.length, 4096); i++) {
-		if (buf[i] === 0) {
-			binary = true;
-			break;
-		}
-	}
+	const buf = await readFile(full);
+	const binary = isBinaryContent(buf);
 	return {
 		path: relPath.replace(/\\/g, "/"),
 		content: binary ? "" : buf.toString("utf8"),
 		language: LANG_BY_EXT[ext] ?? "text",
-		size: stat.size,
+		size: fileStat.size,
 		binary,
 		mimeType,
 	};
 }
 
+export function readWorkspaceFile(root: string, relPath: string): { path: string; content: string; language: string; size: number; binary: boolean; mimeType: string } {
+	const full = workspacePath(root, relPath, { mustExist: true });
+	const fileStat = lstatSync(full);
+	if (fileStat.isSymbolicLink() || !fileStat.isFile()) throw badRequest("Path is not a file.");
+	const mimeType = detectMimeType(relPath);
+	const isPreviewableBinary = mimeType.startsWith("image/") || mimeType === "application/pdf";
+	const maxSize = isPreviewableBinary ? 15_000_000 : 2_000_000;
+	if (fileStat.size > maxSize) throw payloadTooLarge(`File is too large to open (${isPreviewableBinary ? ">15MB" : ">2MB"}).`);
+	const ext = extname(relPath).slice(1).toLowerCase();
+	const isSvg = ext === "svg";
+	if (isPreviewableBinary && !isSvg) {
+		return {
+			path: relPath.replace(/\\/g, "/"),
+			content: "",
+			language: ext || "binary",
+			size: fileStat.size,
+			binary: true,
+			mimeType,
+		};
+	}
+	const buf = readFileSync(full);
+	const binary = isBinaryContent(buf);
+	return {
+		path: relPath.replace(/\\/g, "/"),
+		content: binary ? "" : buf.toString("utf8"),
+		language: LANG_BY_EXT[ext] ?? "text",
+		size: fileStat.size,
+		binary,
+		mimeType,
+	};
+}
+
+export async function readWorkspaceFileRawAsync(root: string, relPath: string): Promise<{ path: string; buffer: Buffer; mimeType: string; size: number }> {
+	const full = workspacePath(root, relPath, { mustExist: true });
+	const fileStat = await lstat(full);
+	if (fileStat.isSymbolicLink() || !fileStat.isFile()) throw badRequest("Path is not a file.");
+	if (fileStat.size > 20_000_000) throw payloadTooLarge("File is too large to preview (>20MB).");
+	const buffer = await readFile(full);
+	return {
+		path: relPath.replace(/\\/g, "/"),
+		buffer,
+		mimeType: detectMimeType(relPath),
+		size: fileStat.size,
+	};
+}
+
 export function readWorkspaceFileRaw(root: string, relPath: string): { path: string; buffer: Buffer; mimeType: string; size: number } {
 	const full = workspacePath(root, relPath, { mustExist: true });
-	const stat = lstatSync(full);
-	if (!stat.isFile()) throw badRequest("Path is not a file.");
-	if (stat.size > 20_000_000) throw payloadTooLarge("File is too large to preview (>20MB).");
+	const fileStat = lstatSync(full);
+	if (fileStat.isSymbolicLink() || !fileStat.isFile()) throw badRequest("Path is not a file.");
+	if (fileStat.size > 20_000_000) throw payloadTooLarge("File is too large to preview (>20MB).");
 	const buffer = readFileSync(full);
 	return {
 		path: relPath.replace(/\\/g, "/"),
 		buffer,
 		mimeType: detectMimeType(relPath),
-		size: stat.size,
+		size: fileStat.size,
 	};
+}
+
+export async function writeWorkspaceFileAsync(root: string, relPath: string, content: string): Promise<{ path: string; size: number }> {
+	if (typeof content !== "string") throw badRequest("Content must be a string.");
+	const full = workspacePath(root, relPath, { mustExist: false });
+	await writeFile(full, content, "utf8");
+	return { path: relPath.replace(/\\/g, "/"), size: Buffer.byteLength(content, "utf8") };
 }
 
 export function writeWorkspaceFile(root: string, relPath: string, content: string): { path: string; size: number } {
@@ -345,9 +479,9 @@ export async function getWorkspaceGitSummary(workspace: string): Promise<Workspa
 			if (item.status === "untracked") {
 				try {
 					const full = workspacePath(workspace, item.path, { mustExist: true });
-					const stat = statSync(full);
-					if (stat.isFile() && stat.size < 500_000) {
-						const count = readFileSync(full, "utf8").split("\n").length;
+					const fileStat = await stat(full);
+					if (fileStat.isFile() && fileStat.size < 500_000) {
+						const count = (await readFile(full, "utf8")).split("\n").length;
 						item.additions = count;
 						totalAdditions += count;
 					}
@@ -391,9 +525,9 @@ export async function getWorkspaceFileDiff(workspace: string, filePath: string, 
 	// Check if untracked file — synthesize unified diff
 	try {
 		const full = workspacePath(workspace, filePath, { mustExist: true });
-		const stat = statSync(full);
-		if (stat.isFile() && stat.size < 500_000) {
-			const lines = readFileSync(full, "utf8").replace(/\n$/, "").split("\n");
+		const fileStat = await stat(full);
+		if (fileStat.isFile() && fileStat.size < 500_000) {
+			const lines = (await readFile(full, "utf8")).replace(/\n$/, "").split("\n");
 			return [
 				`diff --git a/${filePath} b/${filePath}`,
 				"new file mode 100644",

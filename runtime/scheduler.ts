@@ -7,6 +7,7 @@
 // start at once. Docker containers and WSL2 do share it, so they're counted.
 import { readFileSync } from "node:fs";
 import { cpus, freemem, loadavg } from "node:os";
+import { logger } from "./log.ts";
 
 export type SchedulerSettings = {
 	/** At most this many heavy subagents at once; 0 = decide from free memory alone. */
@@ -136,7 +137,8 @@ export class SubagentScheduler {
 			try {
 				item.start();
 				item.resolve(true);
-			} catch {
+			} catch (error) {
+				logger.warn("Scheduled subagent failed to start", { error, context: { key: item.key } });
 				this.#running.delete(item.key);
 				item.resolve(false);
 			}
