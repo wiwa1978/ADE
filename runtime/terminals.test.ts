@@ -61,8 +61,8 @@ test("terminal sessions spawn a user-operated shell in the selected workspace an
 	const created = manager.create({ cwd, cols: 90, rows: 30 });
 	assert.equal(spawned[0].shell, process.platform === "win32" ? "powershell.exe" : "/bin/zsh");
 	assert.deepEqual(spawned[0].args, []);
-	assert.equal(spawned[0].options.cwd, realpathSync(cwd));
-	assert.equal(created.cwd, realpathSync(cwd));
+	assert.equal(spawned[0].options.cwd, realpathSync.native(cwd));
+	assert.equal(created.cwd, realpathSync.native(cwd));
 
 	pty.emitData("hello ");
 	pty.emitData("world");
