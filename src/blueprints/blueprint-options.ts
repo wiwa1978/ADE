@@ -1,3 +1,4 @@
+import { t } from "../i18n"
 import { useEffect, useState } from "react"
 import { request } from "../../api"
 
@@ -45,7 +46,7 @@ export function shortBlueprintName(name: string) {
 
 /** "7 stages · you approve 2" */
 export function stagesLine(option: BlueprintOption) {
-  if (!option.stages.length) return "No stages"
+  if (!option.stages.length) return t("stg.noStagesShort")
   const gates = option.stages.filter(stage => stage.approvalGate !== "never").length
   return `${option.stages.length} stages${gates ? ` · you approve ${gates}` : ""}`
 }

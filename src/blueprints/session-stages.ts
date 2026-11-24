@@ -1,3 +1,4 @@
+import { t } from "../i18n"
 import { useCallback, useEffect, useState } from "react"
 import { request } from "../../api"
 
@@ -55,19 +56,20 @@ export function useSessionStages(sessionId: string | null, refreshKey: string) {
   return { stages, setStages, reload }
 }
 
+/** Status names in the active language (a function, so they follow a language change). */
 export const stageStatusLabel: Record<StageStatus, string> = {
-  pending: "Not started",
-  awaiting_approval: "Waiting for you",
-  running: "In progress",
-  completed: "Done",
-  changes_requested: "Changes requested",
-  skipped: "Skipped",
-  failed: "Failed",
+  get pending() { return t("stg.status.pending") },
+  get awaiting_approval() { return t("stg.status.awaiting") },
+  get running() { return t("stg.status.running") },
+  get completed() { return t("stg.status.completed") },
+  get changes_requested() { return t("stg.status.changes") },
+  get skipped() { return t("stg.status.skipped") },
+  get failed() { return t("stg.status.failed") },
 }
 
 /** "Plan · waiting for your approval" for the slim bar and tags. */
 export function stageStatusPhrase(status: StageStatus, attempt = 1) {
-  if (status === "awaiting_approval") return attempt === 0 ? "approve to start" : "waiting for your approval"
-  if (status === "running") return "in progress"
+  if (status === "awaiting_approval") return attempt === 0 ? t("stg.phase.approveToStart") : t("stg.phase.waiting")
+  if (status === "running") return t("stg.phase.running")
   return stageStatusLabel[status].toLowerCase()
 }

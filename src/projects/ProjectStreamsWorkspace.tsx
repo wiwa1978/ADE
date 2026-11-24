@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { useViewMode } from "../view-mode"
+import { useI18n } from "../i18n/I18nContext"
 import { CalendarClock,
   Archive,
   ArchiveRestore,
@@ -89,6 +90,7 @@ export function ProjectStreamsWorkspace({
 }) {
   const [chosenTab, setActiveTab] = useState<ProjectTab>("sessions")
   // Simple view keeps two tabs: Sessions and Agents. The others come back with Full view.
+  const { t } = useI18n()
   const simple = useViewMode() === "simple"
   const activeTab: ProjectTab = simple && chosenTab !== "sessions" && chosenTab !== "subagents" ? "sessions" : chosenTab
   const [layout, setLayout] = useState<StreamLayout>("split")
@@ -101,7 +103,7 @@ export function ProjectStreamsWorkspace({
 
   // The project's default way of working: Vibe coding or a blueprint.
   const blueprint = !project.blueprintId || project.blueprintId === "vibe"
-    ? { id: "vibe", name: "Vibe coding" }
+    ? { id: "vibe", name: t("ps.vibe") }
     : BUILTIN_BLUEPRINTS.find(b => b.id === project.blueprintId) ?? { id: project.blueprintId, name: project.blueprintId }
   const repoSlug = project.githubUrl?.replace(/^https:\/\/github\.com\//i, "") ?? null
 
@@ -130,7 +132,7 @@ export function ProjectStreamsWorkspace({
       await onQuickStartStream(trimmed)
       setQuickPrompt("")
     } catch (err) {
-      setLaunchError(err instanceof Error ? err.message : "Could not start the session.")
+      setLaunchError(err instanceof Error ? err.message : t("ps.startError"))
     } finally {
       setLaunching(false)
     }
@@ -161,8 +163,8 @@ export function ProjectStreamsWorkspace({
             <button
               type="button"
               className={`ade-icon-btn ${filesOpen ? "bg-[rgb(var(--surface-raised))] text-[rgb(var(--foreground))]" : ""}`}
-              title="Project files"
-              aria-label="Project files"
+              title={t("ps.files")}
+              aria-label={t("ps.files")}
               onClick={onToggleFiles}
             >
               <FolderTree className="size-4" />
@@ -171,8 +173,8 @@ export function ProjectStreamsWorkspace({
           <button
             type="button"
             className={`ade-icon-btn ${settingsOpen ? "bg-[rgb(var(--surface-raised))] text-[rgb(var(--foreground))]" : ""}`}
-            title="Project settings"
-            aria-label="Project settings"
+            title={t("ps.settings")}
+            aria-label={t("ps.settings")}
             onClick={onToggleSettings}
           >
             <Settings2 className="size-4" />
@@ -183,7 +185,7 @@ export function ProjectStreamsWorkspace({
       {!project.repository && !project.githubUrl && !settingsOpen ? (
         <div className="flex items-center justify-between gap-3 px-5 py-2.5 border-b border-[rgb(var(--border)/0.7)] bg-[rgb(var(--surface)/0.55)] text-xs">
           <span className="opacity-75">
-            This project is empty. Link a local folder or GitHub repository in project settings.
+            {t("ps.empty")}
           </span>
           <button type="button" className="sf-btn-secondary !h-7 shrink-0" onClick={onToggleSettings}>
             <Settings2 className="size-3.5" /> Configure project
@@ -192,54 +194,54 @@ export function ProjectStreamsWorkspace({
       ) : null}
 
       <div className="ade-project-tabs-row">
-        <nav className="ade-project-tabs" role="tablist" aria-label="Project views">
+        <nav className="ade-project-tabs" role="tablist" aria-label={t("ps.views")}>
           <button type="button" role="tab" aria-selected={activeTab === "sessions"} className={`ade-project-tab ${activeTab === "sessions" ? "is-active" : ""}`} onClick={() => setActiveTab("sessions")}>
             <Columns2 className="size-3.5" />
-            <span>Sessions</span>
+            <span>{t("ps.sessions")}</span>
             <span className="ade-count-badge">{sessions.length}</span>
           </button>
           {!simple ? (
             <button type="button" role="tab" aria-selected={activeTab === "issues"} className={`ade-project-tab ${activeTab === "issues" ? "is-active" : ""}`} onClick={() => setActiveTab("issues")}>
               <ListTodo className="size-3.5" />
-              <span>Issues</span>
+              <span>{t("ps.issues")}</span>
             </button>
           ) : null}
           {!simple ? (
             <button type="button" role="tab" aria-selected={activeTab === "pulls"} className={`ade-project-tab ${activeTab === "pulls" ? "is-active" : ""}`} onClick={() => setActiveTab("pulls")}>
               <GitPullRequest className="size-3.5" />
-              <span>Pull requests</span>
+              <span>{t("ps.pulls")}</span>
             </button>
           ) : null}
           <button type="button" role="tab" aria-selected={activeTab === "subagents"} className={`ade-project-tab ${activeTab === "subagents" ? "is-active" : ""}`} onClick={() => setActiveTab("subagents")}>
             <Bot className="size-3.5" />
-            <span>Agents</span>
+            <span>{t("ps.agents")}</span>
             {totalSubagentsCount > 0 ? <span className="ade-count-badge is-accent">{totalSubagentsCount}</span> : null}
           </button>
           {!simple ? (
             <button type="button" role="tab" aria-selected={activeTab === "automations"} className={`ade-project-tab ${activeTab === "automations" ? "is-active" : ""}`} onClick={() => setActiveTab("automations")}>
               <CalendarClock className="size-3.5" />
-              <span>Automations</span>
+              <span>{t("ps.automations")}</span>
             </button>
           ) : null}
         </nav>
 
         {activeTab === "sessions" ? (
-          <div className="ade-segmented" role="tablist" aria-label="Session view">
-            <button type="button" role="tab" aria-selected={sessionView === "list"} className={sessionView === "list" ? "is-active" : ""} onClick={() => setSessionView("list")}>List</button>
-            <button type="button" role="tab" aria-selected={sessionView === "side"} className={sessionView === "side" ? "is-active" : ""} onClick={() => setSessionView("side")}>Side by side</button>
+          <div className="ade-segmented" role="tablist" aria-label={t("ps.sessionView")}>
+            <button type="button" role="tab" aria-selected={sessionView === "list"} className={sessionView === "list" ? "is-active" : ""} onClick={() => setSessionView("list")}>{t("ps.list")}</button>
+            <button type="button" role="tab" aria-selected={sessionView === "side"} className={sessionView === "side" ? "is-active" : ""} onClick={() => setSessionView("side")}>{t("ps.sideBySide")}</button>
           </div>
         ) : null}
         {activeTab === "sessions" && sessionView === "side" && visiblePaneIds.length > 0 ? (
           <div className="flex items-center gap-2">
             {hiddenStreamIds.length > 0 ? (
-              <button type="button" className="ade-chip-btn" onClick={() => onOpenStreamPane(hiddenStreamIds[0])} title="Open another session side by side">
-                <Plus className="size-3" /> Add pane ({hiddenStreamIds.length})
+              <button type="button" className="ade-chip-btn" onClick={() => onOpenStreamPane(hiddenStreamIds[0])} title={t("ps.addPaneTitle")}>
+                <Plus className="size-3" /> {t("ps.addPane", { count: hiddenStreamIds.length })}
               </button>
             ) : null}
-            <div className="ade-segmented" role="group" aria-label="Pane layout">
-              <button type="button" className={layout === "single" ? "is-active" : ""} onClick={() => setLayout("single")} title="Single pane"><Square className="size-3" /></button>
-              <button type="button" className={layout === "split" ? "is-active" : ""} onClick={() => setLayout("split")} title="2-up split panes"><Columns2 className="size-3" /></button>
-              <button type="button" className={layout === "grid" ? "is-active" : ""} onClick={() => setLayout("grid")} title="Multi-pane grid"><LayoutGrid className="size-3" /></button>
+            <div className="ade-segmented" role="group" aria-label={t("ps.paneLayout")}>
+              <button type="button" className={layout === "single" ? "is-active" : ""} onClick={() => setLayout("single")} title={t("ps.single")}><Square className="size-3" /></button>
+              <button type="button" className={layout === "split" ? "is-active" : ""} onClick={() => setLayout("split")} title={t("ps.split")}><Columns2 className="size-3" /></button>
+              <button type="button" className={layout === "grid" ? "is-active" : ""} onClick={() => setLayout("grid")} title={t("ps.grid")}><LayoutGrid className="size-3" /></button>
             </div>
           </div>
         ) : null}
@@ -266,9 +268,9 @@ export function ProjectStreamsWorkspace({
               <div className="w-11 h-11 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] grid place-items-center mb-4 opacity-85">
                 <Columns2 className="size-5" />
               </div>
-              <h2 className="text-[16px] font-semibold m-0">Start a session in {project.name}</h2>
+              <h2 className="text-[16px] font-semibold m-0">{t("ps.startIn", { name: project.name })}</h2>
               <p className="text-[13px] opacity-65 max-w-md mt-1.5 mb-5 leading-relaxed">
-                Each session is an agent working on its own branch. Open several here to watch them side by side.
+                {t("ps.startHint")}
               </p>
               <form
                 className="w-full max-w-xl flex items-center gap-2 p-2 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]"
@@ -276,13 +278,13 @@ export function ProjectStreamsWorkspace({
               >
                 <input
                   className="flex-1 bg-transparent border-0 outline-none px-2 text-[13px]"
-                  placeholder={`What should an agent build or investigate in ${project.name}?`}
+                  placeholder={t("ps.whatBuild", { name: project.name })}
                   value={quickPrompt}
                   onChange={e => setQuickPrompt(e.target.value)}
                   disabled={launching}
                 />
                 <button type="submit" className="sf-btn-primary !h-8" disabled={launching || !quickPrompt.trim()}>
-                  {launching ? "Starting…" : "Start session"}
+                  {launching ? t("ps.starting") : t("ps.startSession")}
                 </button>
               </form>
               <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
@@ -318,15 +320,15 @@ export function ProjectStreamsWorkspace({
               <span className="flex items-center gap-2">
                 {archivedOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
                 <Archive className="size-3.5" />
-                <span>Archived sessions</span>
+                <span>{t("ps.archived")}</span>
                 <span className="ade-count-badge">{archivedSessions.length}</span>
               </span>
-              <span className="text-[11px] font-normal opacity-70">Right-click a session to archive it</span>
+              <span className="text-[11px] font-normal opacity-70">{t("ps.rightClick")}</span>
             </button>
             {archivedOpen ? (
               <div className="border-t border-[rgb(var(--border)/0.7)] divide-y divide-[rgb(var(--border)/0.5)]">
                 {archivedSessions.length === 0 ? (
-                  <div className="px-3.5 py-3 text-[12px] opacity-60">No archived sessions in this project.</div>
+                  <div className="px-3.5 py-3 text-[12px] opacity-60">{t("ps.noArchived")}</div>
                 ) : (
                   archivedSessions.map(sess => (
                     <div key={sess.id} className="flex items-center justify-between gap-3 px-3.5 py-2.5 text-[12.5px]">
@@ -336,10 +338,10 @@ export function ProjectStreamsWorkspace({
                         {sess.workspace?.branch ? <span className="ade-pill !text-[10.5px] font-mono">{sess.workspace.branch}</span> : null}
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <button type="button" className="ade-chip-btn" onClick={() => onUnarchiveSession(sess.id)} title="Restore to active sessions">
-                          <ArchiveRestore className="size-3" /> Restore
+                        <button type="button" className="ade-chip-btn" onClick={() => onUnarchiveSession(sess.id)} title={t("ps.restoreTitle")}>
+                          <ArchiveRestore className="size-3" /> {t("ps.restore")}
                         </button>
-                        <button type="button" className="ade-chip-btn ade-chip-danger" onClick={() => onDeleteSession(sess)} title="Delete permanently">
+                        <button type="button" className="ade-chip-btn ade-chip-danger" onClick={() => onDeleteSession(sess)} title={t("ps.deleteTitle")}>
                           <Trash2 className="size-3" />
                         </button>
                       </div>

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { ChevronRight, type LucideIcon } from "lucide-react"
+import { useI18n } from "../i18n/I18nContext"
 
 export type SidePanelItem = {
   id: string
@@ -23,9 +24,10 @@ export type SidePanelItem = {
  * "+" in the panel's tab bar. Keeps the header quiet instead of a row of tool buttons.
  */
 export function SidePanelMenu({ items }: { items: SidePanelItem[] }) {
+  const { t } = useI18n()
   return (
     <div className="ade-pane-body ade-side-menu">
-      <h3>Open in the side panel</h3>
+      <h3>{t("menu.title")}</h3>
       <ul>
         {items.map(item => {
           const Icon = item.icon
@@ -34,7 +36,7 @@ export function SidePanelMenu({ items }: { items: SidePanelItem[] }) {
               <button type="button" className={`ade-side-menu-item ${item.active ? "is-active" : ""}`} onClick={item.onOpen}>
                 <span className="ade-side-menu-icon"><Icon className="size-4" /></span>
                 <span className="ade-side-menu-text">
-                  <strong>{item.label}{item.live ? <span className="ade-state-dot is-running" aria-label="Active" /> : null}</strong>
+                  <strong>{item.label}{item.live ? <span className="ade-state-dot is-running" aria-label={t("menu.active")} /> : null}</strong>
                   <span>{item.description}</span>
                 </span>
                 {item.badge ? <span className="ade-side-menu-badge">{item.badge}</span> : null}

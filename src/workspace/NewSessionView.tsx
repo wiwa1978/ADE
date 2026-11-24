@@ -27,6 +27,8 @@ import { shortBlueprintName, stagesLine, useBlueprintOptions, VIBE_ID } from "..
 import { runTargetDescriptions, targetLabel, targetUnavailable, useRunTargets, type RunTarget, type TargetSettings } from "../run-targets"
 import { DEFAULT_KEYBINDINGS, formatShortcut, type KeybindingMap } from "../keybindings"
 import { ConversationLayout } from "./ConversationLayout"
+import { useI18n } from "../i18n/I18nContext"
+import type { TranslationKey } from "../i18n"
 import { WorkspaceEmptyHero } from "./WorkspaceEmptyHero"
 
 type EngineId = "pi" | "claude-code" | "codex"
@@ -41,10 +43,10 @@ type OpenIssueOption = {
   url: string
 }
 
-const WORKSPACE_OPTIONS: { id: TaskStart["kind"]; label: string; desc: string }[] = [
-  { id: "worktree", label: "New branch", desc: "Isolated Git worktree so your main checkout stays clean" },
-  { id: "checkout", label: "Direct checkout", desc: "Edit files directly in the project's existing checkout" },
-  { id: "none", label: "Chat only", desc: "Conversation without attaching a codebase" },
+const WORKSPACE_OPTIONS: { id: TaskStart["kind"]; label: TranslationKey; desc: TranslationKey }[] = [
+  { id: "worktree", label: "ns.newBranch", desc: "ns.newBranchDesc" },
+  { id: "checkout", label: "ns.directCheckout", desc: "ns.directCheckoutDesc" },
+  { id: "none", label: "ns.chatOnly", desc: "ns.chatOnlyDesc" },
 ]
 
 export function NewSessionView({
@@ -109,12 +111,13 @@ export function NewSessionView({
   /** Opened from an issue: link it and fill in the task. */
   initialIssue?: GitHubIssue | null
 }) {
+  const { t } = useI18n()
   const unarchivedProjects = projects.filter(p => !p.archivedAt)
   const activeProject = unarchivedProjects.find(p => p.id === selectedProjectId) ?? null
   const [sessionTitle, setSessionTitle] = useState("")
   const [kind, setKind] = useState<TaskStart["kind"]>(activeProject?.repository ? "worktree" : "checkout")
   const [repository, setRepository] = useState(activeProject?.repository ?? "")
-  const [prompt, setPrompt] = useState(initialIssue ? `Work on #${initialIssue.number}: ${initialIssue.title}` : "")
+  const [prompt, setPrompt] = useState(initialIssue ? t("ns.workOn", { number: initialIssue.number, title: initialIssue.title }) : "")
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
   const [projectQuery, setProjectQuery] = useState("")
   const [issueOpen, setIssueOpen] = useState(false)
@@ -127,7 +130,7 @@ export function NewSessionView({
     setPrevInitialIssue(initialIssue ?? null)
     if (initialIssue) {
       setLinkedIssue(initialIssue)
-      setPrompt(`Work on #${initialIssue.number}: ${initialIssue.title}`)
+      setPrompt(t("ns.workOn", { number: initialIssue.number, title: initialIssue.title }))
     }
   }
   const [issueError, setIssueError] = useState("")
@@ -212,12 +215,12 @@ export function NewSessionView({
       })
       .catch(err => {
         if (!cancelled) {
-          setIssueError(err instanceof Error ? err.message : "Could not load open GitHub issues.")
+          setIssueError(err instanceof Error ? err.message : t("ns.loadIssuesError"))
           setLoadingIssues(false)
         }
       })
     return () => { cancelled = true }
-  }, [issueOpen, activeProjectId, activeProjectGithubUrl, openIssues.length])
+  }, [issueOpen, activeProjectId, activeProjectGithubUrl, openIssues.length, t])
 
   async function pickFolder() {
     try {
@@ -239,10 +242,10 @@ export function NewSessionView({
     try {
       const issue = await onLookupIssue(selectedProjectId, issueUrl.trim())
       setLinkedIssue(issue)
-      if (!prompt.trim()) setPrompt(`Work on #${issue.number}: ${issue.title}`)
+      if (!prompt.trim()) setPrompt(t("ns.workOn", { number: issue.number, title: issue.title }))
       setIssueOpen(false)
     } catch (err) {
-      setIssueError(err instanceof Error ? err.message : "Could not load issue.")
+      setIssueError(err instanceof Error ? err.message : t("ns.loadIssueError"))
     } finally {
       setLookingUp(false)
     }
@@ -288,7 +291,7 @@ export function NewSessionView({
     return p.name.toLowerCase().includes(q) || (p.repository ?? "").toLowerCase().includes(q)
   })
 
-  const workspaceLabel = WORKSPACE_OPTIONS.find(o => o.id === kind)?.label ?? "New branch"
+  const workspaceLabel = t(WORKSPACE_OPTIONS.find(o => o.id === kind)?.label ?? "ns.newBranch")
   const runOnAvailable = runTargets?.available ?? ["local", "docker"]
 
   return (
@@ -297,7 +300,7 @@ export function NewSessionView({
         <header className="ade-workspace-header">
           <div className="ade-header-left">
             <span className="ade-header-title ade-truncate">
-              {sessionTitle.trim() || "New session"}
+              {sessionTitle.trim() || t("ns.newSession")}
             </span>
             {activeProject ? (
               <span className="ade-pill">{activeProject.name}</span>
@@ -309,7 +312,7 @@ export function NewSessionView({
                 type="button"
                 className="ade-header-tool-btn"
                 onClick={onOpenEnvironmentPalette}
-                title={keybindings.switchEnvironment ? `Switch environment (${formatShortcut(keybindings.switchEnvironment)})` : "Switch environment"}
+                title={keybindings.switchEnvironment ? t("ns.switchEnvironmentKey", { key: formatShortcut(keybindings.switchEnvironment) }) : t("ns.switchEnvironment")}
               >
                 <Server className="size-3.5" />
                 <span>{environmentName}</span>
@@ -334,18 +337,18 @@ export function NewSessionView({
                 onClick={() => setOpenMenu(m => (m === "project" ? null : "project"))}
               >
                 <FolderGit2 className="size-3.5 opacity-70" />
-                <span className="truncate max-w-[160px]">{activeProject ? activeProject.name : "No project"}</span>
+                <span className="truncate max-w-[160px]">{activeProject ? activeProject.name : t("ns.noProject")}</span>
                 <ChevronDown className="size-3 opacity-55" />
               </button>
 
               {openMenu === "project" ? (
-                <div className="ade-ns-popover ade-ns-popover-up" role="dialog" aria-label="Choose project">
+                <div className="ade-ns-popover ade-ns-popover-up" role="dialog" aria-label={t("ns.chooseProject")}>
                   {unarchivedProjects.length > 4 ? (
                     <div className="ade-ns-popover-search">
                       <Search className="size-3.5 opacity-55 shrink-0" />
                       <input
                         type="text"
-                        placeholder="Filter projects…"
+                        placeholder={t("ns.filterProjects")}
                         value={projectQuery}
                         onChange={e => setProjectQuery(e.target.value)}
                         autoFocus
@@ -358,7 +361,7 @@ export function NewSessionView({
                       className={`ade-ns-popover-item ${selectedProjectId === null ? "is-selected" : ""}`}
                       onClick={() => handleProjectChange(null)}
                     >
-                      <span className="flex-1 truncate">No project</span>
+                      <span className="flex-1 truncate">{t("ns.noProject")}</span>
                       {selectedProjectId === null ? <Check className="size-3.5 text-[rgb(var(--primary))]" /> : null}
                     </button>
                     {filteredProjects.map(p => (
@@ -371,7 +374,7 @@ export function NewSessionView({
                         <span className="flex-1 min-w-0">
                           <span className="block truncate">{p.name}</span>
                           {!p.repository ? (
-                            <span className="block text-[10.5px] opacity-55 truncate">Empty project</span>
+                            <span className="block text-[10.5px] opacity-55 truncate">{t("ns.emptyProject")}</span>
                           ) : null}
                         </span>
                         {selectedProjectId === p.id ? <Check className="size-3.5 text-[rgb(var(--primary))] shrink-0" /> : null}
@@ -386,7 +389,7 @@ export function NewSessionView({
                         onClick={() => { setOpenMenu(null); onAddProject() }}
                       >
                         <FolderPlus className="size-3.5 opacity-75" />
-                        <span>New project…</span>
+                        <span>{t("ns.newProjectDots")}</span>
                       </button>
                     </div>
                   ) : null}
@@ -411,7 +414,7 @@ export function NewSessionView({
               </button>
 
               {openMenu === "workspace" ? (
-                <div className="ade-ns-popover ade-ns-popover-up" role="dialog" aria-label="Workspace mode">
+                <div className="ade-ns-popover ade-ns-popover-up" role="dialog" aria-label={t("ns.workspaceMode")}>
                   <div className="ade-ns-popover-list">
                     {WORKSPACE_OPTIONS.map(opt => (
                       <button
@@ -421,8 +424,8 @@ export function NewSessionView({
                         onClick={() => { setKind(opt.id); setOpenMenu(null) }}
                       >
                         <span className="flex-1 min-w-0">
-                          <span className="block font-medium">{opt.label}</span>
-                          <span className="block text-[11px] opacity-60">{opt.desc}</span>
+                          <span className="block font-medium">{t(opt.label)}</span>
+                          <span className="block text-[11px] opacity-60">{t(opt.desc)}</span>
                         </span>
                         {kind === opt.id ? <Check className="size-3.5 text-[rgb(var(--primary))] shrink-0" /> : null}
                       </button>
@@ -440,16 +443,16 @@ export function NewSessionView({
                   className={`ade-ns-pill ${openMenu === "blueprint" ? "is-open" : ""}`}
                   aria-haspopup="listbox"
                   aria-expanded={openMenu === "blueprint"}
-                  title={blueprintLocked ? "This project's sessions all use its blueprint (project settings)." : "Way of working"}
+                  title={blueprintLocked ? t("ns.lockedTitle") : t("ns.wayOfWorking")}
                   onClick={() => setOpenMenu(m => (m === "blueprint" ? null : "blueprint"))}
                 >
                   <Workflow className="size-3.5 opacity-70" />
-                  <span>{effectiveBlueprintOption ? shortBlueprintName(effectiveBlueprintOption.name) : "Vibe coding"}</span>
+                  <span>{effectiveBlueprintOption ? shortBlueprintName(effectiveBlueprintOption.name) : t("ns.vibe")}</span>
                   {blueprintLocked ? <Lock className="size-3 opacity-55" /> : <ChevronDown className="size-3 opacity-55" />}
                 </button>
 
                 {openMenu === "blueprint" ? (
-                  <div className="ade-ns-popover !w-[320px]" role="dialog" aria-label="Way of working">
+                  <div className="ade-ns-popover !w-[320px]" role="dialog" aria-label={t("ns.wayOfWorking")}>
                     <div className="ade-ns-popover-list">
                       {blueprintOptions.map(option => {
                         const blocked = blueprintLocked && option.id !== projectBlueprint
@@ -458,13 +461,13 @@ export function NewSessionView({
                             key={option.id}
                             type="button"
                             disabled={blocked}
-                            title={blocked ? "This project's sessions all use its blueprint." : option.description}
+                            title={blocked ? t("ns.lockedShort") : option.description}
                             className={`ade-ns-popover-item ${effectiveBlueprint === option.id ? "is-selected" : ""}`}
                             onClick={() => { setBlueprintChoice(option.id); setOpenMenu(null) }}
                           >
                             <span className="flex-1 min-w-0">
-                              <span className="block font-medium">{shortBlueprintName(option.name)}{option.id === projectBlueprint ? <span className="opacity-55 font-normal"> · project default</span> : null}</span>
-                              <span className="block text-[11px] opacity-60 leading-snug">{option.id === VIBE_ID ? option.description : `${stagesLine(option)}. Best for ${option.bestFor}.`}</span>
+                              <span className="block font-medium">{shortBlueprintName(option.name)}{option.id === projectBlueprint ? <span className="opacity-55 font-normal">{t("ns.projectDefault")}</span> : null}</span>
+                              <span className="block text-[11px] opacity-60 leading-snug">{option.id === VIBE_ID ? option.description : t("ns.stagesBestFor", { stages: stagesLine(option), bestFor: option.bestFor })}</span>
                             </span>
                             {effectiveBlueprint === option.id ? <Check className="size-3.5 text-[rgb(var(--primary))] shrink-0" /> : null}
                           </button>
@@ -492,7 +495,7 @@ export function NewSessionView({
                 </button>
 
                 {openMenu === "runOn" ? (
-                  <div className="ade-ns-popover ade-ns-popover-up !w-[280px]" role="dialog" aria-label="Run on target">
+                  <div className="ade-ns-popover ade-ns-popover-up !w-[280px]" role="dialog" aria-label={t("ns.runOn")}>
                     <div className="ade-ns-popover-list">
                       {runOnAvailable.map(target => {
                         const blocked = runTargets?.docker
@@ -547,7 +550,7 @@ export function NewSessionView({
                 </button>
 
                 {openMenu === "attempts" ? (
-                  <div className="ade-ns-popover ade-ns-popover-up !w-[240px]" role="dialog" aria-label="Attempts">
+                  <div className="ade-ns-popover ade-ns-popover-up !w-[240px]" role="dialog" aria-label={t("ns.attempts")}>
                     <div className="ade-ns-popover-list">
                       {[1, 2, 3].map(count => (
                         <button
@@ -559,7 +562,7 @@ export function NewSessionView({
                           <span className="flex-1 min-w-0">
                             <span className="block font-medium">{count === 1 ? "1 attempt" : `${count} parallel attempts`}</span>
                             <span className="block text-[11px] opacity-60">
-                              {count === 1 ? "Single agent on one branch" : `${count} agents on separate branches`}
+                              {count === 1 ? t("ns.singleAgent") : t("ns.nAgents", { count })}
                             </span>
                           </span>
                           {attemptCount === count ? <Check className="size-3.5 text-[rgb(var(--primary))] shrink-0" /> : null}
@@ -573,9 +576,9 @@ export function NewSessionView({
 
             {/* Quick Add Project */}
             {onAddProject ? (
-              <button type="button" className="ade-ns-pill ade-ns-pill-quiet" onClick={onAddProject} title="Create a new project">
+              <button type="button" className="ade-ns-pill ade-ns-pill-quiet" onClick={onAddProject} title={t("ns.createProjectTitle")}>
                 <FolderPlus className="size-3.5 opacity-70" />
-                <span>New project</span>
+                <span>{t("ns.newProject")}</span>
               </button>
             ) : null}
 
@@ -583,7 +586,7 @@ export function NewSessionView({
             {activeProject?.githubUrl && !linkedIssue ? (
               <button type="button" className="ade-ns-pill ade-ns-pill-quiet" onClick={() => setIssueOpen(v => !v)}>
                 <Link2 className="size-3.5 opacity-70" />
-                <span>Link issue</span>
+                <span>{t("ns.linkIssue")}</span>
               </button>
             ) : null}
           </div>
@@ -594,7 +597,7 @@ export function NewSessionView({
               <input
                 type="text"
                 className="ade-ns-folder-input"
-                placeholder={activeProject ? `Attach a folder to ${activeProject.name}…` : "Choose a local folder path…"}
+                placeholder={activeProject ? t("ns.attachFolder", { name: activeProject.name }) : t("ns.chooseFolder")}
                 value={repository}
                 onChange={e => setRepository(e.target.value)}
               />
@@ -606,9 +609,9 @@ export function NewSessionView({
                   type="button"
                   className="sf-btn-ghost !h-7 !text-[12px] shrink-0"
                   onClick={() => onConfigureProject(activeProject.id)}
-                  title="Open project settings on the right side"
+                  title={t("ns.configureTitle")}
                 >
-                  <Settings2 className="size-3.5" /> Configure
+                  <Settings2 className="size-3.5" /> {t("ns.configure")}
                 </button>
               ) : null}
             </div>
@@ -636,13 +639,13 @@ export function NewSessionView({
           ) : issueOpen && activeProject?.githubUrl ? (
             <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3 flex flex-col gap-2 text-xs">
               <div className="flex items-center justify-between">
-                <span className="font-semibold">Import GitHub Issue</span>
+                <span className="font-semibold">{t("ns.importIssue")}</span>
                 <button type="button" className="sf-btn-ghost !h-6 !px-1.5" onClick={() => setIssueOpen(false)}>
                   <X className="size-3.5" />
                 </button>
               </div>
               {loadingIssues ? (
-                <div className="opacity-65 py-2">Loading open issues…</div>
+                <div className="opacity-65 py-2">{t("ns.loadingIssues")}</div>
               ) : openIssues.length > 0 ? (
                 <div className="max-h-36 overflow-y-auto divide-y divide-[rgb(var(--border)/0.5)] rounded-lg border border-[rgb(var(--border)/0.7)] bg-[rgb(var(--background))]">
                   {openIssues.map(iss => (
@@ -666,12 +669,12 @@ export function NewSessionView({
                 <input
                   type="text"
                   className="sf-field !h-8 flex-1"
-                  placeholder="Or paste issue URL (https://github.com/owner/repo/issues/123)"
+                  placeholder={t("ns.pasteIssue")}
                   value={issueUrl}
                   onChange={e => setIssueUrl(e.target.value)}
                 />
                 <button type="button" className="sf-btn-secondary !h-8" disabled={lookingUp || !issueUrl.trim()} onClick={() => void handleLookupIssue()}>
-                  {lookingUp ? "Loading…" : "Load"}
+                  {lookingUp ? t("ns.loadingDots") : t("ns.load")}
                 </button>
               </div>
               {issueError ? <div className="text-rose-400">{issueError}</div> : null}
@@ -696,9 +699,9 @@ export function NewSessionView({
           disabled={!readyToStart}
           canSubmitEmpty={Boolean(startFrom)}
           placeholder={startFrom
-            ? "Optional: what should the agent do on this branch? Leave empty to just open it."
-            : `Message ADE… ${formatShortcut(keybindings.sendMessage)} to start, ${formatShortcut(keybindings.newLine)} for a new line.`}
-          submitTitle={canAttempt && attemptCount > 1 ? `Start ${attemptCount} attempts` : "Start session"}
+            ? t("ns.promptStartFrom")
+            : t("ns.promptPlaceholder", { send: formatShortcut(keybindings.sendMessage), newLine: formatShortcut(keybindings.newLine) })}
+          submitTitle={canAttempt && attemptCount > 1 ? t("ns.startAttempts", { count: attemptCount }) : t("ns.startSession")}
           modelCatalog={modelCatalog}
           selectedProvider={selectedProvider}
           selectedModel={selectedModel}
@@ -718,12 +721,12 @@ export function NewSessionView({
     >
       <div className="ade-timeline">
         <WorkspaceEmptyHero
-          title={sessionTitle.trim() || "New session"}
-          subtitle="Click the title above to name this session, or describe what you want built, planned, or investigated."
+          title={sessionTitle.trim() || t("ns.newSession")}
+          subtitle={t("ns.heroSubtitle")}
           editableTitle={{
             value: sessionTitle,
-            placeholder: "New session",
-            ariaLabel: "Session name",
+            placeholder: t("ns.newSession"),
+            ariaLabel: t("ns.sessionName"),
             onChange: setSessionTitle,
           }}
         />

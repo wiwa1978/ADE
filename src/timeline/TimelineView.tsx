@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { useI18n } from "../i18n/I18nContext"
 import {
   AlertTriangle,
   Bot,
@@ -49,6 +50,7 @@ function ToolCallCard({
   onOpenBrowser?: (url?: string) => void
   onOpenArtifact?: (artifactId?: string) => void
 }) {
+  const { t } = useI18n()
   const isRunning = tool.status === "running" || tool.status === "pending" || tool.status === "waiting"
   const isSleeping = tool.status === "sleeping"
   const [open, setOpen] = useState(isRunning || isSleeping || tool.isError)
@@ -89,16 +91,16 @@ function ToolCallCard({
           : isBrowserTool && urlText
             ? `${tool.name.replace("browser_", "")} ${urlText}`
             : isArtifactTool && tool.arguments.title
-              ? `Artifact: ${String(tool.arguments.title)}`
+              ? t("tl.artifact", { title: String(tool.arguments.title) })
               : tool.name
 
   const statusBadge = isSleeping
-    ? <span className="ade-pill ade-pill-warn">Awaiting approval</span>
+    ? <span className="ade-pill ade-pill-warn">{t("tl.awaitingApproval")}</span>
     : isRunning
-      ? <span className="ade-pill ade-pill-accent"><Loader2 className="size-3 animate-spin" /> Running</span>
+      ? <span className="ade-pill ade-pill-accent"><Loader2 className="size-3 animate-spin" /> {t("tl.running")}</span>
       : tool.isError || tool.status === "error"
-        ? <span className="ade-pill ade-pill-danger"><XCircle className="size-3" /> Error</span>
-        : <span className="ade-pill ade-pill-ok"><CheckCircle2 className="size-3" /> Done</span>
+        ? <span className="ade-pill ade-pill-danger"><XCircle className="size-3" /> {t("tl.error")}</span>
+        : <span className="ade-pill ade-pill-ok"><CheckCircle2 className="size-3" /> {t("tl.done")}</span>
 
   // Dedicated rich Subagent Activity Card inline in the timeline!
   if (isSubagentTool) {
@@ -121,11 +123,11 @@ function ToolCallCard({
           </div>
           <div className="ade-subagent-inline-actions">
             <span className={`ade-pill ${subStatus === "running" ? "ade-pill-accent" : subStatus === "completed" ? "ade-pill-ok" : subStatus === "failed" ? "ade-pill-danger" : ""}`}>
-              {subStatus === "running" ? <><Loader2 className="size-3 animate-spin" /> Working</> : subStatus}
+              {subStatus === "running" ? <><Loader2 className="size-3 animate-spin" /> {t("tl.working")}</> : subStatus}
             </span>
             {subagentId && onOpenSubagent ? (
               <button type="button" className="ade-chip-btn" onClick={() => onOpenSubagent(subagentId)}>
-                <Columns2 className="size-3.5" /> Open beside
+                <Columns2 className="size-3.5" /> {t("tl.openBeside")}
               </button>
             ) : null}
           </div>
@@ -136,12 +138,12 @@ function ToolCallCard({
         {activeSubTool ? (
           <div className="ade-subagent-inline-live">
             <Loader2 className="size-3 animate-spin" />
-            <span>Running <code>{activeSubTool.name}</code>…</span>
+            <span dangerouslySetInnerHTML={{ __html: t("tl.runningTool", { name: activeSubTool.name.replace(/[<>&]/g, "") }) }} />
           </div>
         ) : null}
         {tool.output ? (
           <details open={open} onToggle={e => setOpen((e.target as HTMLDetailsElement).open)} className="ade-subagent-inline-report">
-            <summary>{open ? "Hide report" : "View report"}</summary>
+            <summary>{open ? t("tl.hideReport") : t("tl.viewReport")}</summary>
             <div className="ade-tool-output-md">
               <MessageContent content={tool.output} onOpenFile={onOpenFile} workspacePath={workspacePath} />
             </div>
@@ -160,16 +162,16 @@ function ToolCallCard({
         <div className="ade-tool-head-right" onClick={e => e.stopPropagation()}>
           {filePaths.length > 0 && onOpenFile ? (
             filePaths.slice(0, 2).map(fp => (
-              <button key={fp} type="button" className="ade-chip-btn" onClick={() => onOpenFile(fp)} title={`View ${fp} in right sidebar`}>
-                {filePaths.length === 1 ? "Open file" : fp.split("/").pop() || fp}
+              <button key={fp} type="button" className="ade-chip-btn" onClick={() => onOpenFile(fp)} title={t("tl.viewFileTitle", { file: fp })}>
+                {filePaths.length === 1 ? t("tl.openFile") : fp.split("/").pop() || fp}
               </button>
             ))
           ) : null}
           {isBrowserTool && onOpenBrowser ? (
-            <button type="button" className="ade-chip-btn" onClick={() => onOpenBrowser(urlText)}>Open browser</button>
+            <button type="button" className="ade-chip-btn" onClick={() => onOpenBrowser(urlText)}>{t("tl.openBrowser")}</button>
           ) : null}
           {isArtifactTool && onOpenArtifact ? (
-            <button type="button" className="ade-chip-btn" onClick={() => onOpenArtifact(typeof details.artifactId === "string" ? details.artifactId : undefined)}>View artifact</button>
+            <button type="button" className="ade-chip-btn" onClick={() => onOpenArtifact(typeof details.artifactId === "string" ? details.artifactId : undefined)}>{t("tl.viewArtifact")}</button>
           ) : null}
           {statusBadge}
         </div>
@@ -180,12 +182,12 @@ function ToolCallCard({
             <pre className="ade-tool-args">{JSON.stringify(tool.arguments, null, 2)}</pre>
           ) : null}
           {typeof details.screenshot === "string" ? (
-            <img src={details.screenshot} alt="Browser screenshot" className="ade-tool-screenshot" />
+            <img src={details.screenshot} alt={t("tl.screenshot")} className="ade-tool-screenshot" />
           ) : null}
           {tool.output ? (
             <pre className={`ade-tool-output ${isShellTool ? "is-terminal" : ""}`}>{tool.output}</pre>
           ) : isRunning ? (
-            <div className="ade-tool-waiting"><Loader2 className="size-3.5 animate-spin" /> Waiting for output…</div>
+            <div className="ade-tool-waiting"><Loader2 className="size-3.5 animate-spin" /> {t("tl.waitingOutput")}</div>
           ) : null}
         </div>
       ) : null}
@@ -200,6 +202,7 @@ function ApprovalCard({
   approval: PendingApproval
   onResolve: (id: string, decision: { allow: boolean; alwaysAllow?: boolean; prefix?: string; reason?: string }) => Promise<void>
 }) {
+  const { t } = useI18n()
   const [busy, setBusy] = useState(false)
   const [denyReason, setDenyReason] = useState("")
   const [showDeny, setShowDeny] = useState(false)
@@ -214,10 +217,10 @@ function ApprovalCard({
   }
 
   return (
-    <div className="ade-approval-card" role="region" aria-label="Approval required">
+    <div className="ade-approval-card" role="region" aria-label={t("tl.approvalRequired")}>
       <div className="ade-approval-head">
         <ShieldAlert className="size-4 text-[var(--accent)]" />
-        <strong>Approval required</strong>
+        <strong>{t("tl.approvalRequired")}</strong>
         <span className="ade-pill">{approval.toolName}</span>
       </div>
       <div className="ade-approval-command">
@@ -225,7 +228,7 @@ function ApprovalCard({
       </div>
       <div className="ade-approval-actions">
         <button type="button" className="ade-btn ade-btn-primary" disabled={busy} onClick={() => void handle({ allow: true })}>
-          <Check className="size-3.5" /> Allow once
+          <Check className="size-3.5" /> {t("tl.allowOnce")}
         </button>
         {approval.suggestedPrefix ? (
           <button
@@ -234,25 +237,25 @@ function ApprovalCard({
             disabled={busy}
             onClick={() => void handle({ allow: true, alwaysAllow: true, prefix: approval.suggestedPrefix })}
           >
-            Always allow <code>{approval.suggestedPrefix}</code>
+            {t("tl.alwaysAllow")} <code>{approval.suggestedPrefix}</code>
           </button>
         ) : null}
         {!showDeny ? (
           <button type="button" className="ade-btn ade-btn-danger" disabled={busy} onClick={() => setShowDeny(true)}>
-            <X className="size-3.5" /> Deny
+            <X className="size-3.5" /> {t("tl.deny")}
           </button>
         ) : (
           <div className="ade-approval-deny-row">
             <input
               type="text"
               className="ade-input-sm"
-              placeholder="Optional reason for the agent..."
+              placeholder={t("tl.denyReason")}
               value={denyReason}
               onChange={e => setDenyReason(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") void handle({ allow: false, reason: denyReason }) }}
             />
             <button type="button" className="ade-btn ade-btn-danger" disabled={busy} onClick={() => void handle({ allow: false, reason: denyReason })}>
-              Confirm deny
+              {t("tl.confirmDeny")}
             </button>
           </div>
         )}
@@ -262,13 +265,14 @@ function ApprovalCard({
 }
 
 function ThinkingBlock({ text, streaming }: { text: string; streaming?: boolean }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(Boolean(streaming))
   return (
     <div className="ade-thinking">
       <button type="button" className="ade-thinking-toggle" onClick={() => setOpen(v => !v)}>
         {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
         <Brain className="size-3.5" />
-        <span>{streaming ? "Thinking…" : "Thought process"}</span>
+        <span>{streaming ? t("tl.thinking") : t("tl.thought")}</span>
       </button>
       {open ? <div className="ade-thinking-body">{text}</div> : null}
     </div>
@@ -309,6 +313,7 @@ export function TimelineView({
   /** Offer "Rewind files to before this message" on user messages (coding sessions with a workspace). */
   onRewind?: (messageContent: string) => void
 }) {
+  const { t } = useI18n()
   const endRef = useRef<HTMLDivElement>(null)
 
   const items: TimelineItem[] = timeline && timeline.items.length > 0
@@ -333,8 +338,8 @@ export function TimelineView({
     <div className="ade-timeline">
       {items.length === 0 && approvals.length === 0 ? (
         <WorkspaceEmptyHero
-          title={emptyTitle || "Ready to build"}
-          subtitle={emptySubtitle || "Ask the agent to explore the codebase, spawn parallel subagents, run commands, review diffs, or inspect your app in the built-in browser."}
+          title={emptyTitle || t("tl.readyToBuild")}
+          subtitle={emptySubtitle || t("tl.emptySubtitle")}
         />
       ) : null}
 
@@ -344,7 +349,7 @@ export function TimelineView({
             <div key={item.id} className="ade-msg ade-msg-user">
               <div className="ade-msg-user-bubble">{item.content}</div>
               {onRewind && !busy ? (
-                <button type="button" className="ade-msg-rewind" onClick={() => onRewind(item.content)} title="Put the workspace's files back the way they were before this message">
+                <button type="button" className="ade-msg-rewind" onClick={() => onRewind(item.content)} title={t("tl.rewindTitle")}>
                   ↺ Rewind files to here
                 </button>
               ) : null}
@@ -354,7 +359,7 @@ export function TimelineView({
         if (item.kind === "compaction") {
           return (
             <div key={item.id} className="ade-compaction-divider">
-              <span>Context compacted</span>
+              <span>{t("tl.compacted")}</span>
             </div>
           )
         }
@@ -397,11 +402,11 @@ export function TimelineView({
                   <div key={url} className="ade-url-pill-group">
                     {onOpenBrowser ? (
                       <button type="button" className="ade-chip-btn" onClick={() => onOpenBrowser(url)}>
-                        <Globe className="size-3" /> Preview {url}
+                        <Globe className="size-3" /> {t("tl.preview", { url })}
                       </button>
                     ) : null}
                     {onOpenExternalBrowser ? (
-                      <button type="button" className="ade-chip-btn" onClick={() => onOpenExternalBrowser(url)} title="Open in external browser">
+                      <button type="button" className="ade-chip-btn" onClick={() => onOpenExternalBrowser(url)} title={t("tl.openExternal")}>
                         <ExternalLink className="size-3" />
                       </button>
                     ) : null}
@@ -431,7 +436,7 @@ export function TimelineView({
       {busy ? (
         <div className="ade-working-indicator">
           <Loader2 className="size-3.5 animate-spin" />
-          <span>Agent working…</span>
+          <span>{t("tl.agentWorking")}</span>
         </div>
       ) : null}
 
