@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/I18nContext"
 import {
   Activity,
   Bot,
@@ -166,6 +167,7 @@ export function BesidePane({
   onRunStatusChange?: (status: RunStatus) => void
   onOpenProjectSettings?: () => void
 }) {
+  const { t } = useI18n()
   const hold = useSessionHold(activeBesideTab?.kind === "progress" || activeBesideTab?.kind === "agents" || activeBesideTab?.kind === "team" || activeBesideTab?.kind === "swarm" ? session.id : null, agentBusy)
   const { stages: progressStages } = useSessionStages((activeBesideTab?.kind === "progress" || activeBesideTab?.kind === "team") && session.blueprint ? session.id : null, `${JSON.stringify(session.blueprint ?? null)}:${agentBusy}`)
   const teamWork = useAgentsWork(activeBesideTab?.kind === "team" ? session.id : null, subagents.map(sub => `${sub.id}:${sub.status}`).join(","))
@@ -197,8 +199,8 @@ export function BesidePane({
   return (
     <section className="ade-pane ade-pane-beside" style={{ width: `${100 - splitRatio}%` }}>
       {/* Everything in this panel is about this session; it lights up briefly when you switch. */}
-      <div key={session.id} className="ade-beside-context" title="Everything in this panel is about this session">
-        <span className="ade-beside-context-label">Session</span>
+      <div key={session.id} className="ade-beside-context" title={t("beside.contextTitle")}>
+        <span className="ade-beside-context-label">{t("beside.session")}</span>
         {projectName ? <span className="ade-beside-context-project ade-truncate">{projectName} /</span> : null}
         <strong className="ade-truncate">{session.label}</strong>
         {session.workspace?.branch ? <span className="ade-beside-context-branch ade-mono ade-truncate">{session.workspace.branch}</span> : null}
@@ -218,7 +220,7 @@ export function BesidePane({
               <button
                 type="button"
                 className="ade-tab-close"
-                aria-label={`Close ${tab.title}`}
+                aria-label={t("beside.close", { title: tab.title })}
                 onClick={e => {
                   e.stopPropagation()
                   onCloseTab(tab.id)
@@ -229,17 +231,17 @@ export function BesidePane({
             </div>
           ))}
           {activeBesideTab.kind !== "tools" ? (
-            <button type="button" className="ade-tab-add" title="Open something else in the side panel" aria-label="Open something else" onClick={onOpenMenu}>
+            <button type="button" className="ade-tab-add" title={t("beside.openSomething")} aria-label={t("beside.openSomethingAria")} onClick={onOpenMenu}>
               <Plus className="size-3.5" />
             </button>
           ) : null}
           {activeBesideTab.kind === "terminal" ? (
-            <button type="button" className="ade-tab-add" title="New terminal" aria-label="New terminal" onClick={() => onOpenTerminal(true)}>
+            <button type="button" className="ade-tab-add" title={t("beside.newTerminal")} aria-label={t("beside.newTerminal")} onClick={() => onOpenTerminal(true)}>
               <Plus className="size-3.5" />
             </button>
           ) : null}
         </div>
-        <button type="button" className="ade-icon-btn" title="Close beside pane" onClick={onCloseAll}>
+        <button type="button" className="ade-icon-btn" title={t("beside.closePane")} onClick={onCloseAll}>
           <PanelRightClose className="size-3.5" />
         </button>
       </div>
@@ -313,7 +315,7 @@ export function BesidePane({
         ) : null}
         {activeBesideTab.kind === "subagent" && activeBesideTab.subagentId ? (() => {
           const sub = subagents.find(s => s.id === activeBesideTab.subagentId)
-          if (!sub) return <div className="ade-pane-empty"><p>Subagent not found.</p></div>
+          if (!sub) return <div className="ade-pane-empty"><p>{t("beside.subagentMissing")}</p></div>
           return (
             <SubagentPanel
               subagent={sub}

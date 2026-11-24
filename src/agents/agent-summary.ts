@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { request } from "../../api"
 import type { TimelineItem, TimelineToolCall } from "../../app-types"
+import { t } from "../i18n"
 
 export type AgentChanges = { base: string; files: { path: string; added: number; removed: number; status: "added" | "modified" | "deleted" }[]; added: number; removed: number; commits: number }
 export type AgentWork = { id: string; cost: number | null; inputTokens: number | null; outputTokens: number | null; changes: AgentChanges | null }
@@ -27,18 +28,18 @@ export function describeTool(tool: TimelineToolCall) {
   const args = tool.arguments ?? {}
   const text = (key: string) => (typeof args[key] === "string" ? String(args[key]) : "")
   switch (tool.name) {
-    case "run_command": return `Running ${text("command").split("\n")[0].slice(0, 80)}`
-    case "manage_process": return "Managing a background process"
-    case "read": return `Reading ${text("path")}`
-    case "write": return `Writing ${text("path")}`
-    case "edit": case "edit_files": return text("path") ? `Editing ${text("path")}` : "Editing files"
-    case "list_files": return `Listing ${text("path") || "files"}`
-    case "grep_search": case "find_files": return `Searching for ${text("query") || text("pattern")}`
-    case "spawn_subagent": return `Starting subagent ${text("name")}`
-    case "wait_subagent": return "Waiting for subagents"
-    case "finish_stage": return `Finishing stage ${text("stageId")}`
-    case "web_search": return `Searching the web for ${text("query")}`
-    default: return tool.name.startsWith("browser_") ? `Browser: ${tool.name.slice(8).replace(/_/g, " ")}` : tool.name.replace(/_/g, " ")
+    case "run_command": return t("tool.running", { command: text("command").split("\n")[0].slice(0, 80) })
+    case "manage_process": return t("tool.managing")
+    case "read": return t("tool.reading", { path: text("path") })
+    case "write": return t("tool.writing", { path: text("path") })
+    case "edit": case "edit_files": return text("path") ? t("tool.editing", { path: text("path") }) : t("tool.editingFiles")
+    case "list_files": return t("tool.listing", { path: text("path") || t("tool.files") })
+    case "grep_search": case "find_files": return t("tool.searching", { query: text("query") || text("pattern") })
+    case "spawn_subagent": return t("tool.startSub", { name: text("name") })
+    case "wait_subagent": return t("tool.waitSub")
+    case "finish_stage": return t("tool.finishStage", { stage: text("stageId") })
+    case "web_search": return t("tool.webSearch", { query: text("query") })
+    default: return tool.name.startsWith("browser_") ? t("tool.browser", { action: tool.name.slice(8).replace(/_/g, " ") }) : tool.name.replace(/_/g, " ")
   }
 }
 
@@ -65,9 +66,9 @@ export function summarize(items: TimelineItem[] | undefined, busy: boolean, live
     if (!now && busy) {
       const running = [...item.toolCalls].reverse().find(tool => ["running", "pending", "waiting", "sleeping"].includes(tool.status))
       if (running) now = describeTool(running)
-      else if (item.streaming && item.text) now = "Writing a reply"
-      else if (item.streaming) now = "Thinking"
-      else if (item.toolCalls.length) now = `Done: ${describeTool(item.toolCalls[item.toolCalls.length - 1])}`
+      else if (item.streaming && item.text) now = t("tool.writingReply")
+      else if (item.streaming) now = t("tool.thinking")
+      else if (item.toolCalls.length) now = t("tool.doneLast", { action: describeTool(item.toolCalls[item.toolCalls.length - 1]) })
     }
     if (reasoning && answer && (now || !busy)) break
   }

@@ -3,6 +3,8 @@ import { Bot, Brain, CheckCircle2, ChevronDown, ChevronRight, Clock, GitMerge, L
 import { request } from "../../api"
 import type { ConversationTimelineSnapshot, SubagentInfo, TimelineItem, TimelineToolCall } from "../../app-types"
 import { SubagentPanel } from "../panels/SubagentPanel"
+import { t as tr } from "../i18n"
+import { useI18n } from "../i18n/I18nContext"
 import { clock, type SessionHold } from "../subagents/session-hold"
 import { formatDuration, summarize, useAgentsWork, type AgentChanges } from "./agent-summary"
 
@@ -13,14 +15,14 @@ type CardState = { tone: "working" | "waiting" | "done" | "failed" | "idle"; lab
 
 function cardState(sub: SubagentInfo, busy: boolean, hold: SessionHold | undefined): CardState {
   const queued = hold?.queued.find(item => item.subagentId === sub.id)
-  if (queued) return { tone: "waiting", label: `Queued #${queued.position}` }
+  if (queued) return { tone: "waiting", label: tr("ag.queued", { position: queued.position }) }
   const wait = hold?.usageWaits.find(item => item.subagentId === sub.id)
-  if (wait) return { tone: "waiting", label: `Usage limit · ${clock(wait.until)}` }
-  if (busy || sub.status === "running") return { tone: "working", label: "Working" }
-  if (sub.status === "waiting") return { tone: "waiting", label: "Waiting" }
-  if (sub.status === "completed") return { tone: "done", label: "Done" }
-  if (sub.status === "failed" || sub.status === "blocked") return { tone: "failed", label: sub.status === "blocked" ? "Blocked" : "Failed" }
-  return { tone: "idle", label: "Not started" }
+  if (wait) return { tone: "waiting", label: tr("ag.usageLimit", { time: clock(wait.until) }) }
+  if (busy || sub.status === "running") return { tone: "working", label: tr("ag.working") }
+  if (sub.status === "waiting") return { tone: "waiting", label: tr("ag.waiting") }
+  if (sub.status === "completed") return { tone: "done", label: tr("ag.done") }
+  if (sub.status === "failed" || sub.status === "blocked") return { tone: "failed", label: sub.status === "blocked" ? tr("ag.blocked") : tr("ag.failed") }
+  return { tone: "idle", label: tr("ag.notStarted") }
 }
 
 const stateIcon = { working: Loader2, waiting: PauseCircle, done: CheckCircle2, failed: XCircle, idle: Clock }
@@ -61,6 +63,7 @@ export function AgentsView({
   onOpenBrowser?: (url?: string) => void
   onOpenExternalBrowser?: (url: string) => void
 }) {
+  const { t } = useI18n()
   const busyOf = (sub: SubagentInfo) => Boolean(subagentTimelines[sub.id]?.busy) || sub.status === "running"
   const refreshKey = subagents.map(sub => `${sub.id}:${sub.status}`).join(",")
   const work = useAgentsWork(sessionId, refreshKey)
@@ -84,10 +87,10 @@ export function AgentsView({
   return (
     <div className="ade-agents">
       <header className="ade-agents-head">
-        <strong>Agents</strong>
-        <span className="ade-muted">{[`${subagents.length + 1} in this session`, working ? `${working} working` : "", done ? `${done} done` : ""].filter(Boolean).join(" · ")}</span>
+        <strong>{t("ag.title")}</strong>
+        <span className="ade-muted">{[t("ag.inSession", { count: subagents.length + 1 }), working ? t("ag.nWorking", { count: working }) : "", done ? t("ag.nDone", { count: done }) : ""].filter(Boolean).join(" · ")}</span>
         <span className="flex-1" />
-        <button type="button" className="ade-icon-btn" onClick={onToggleWide} title={wide ? "Narrower: more room for the chat" : "Wider: more room for the agents"} aria-label={wide ? "Make the Agents view narrower" : "Make the Agents view wider"}>
+        <button type="button" className="ade-icon-btn" onClick={onToggleWide} title={wide ? t("ag.narrowTitle") : t("ag.wideTitle")} aria-label={wide ? t("ag.narrowAria") : t("ag.wideAria")}>
           {wide ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
         </button>
       </header>
@@ -95,9 +98,9 @@ export function AgentsView({
       <div className="ade-agent-cards" role="list">
         <AgentCard
           id={LEAD}
-          name="Main agent"
-          meta="Pi Durable · leads the session"
-          state={leadBusy ? { tone: "working", label: "Working" } : { tone: leadItems.length ? "done" : "idle", label: leadItems.length ? "Idle" : "Not started" }}
+          name={t("ag.mainAgent")}
+          meta={t("ag.mainMeta")}
+          state={leadBusy ? { tone: "working", label: t("ag.working") } : { tone: leadItems.length ? "done" : "idle", label: leadItems.length ? t("ag.idle") : t("ag.notStarted") }}
           now={lead.now}
           reasoning={lead.reasoning}
           answer={lead.answer}
@@ -138,7 +141,7 @@ export function AgentsView({
         })}
       </div>
 
-      {!subagents.length ? <p className="ade-muted ade-xs ade-agents-empty">No subagents yet. When the main agent hands out work (or you ask it to, e.g. “use subagents to research X and Y in parallel”), each one appears here with its own live card.</p> : null}
+      {!subagents.length ? <p className="ade-muted ade-xs ade-agents-empty">{t("ag.noSubagents")}</p> : null}
 
       <div className={`ade-agent-details ${shownIds.length > 1 ? "is-split" : ""}`}>
         {shownIds.map(id => {
@@ -148,8 +151,8 @@ export function AgentsView({
                 <div className="ade-agent-detail-lead">
                   <Bot className="size-4" />
                   <div>
-                    <strong>Main agent</strong>
-                    <p className="ade-muted ade-xs">Its full conversation is the chat on the left: reasoning, tool calls and answers. {lead.now ? `Now: ${lead.now}.` : ""}</p>
+                    <strong>{t("ag.mainAgent")}</strong>
+                    <p className="ade-muted ade-xs">{t("ag.mainConversation", { now: lead.now ? t("ag.nowPrefix", { text: lead.now }) : "" })}</p>
                     {lead.reasoning ? <p className="ade-agent-reasoning"><Brain className="size-3.5" /> {lead.reasoning}</p> : null}
                   </div>
                 </div>
@@ -198,6 +201,7 @@ function AgentCard(props: {
   onSelect: () => void
   onPin: () => void
 }) {
+  const { t } = useI18n()
   const Icon = stateIcon[props.state.tone]
   return (
     <div role="listitem" className={`ade-agent-card is-${props.state.tone} ${props.selected ? "is-selected" : ""}`}>
@@ -221,7 +225,7 @@ function AgentCard(props: {
           {props.cost ? <span>${props.cost.toFixed(2)}</span> : null}
         </span>
       </button>
-      <button type="button" className={`ade-agent-pin ${props.pinned ? "is-on" : ""}`} onClick={props.onPin} title={props.pinned ? "Unpin" : "Pin: keep it open next to others (up to 3)"} aria-label={props.pinned ? `Unpin ${props.name}` : `Pin ${props.name}`}>
+      <button type="button" className={`ade-agent-pin ${props.pinned ? "is-on" : ""}`} onClick={props.onPin} title={props.pinned ? t("ag.unpin") : t("ag.pinTitle")} aria-label={props.pinned ? t("ag.unpinName", { name: props.name }) : t("ag.pinName", { name: props.name })}>
         {props.pinned ? <PinOff className="size-3" /> : <Pin className="size-3" />}
       </button>
     </div>
@@ -230,6 +234,7 @@ function AgentCard(props: {
 
 /** A worktree subagent's changes on its branch: the files, each file's diff, and merging into the session. */
 function AgentChangesStrip({ sessionId, sub, changes, busy }: { sessionId: string; sub: SubagentInfo; changes: AgentChanges; busy: boolean }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [openFile, setOpenFile] = useState<string | null>(null)
   const [diff, setDiff] = useState("")
@@ -239,23 +244,23 @@ function AgentChangesStrip({ sessionId, sub, changes, busy }: { sessionId: strin
   const showDiff = async (path: string) => {
     if (openFile === path) { setOpenFile(null); return }
     setOpenFile(path)
-    setDiff("Loading…")
+    setDiff(t("ag.loading"))
     try {
       const result = await request<{ diff: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/agents/${encodeURIComponent(sub.id)}/diff?file=${encodeURIComponent(path)}`)
-      setDiff(result.diff || "No differences.")
+      setDiff(result.diff || t("ag.noDiff"))
     } catch (err) {
-      setDiff(err instanceof Error ? err.message : "Could not load the diff.")
+      setDiff(err instanceof Error ? err.message : t("ag.diffError"))
     }
   }
 
   const merge = async () => {
-    if (!window.confirm(`Merge ${sub.name}'s branch (${sub.branch}) into the session's branch?`)) return
+    if (!window.confirm(t("ag.mergeConfirm", { name: sub.name, branch: sub.branch ?? "" }))) return
     setMerging(true)
     try {
       const result = await request<{ merged: boolean; message: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/agents/${encodeURIComponent(sub.id)}/merge`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
       setMessage(result.message)
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Could not merge.")
+      setMessage(err instanceof Error ? err.message : t("ag.mergeError"))
     } finally {
       setMerging(false)
     }
@@ -267,12 +272,12 @@ function AgentChangesStrip({ sessionId, sub, changes, busy }: { sessionId: strin
         <button type="button" className="ade-agent-changes-toggle" onClick={() => setOpen(value => !value)} aria-expanded={open}>
           {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
           <strong>Changes on {sub.branch}</strong>
-          <span className="ade-muted"><span className="ade-plus">+{changes.added}</span> <span className="ade-minus">−{changes.removed}</span> · {changes.files.length} {changes.files.length === 1 ? "file" : "files"}{changes.commits ? ` · ${changes.commits} ${changes.commits === 1 ? "commit" : "commits"}` : ""}</span>
+          <span className="ade-muted"><span className="ade-plus">+{changes.added}</span> <span className="ade-minus">−{changes.removed}</span> · {changes.files.length === 1 ? t("ag.oneFile") : t("ag.nFiles", { count: changes.files.length })}{changes.commits ? (changes.commits === 1 ? t("ag.oneCommit") : t("ag.nCommits", { count: changes.commits })) : ""}</span>
         </button>
         <span className="flex-1" />
         {changes.files.length && !busy ? (
-          <button type="button" className="ade-chip-btn" disabled={merging} onClick={() => void merge()} title="Bring this subagent's work into the session's branch">
-            <GitMerge className="size-3" /> {merging ? "Merging…" : "Merge into session"}
+          <button type="button" className="ade-chip-btn" disabled={merging} onClick={() => void merge()} title={t("ag.mergeTitle")}>
+            <GitMerge className="size-3" /> {merging ? t("ag.merging") : t("ag.mergeInto")}
           </button>
         ) : null}
       </div>
