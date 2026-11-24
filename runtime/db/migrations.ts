@@ -223,6 +223,22 @@ export const HOST_MIGRATIONS: readonly SchemaMigration[] = [
 			db.exec("UPDATE projects SET blueprintId='vibe' WHERE blueprintId IS NULL OR blueprintId='automated-factory'");
 		},
 	},
+	{
+		version: 6,
+		name: "secondary_indexes",
+		up(db) {
+			db.exec(`
+				CREATE INDEX IF NOT EXISTS idx_turns_taskId_createdAt ON turns (taskId, createdAt, id);
+				CREATE INDEX IF NOT EXISTS idx_turns_chatId_createdAt ON turns (chatId, createdAt, id);
+				CREATE INDEX IF NOT EXISTS idx_turns_status ON turns (status);
+				CREATE INDEX IF NOT EXISTS idx_turns_mode_root ON turns (mode, createdAt, id) WHERE taskId IS NULL AND chatId IS NULL;
+				CREATE INDEX IF NOT EXISTS idx_coding_tasks_projectId ON coding_tasks (projectId);
+				CREATE INDEX IF NOT EXISTS idx_coding_tasks_workspace ON coding_tasks (workspace);
+				CREATE INDEX IF NOT EXISTS idx_session_artifacts_sessionId ON session_artifacts (sessionId);
+				CREATE INDEX IF NOT EXISTS idx_approval_rules_tool_effect ON approval_rules (toolName, effect);
+			`);
+		},
+	},
 ];
 
 export const LATEST_HOST_SCHEMA_VERSION = HOST_MIGRATIONS[HOST_MIGRATIONS.length - 1].version;

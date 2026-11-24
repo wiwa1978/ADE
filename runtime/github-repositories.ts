@@ -49,6 +49,7 @@ async function githubRestJson(token: string, path: string): Promise<unknown> {
 			"x-github-api-version": "2022-11-28",
 			"user-agent": "ADE-Local",
 		},
+		signal: AbortSignal.timeout(20_000),
 	});
 	if (!response.ok) {
 		throw badGateway("GitHub CLI could not access GitHub. Check your connection and sign in with gh auth login --hostname github.com --web.");

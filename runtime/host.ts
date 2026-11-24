@@ -1,11 +1,14 @@
+import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { CaptainCore } from "../packages/captain-core/index.ts";
+import { LocalGitHubProvider } from "../packages/github-local/index.ts";
 import { createNodeSqliteCaptainHost } from "../packages/host-node/index.ts";
+import { LocalDockerSandbox } from "../packages/sandbox-docker/index.ts";
 import { ApprovalManager } from "./approvals.ts";
 import { ArtifactManager } from "./artifacts.ts";
 import { BrowserManager } from "./browser.ts";
 import { ChatThreadStore } from "./db/chat-thread-store.ts";
-import { ProjectStore } from "./db/project-store.ts";
+import { ProjectStore, type SaveProjectInput } from "./db/project-store.ts";
 import { openHostDatabase } from "./db/schema.ts";
 import { TaskStore, type CreateCodingTaskInput } from "./db/task-store.ts";
 import { TurnStore } from "./db/turn-store.ts";
@@ -124,10 +127,21 @@ export class LocalAgentHost {
 			region: "local",
 			onEvent: (event) => this.events.emit("factory.event", event, event.runId),
 		});
-		this.factory = new CaptainCore({ host: this.#captainHost });
+		const factorySandbox = new LocalDockerSandbox({
+			worktreesRoot: join(stateDirectory, "factory-worktrees"),
+			mode: "auto",
+		});
+		const factoryGitHub = new LocalGitHubProvider();
+		this.factory = new CaptainCore({
+			host: this.#captainHost,
+			sandbox: factorySandbox,
+			github: factoryGitHub,
+		});
 		this.factoryRunner = new LocalFactoryRunner({
 			captain: this.factory,
 			stateDirectory,
+			sandbox: factorySandbox,
+			github: factoryGitHub,
 			stageExecutor: createPiFactoryStageExecutor({
 				stateDirectory,
 				resolveModelConfig: (provider) => this.#models.getConfig(provider),
@@ -146,7 +160,7 @@ export class LocalAgentHost {
 		return this.#projects.list();
 	}
 
-	saveProject(input: Record<string, unknown> | null | undefined, id?: string) {
+	saveProject(input: SaveProjectInput | null | undefined, id?: string) {
 		return this.#projects.save(input, id);
 	}
 
@@ -202,6 +216,23 @@ export class LocalAgentHost {
 		});
 	}
 
+	getSession(id: string) {
+		const task = this.#tasks.get(id) ?? null;
+		const chat = task ? null : (this.#chats.get(id) ?? null);
+		const session = this.#turns.getSession(id, task, chat, (sid) => this.#turnExecutor.isActiveOrRecovering(sid));
+		if (!session) return undefined;
+		const blueprint = task ? this.blueprints.summaryOf(task) : null;
+		return blueprint ? { ...session, blueprint } : session;
+	}
+
+	findProjectForCwd(cwd: string): string | null {
+		return this.#tasks.findProjectForCwd(cwd);
+	}
+
+	listSessionWorkspaces() {
+		return this.#tasks.listWorkspaces();
+	}
+
 	async createCodingTask(input: CreateCodingTaskInput | null | undefined, manager: WorktreeManager) {
 		const id = await this.#tasks.create(input, manager, {
 			isClosing: () => this.#turnExecutor.isClosing(),
@@ -211,30 +242,36 @@ export class LocalAgentHost {
 			resumeInitialTurn: (taskId, savedTurn, config) => this.#turnExecutor.resumeInitialTurn(taskId, savedTurn, config),
 			prepareBranch: (repository, startFrom) => startFromService.prepare(repository, startFrom),
 		});
-		return this.sessions().find(item => item.id === id);
+		return this.getSession(id);
 	}
 
 	renameCodingTask(id: string, title: unknown) {
 		this.#tasks.rename(id, title);
-		return this.sessions().find(item => item.id === id);
+		return this.getSession(id);
 	}
 
 	deleteCodingTask(id: string) {
-		return this.#tasks.delete(id);
+		const result = this.#tasks.delete(id);
+		void this.#sessionManager.evict(id);
+		this.events.emit("sessions.changed", { id, deleted: true });
+		return result;
 	}
 
 	createChatThread(input: { id?: unknown; mode?: unknown } | null | undefined) {
 		const id = this.#chats.create(input);
-		return this.sessions().find(item => item.id === id);
+		return this.getSession(id);
 	}
 
 	renameChatThread(id: string, title: unknown) {
 		this.#chats.rename(id, title);
-		return this.sessions().find(item => item.id === id);
+		return this.getSession(id);
 	}
 
 	deleteChatThread(id: string) {
-		return this.#chats.delete(id);
+		const result = this.#chats.delete(id);
+		void this.#sessionManager.evict(id);
+		this.events.emit("sessions.changed", { id, deleted: true });
+		return result;
 	}
 
 	async setSessionArchived(id: string, archived: boolean): Promise<{ id: string; archivedAt: number | null; workspace: string | null; repository: string | null; kind: string | null }> {
@@ -243,6 +280,7 @@ export class LocalAgentHost {
 		const chat = task ? null : this.#chats.get(id);
 		if (!task && !chat) throw notFound("Session not found.");
 		if (archived && this.#turnExecutor.isActiveOrRecovering(id)) await this.abortSession(id).catch(() => ({ ok: false }));
+		if (archived) await this.#sessionManager.evict(id);
 		const archivedAt = archived ? Date.now() : null;
 		if (task) this.#tasks.setArchivedAt(id, archivedAt);
 		else this.#chats.setArchivedAt(id, archivedAt);
@@ -252,12 +290,12 @@ export class LocalAgentHost {
 
 	forkSession(sourceId: string) {
 		const newId = this.#chats.forkSession(sourceId);
-		return this.sessions().find(item => item.id === newId);
+		return this.getSession(newId);
 	}
 
 	moveSession(sourceId: string, opts: { mode?: "coding" | "personal"; projectId?: string | null }) {
 		const id = this.#chats.moveSession(sourceId, opts);
-		return this.sessions().find(item => item.id === id);
+		return this.getSession(id);
 	}
 
 	markWorktreeRemoved(id: string) {

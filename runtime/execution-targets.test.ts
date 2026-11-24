@@ -65,6 +65,9 @@ test("Docker: a container per session with its worktree, Git metadata and agent 
 		const run = calls.find(args => args[0] === "run")!;
 		const mounts = run.flatMap((arg, index) => (arg === "-v" ? [run[index + 1].split(":")[0]] : [])).filter(path => path.startsWith(f.root));
 		assert.deepEqual(mounts.sort(), [join(f.repo, ".git"), f.worktrees].sort(), "the worktree sits inside the worktree folder, so it isn't mounted twice");
+		assert.ok(run.includes("--cap-drop=ALL"), "container drops all Linux capabilities");
+		assert.ok(run.includes("--security-opt=no-new-privileges:true"), "container forbids privilege escalation");
+		assert.ok(run.includes("--pids-limit=256"), "container limits PIDs");
 		assert.ok(run.includes("IS_SANDBOX=1") && run.some(arg => arg.startsWith("HOME=")), "agent CLIs find their sign-in and may skip prompts in the container");
 		assert.equal(run.at(-3), DEFAULT_DOCKER_IMAGE);
 		const record = targets.session("s1");
@@ -165,7 +168,23 @@ test("SSH: the worktree is synced up, the command runs remotely with secrets on 
 		assert.equal(readFileSync(join(f.workspace, "out.txt"), "utf8"), "made-remotely\n", "files created remotely come back");
 		assert.equal(existsSync(join(remoteHome, "ade-ws", "s1", "node_modules")), false, "ignored folders aren't copied");
 		assert.equal(existsSync(join(remoteHome, "ade-ws", "s1", ".git")), false, "Git stays on this computer");
-		assert.equal(targets.commandFor("s1", f.workspace, "git status", [], { workspaces: [f.workspace] }), null, "plain git commands run here");
+		assert.deepEqual(
+			targets.commandFor("s1", f.workspace, "git status", [], { workspaces: [f.workspace] }),
+			{ file: "git", args: ["status"] },
+			"plain safe git commands run locally via execFile without a shell",
+		);
+		// Unsafe git commands must never bypass SSH isolation
+		for (const unsafe of [
+			"git status\nwhoami",
+			"git -c core.sshCommand=evil fetch",
+			"git --exec-path=/tmp status",
+			"git --config-env=core.sshCommand=EVIL status",
+			"git config user.name evil",
+		]) {
+			const inv = targets.commandFor("s1", f.workspace, unsafe, [], { workspaces: [f.workspace] });
+			assert.equal(inv?.file, "/bin/sh", `unsafe git command must stay remote: ${unsafe}`);
+		}
+		assert.throws(() => targets.setTarget("s1", { target: "ssh", sshHost: "build-box", remoteRoot: "bad root;rm" }, { workspace: f.workspace }), /Enter a folder/);
 
 		const failing = targets.commandFor("s1", f.workspace, "exit 7", [], { workspaces: [f.workspace] })!;
 		assert.equal(spawnSync(failing.file, failing.args, { env: { ...process.env, PATH: path } }).status, 7, "the remote exit code comes through");
@@ -194,6 +213,13 @@ test("Boat.dev: a VM is created, its key authorized and host key pinned, and it'
 		assert.equal(ready.state, "running", ready.message);
 		assert.deepEqual(calls.slice(0, 2), ["create ade-s1", "key bx_abcdefgh ssh-ed25519"]);
 		assert.equal(readFileSync(join(f.root, "state", "boat_known_hosts"), "utf8"), "bx_abcdefgh ssh-ed25519 AAAAhost\n");
+		// Preserves existing host keys for other Boat VMs instead of overwriting the file
+		writeFileSync(join(f.root, "state", "boat_known_hosts"), "bx_other ssh-ed25519 AAAAother\nbx_abcdefgh ssh-ed25519 AAAAold\n", { mode: 0o600 });
+		await targets.ensure("s1", { workspace: f.workspace });
+		assert.equal(
+			readFileSync(join(f.root, "state", "boat_known_hosts"), "utf8"),
+			"bx_other ssh-ed25519 AAAAother\nbx_abcdefgh ssh-ed25519 AAAAhost\n",
+		);
 		const command = targets.commandFor("s1", f.workspace, "npm test", [], { workspaces: [f.workspace] })!.args.join(" ");
 		assert.match(command, /HostKeyAlias=bx_abcdefgh/);
 		assert.match(command, /user@203\.0\.113\.7/);

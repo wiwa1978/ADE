@@ -68,6 +68,7 @@ export class RemoteHttpSandbox implements SandboxProvider {
         authorization: `Bearer ${this.#apiKey}`,
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!response.ok) {
       throw new Error(`RemoteSandbox ${path} failed (${response.status}): ${await response.text()}`);
@@ -152,6 +153,7 @@ export class BoatSandbox implements SandboxProvider {
         ...(body !== undefined ? { "content-type": "application/json" } : {}),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       throw new Error(`BoatSandbox ${method} ${path} failed (${res.status}): ${await res.text()}`);

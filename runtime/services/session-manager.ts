@@ -61,6 +61,7 @@ export class SessionManager {
 	#blueprints?: SessionBlueprints;
 	#team?: TeamBoard;
 	#sessions = new Map<string, OpenSession>();
+	#opening = new Map<string, Promise<OpenSession>>();
 	#watches = new Map<string, WatchHandle>();
 
 	constructor(opts: {
@@ -178,81 +179,125 @@ export class SessionManager {
 			}, context);
 			return openSession;
 		}
-		const registry = createRegistry();
-		const identity = task?.workspace && task.workspaceDev && task.workspaceIno ? { dev: task.workspaceDev, ino: task.workspaceIno } : null;
-		const workspaceExt = task?.workspace && identity ? createWorkspaceTools(task.workspace, identity) : null;
-		const searchExt = task?.workspace && identity ? createSearchTools(task.workspace, identity) : null;
-		const shellExt = task?.workspace && identity ? createShellTools({ sessionId: key, workspace: task.workspace, identity, processes: this.#processes }) : null;
-		if (workspaceExt) registry.install(workspaceExt);
-		if (searchExt) registry.install(searchExt);
-		if (shellExt) registry.install(shellExt);
-		const teamExt = task && this.#team ? createTeamTools({
-			sessionId: key,
-			board: this.#team,
-			agents: async () => (await this.featureAgents(task.id)).map(agent => ({ id: String(agent.id), name: agent.name })),
-		}) : null;
-		if (teamExt) registry.install(teamExt);
-		if (task) {
-			const wsTools = workspaceExt?.tools ?? [];
-			registry.install(createSubagentTools({
-				sessionId: key,
-				workspace: task.workspace ?? null,
-				workspaceIdentity: identity,
-				repository: task.repository ?? null,
-				readTools: wsTools.filter(tool => ["read", "list_files"].includes(tool.name)),
-				workspaceTools: wsTools,
-				searchTools: searchExt?.tools ?? [],
-				shellTools: shellExt?.tools ?? [],
-				worktreeManager: this.#worktreeManager,
-				processes: this.#processes,
-				events: this.#events,
-				teamTools: teamExt?.tools ?? [],
-				onSubagentCreated: (convId) => {
-					const current = this.#sessions.get(key);
-					if (current) void this.watchConversation(key, current.harness, convId, true);
-				},
-			}));
-		}
-		if (task || mode === "coding") {
-			registry.install(createBrowserTools(this.#browser));
-		}
-		registry.install(this.#artifacts.createExtension(key));
-		if (task && this.#blueprints) registry.install(this.#blueprints.createExtension(key));
-		registry.install(createSkillsExtension(task?.workspace ?? null));
-		const mcpExt = this.#mcp.createExtension();
-		if (mcpExt) registry.install(mcpExt);
-
-		let harnessRef: Harness | null = null;
-		registry.install(this.#approvals.createExtension(key, () => harnessRef));
-
-		const workspaceDir = task?.workspace ?? undefined;
-		const harness = await Harness.open(
-			await openNodeSqliteStorage(join(this.#stateDirectory, chatId ? `chat-thread-${chatId}.sqlite` : task ? `coding-task-${taskId}.sqlite` : `${mode}.sqlite`)),
-			{ models: config.models, registry, ...(workspaceDir ? { env: () => new NodeExecutionEnv({ cwd: workspaceDir }) } : {}) },
-			context,
-		);
-		harnessRef = harness;
-		try {
-			const root = await harness.root(context, {
-				agent: {
-					model: { provider: config.provider, modelId },
-					thinkingLevel: thinkingLevel as never,
-					instructions,
-				},
-			});
-			await root.configure({
+		const inFlight = this.#opening.get(key);
+		if (inFlight) {
+			const session = await inFlight;
+			await session.root.configure({
 				model: { provider: config.provider, modelId },
 				thinkingLevel: thinkingLevel as never,
 				instructions,
 			}, context);
-			const session: OpenSession = { harness, root };
-			this.#sessions.set(key, session);
-			harness.resume();
-			await this.watchConversation(key, harness, ROOT_CONVERSATION_ID, false);
 			return session;
+		}
+		const openPromise = (async (): Promise<OpenSession> => {
+			const registry = createRegistry();
+			const identity = task?.workspace && task.workspaceDev && task.workspaceIno ? { dev: task.workspaceDev, ino: task.workspaceIno } : null;
+			const workspaceExt = task?.workspace && identity ? createWorkspaceTools(task.workspace, identity) : null;
+			const searchExt = task?.workspace && identity ? createSearchTools(task.workspace, identity) : null;
+			const shellExt = task?.workspace && identity ? createShellTools({ sessionId: key, workspace: task.workspace, identity, processes: this.#processes }) : null;
+			if (workspaceExt) registry.install(workspaceExt);
+			if (searchExt) registry.install(searchExt);
+			if (shellExt) registry.install(shellExt);
+			const teamExt = task && this.#team ? createTeamTools({
+				sessionId: key,
+				board: this.#team,
+				agents: async () => (await this.featureAgents(task.id)).map(agent => ({ id: String(agent.id), name: agent.name })),
+			}) : null;
+			if (teamExt) registry.install(teamExt);
+			if (task) {
+				const wsTools = workspaceExt?.tools ?? [];
+				registry.install(createSubagentTools({
+					sessionId: key,
+					workspace: task.workspace ?? null,
+					workspaceIdentity: identity,
+					repository: task.repository ?? null,
+					readTools: wsTools.filter(tool => ["read", "list_files"].includes(tool.name)),
+					workspaceTools: wsTools,
+					searchTools: searchExt?.tools ?? [],
+					shellTools: shellExt?.tools ?? [],
+					worktreeManager: this.#worktreeManager,
+					processes: this.#processes,
+					events: this.#events,
+					teamTools: teamExt?.tools ?? [],
+					onSubagentCreated: (convId) => {
+						const current = this.#sessions.get(key);
+						if (current) void this.watchConversation(key, current.harness, convId, true);
+					},
+				}));
+			}
+			if (task || mode === "coding") {
+				registry.install(createBrowserTools(this.#browser));
+			}
+			registry.install(this.#artifacts.createExtension(key));
+			if (task && this.#blueprints) registry.install(this.#blueprints.createExtension(key));
+			registry.install(createSkillsExtension(task?.workspace ?? null));
+			const mcpExt = this.#mcp.createExtension();
+			if (mcpExt) registry.install(mcpExt);
+
+			let harnessRef: Harness | null = null;
+			registry.install(this.#approvals.createExtension(key, () => harnessRef));
+
+			const workspaceDir = task?.workspace ?? undefined;
+			const harness = await Harness.open(
+				await openNodeSqliteStorage(join(this.#stateDirectory, chatId ? `chat-thread-${chatId}.sqlite` : task ? `coding-task-${taskId}.sqlite` : `${mode}.sqlite`)),
+				{ models: config.models, registry, ...(workspaceDir ? { env: () => new NodeExecutionEnv({ cwd: workspaceDir }) } : {}) },
+				context,
+			);
+			harnessRef = harness;
+			try {
+				const root = await harness.root(context, {
+					agent: {
+						model: { provider: config.provider, modelId },
+						thinkingLevel: thinkingLevel as never,
+						instructions,
+					},
+				});
+				await root.configure({
+					model: { provider: config.provider, modelId },
+					thinkingLevel: thinkingLevel as never,
+					instructions,
+				}, context);
+				const session: OpenSession = { harness, root };
+				this.#sessions.set(key, session);
+				harness.resume();
+				await this.watchConversation(key, harness, ROOT_CONVERSATION_ID, false);
+				return session;
+			} catch (error) {
+				await harness.close(context);
+				throw error;
+			}
+		})();
+		this.#opening.set(key, openPromise);
+		try {
+			return await openPromise;
+		} finally {
+			if (this.#opening.get(key) === openPromise) this.#opening.delete(key);
+		}
+	}
+
+	/** Stop watches and close the open Harness for an archived or deleted session. */
+	async evict(id: string): Promise<void> {
+		const pending = this.#opening.get(id);
+		if (pending) {
+			await pending.catch(() => undefined);
+		}
+		const prefix = `${id}:`;
+		for (const [watchKey, watch] of [...this.#watches.entries()]) {
+			if (!watchKey.startsWith(prefix)) continue;
+			this.#watches.delete(watchKey);
+			try {
+				await watch.stop();
+			} catch (error) {
+				logger.debug("Failed to stop conversation watch during session eviction", { error, sessionId: id });
+			}
+		}
+		const session = this.#sessions.get(id);
+		if (!session) return;
+		this.#sessions.delete(id);
+		try {
+			await session.harness.close(context);
 		} catch (error) {
-			await harness.close(context);
-			throw error;
+			logger.debug("Failed to close session harness during eviction", { error, sessionId: id });
 		}
 	}
 

@@ -133,6 +133,32 @@ test("migrations upgrade a legacy pre-migration database to the exact same schem
 	assert.equal(chat.title, "Notes");
 	assert.equal(chat.archivedAt, null);
 
+	// Migration v6 secondary indexes exist on both fresh and migrated databases
+	const expectedIndexes = [
+		"idx_turns_taskId_createdAt",
+		"idx_turns_chatId_createdAt",
+		"idx_turns_status",
+		"idx_turns_mode_root",
+		"idx_coding_tasks_projectId",
+		"idx_coding_tasks_workspace",
+		"idx_session_artifacts_sessionId",
+		"idx_approval_rules_tool_effect",
+	];
+	for (const conn of [freshDb, legacyDb]) {
+		const indexNames = new Set(
+			(
+				conn
+					.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%'")
+					.all() as { name: string }[]
+			).map((row) => row.name),
+		);
+		for (const idx of expectedIndexes) {
+			assert.ok(indexNames.has(idx), `Expected index ${idx} to exist`);
+		}
+		assert.equal((conn.prepare("PRAGMA foreign_keys").get() as { foreign_keys?: number })?.foreign_keys, 1);
+		assert.equal((conn.prepare("PRAGMA busy_timeout").get() as { timeout?: number })?.timeout, 5000);
+	}
+
 	freshDb.close();
 	legacyDb.close();
 });

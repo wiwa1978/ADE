@@ -1,10 +1,11 @@
-import { statSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
+import { resolve, sep } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { validateLinkedIssue } from "../github-issues.ts";
 import { badRequest, conflict, notFound, serviceUnavailable } from "../http-error.ts";
 import { parseStartFrom, type PreparedBranch, type StartFrom } from "../start-from.ts";
 import { resolveBaseCommit, resolveCheckout, type WorktreeManager } from "../worktrees.ts";
-import { dbAll, dbGet } from "./schema.ts";
+import { dbAll, dbGet, dbRun, withTransaction } from "./schema.ts";
 import type { ProjectStore } from "./project-store.ts";
 import { resolveSessionBlueprint } from "../session-blueprints.ts";
 import type { TurnStore } from "./turn-store.ts";
@@ -72,7 +73,7 @@ export class TaskStore {
 	}
 
 	exists(id: string): boolean {
-		return Boolean(this.#db.prepare("SELECT 1 FROM coding_tasks WHERE id=?").get(id));
+		return Boolean(dbGet(this.#db, "SELECT 1 FROM coding_tasks WHERE id=?", id));
 	}
 
 	hasProvisioning(): boolean {
@@ -83,23 +84,25 @@ export class TaskStore {
 		if (typeof title !== "string" || !title.trim() || title.length > 200) {
 			throw badRequest("Provide a session name of up to 200 characters.");
 		}
-		const result = this.#db.prepare("UPDATE coding_tasks SET initialTitle=COALESCE(initialTitle,title),title=? WHERE id=?").run(title.trim(), id);
+		const result = dbRun(this.#db, "UPDATE coding_tasks SET initialTitle=COALESCE(initialTitle,title),title=? WHERE id=?", title.trim(), id);
 		if (!result.changes) throw notFound("Session not found.");
 	}
 
 	delete(id: string): { deleted: true; id: string } {
-		this.#turns.deleteForTask(id);
-		const result = this.#db.prepare("DELETE FROM coding_tasks WHERE id=?").run(id);
-		if (!result.changes) throw notFound("Session not found.");
-		return { deleted: true, id };
+		return withTransaction(this.#db, () => {
+			this.#turns.deleteForTask(id);
+			const result = dbRun(this.#db, "DELETE FROM coding_tasks WHERE id=?", id);
+			if (!result.changes) throw notFound("Session not found.");
+			return { deleted: true, id };
+		});
 	}
 
 	setArchivedAt(id: string, archivedAt: number | null): void {
-		this.#db.prepare("UPDATE coding_tasks SET archivedAt=? WHERE id=?").run(archivedAt, id);
+		dbRun(this.#db, "UPDATE coding_tasks SET archivedAt=? WHERE id=?", archivedAt, id);
 	}
 
 	markWorktreeRemoved(id: string): void {
-		this.#db.prepare("UPDATE coding_tasks SET worktreeRemoved=1 WHERE id=?").run(id);
+		dbRun(this.#db, "UPDATE coding_tasks SET worktreeRemoved=1 WHERE id=?", id);
 	}
 
 	removedWorktree(id: string): { path: string; repository: string; branch: string } | null {
@@ -116,7 +119,7 @@ export class TaskStore {
 		const task = dbGet<Pick<CodingTaskRow, "workspace">>(this.#db, "SELECT workspace FROM coding_tasks WHERE id=?", id);
 		if (!task?.workspace) throw notFound("Session workspace not found.");
 		const info = statSync(task.workspace, { bigint: true });
-		this.#db.prepare("UPDATE coding_tasks SET worktreeRemoved=0, workspaceDev=?, workspaceIno=? WHERE id=?").run(String(info.dev), String(info.ino), id);
+		dbRun(this.#db, "UPDATE coding_tasks SET worktreeRemoved=0, workspaceDev=?, workspaceIno=? WHERE id=?", String(info.dev), String(info.ino), id);
 	}
 
 	getWorkspacePath(sessionId: string): string | null {
@@ -132,6 +135,62 @@ export class TaskStore {
 	getWorkspaceBase(sessionId: string): string | null {
 		const task = dbGet<Pick<CodingTaskRow, "base" | "kind">>(this.#db, "SELECT base, kind FROM coding_tasks WHERE id=?", sessionId);
 		return task?.kind === "worktree" && task.base && task.base !== "HEAD" ? task.base : null;
+	}
+
+	listWorkspaces(): { id: string; path: string | null; repository: string; archivedAt: number | null }[] {
+		return dbAll<Pick<CodingTaskRow, "id" | "workspace" | "repository" | "archivedAt" | "worktreeRemoved">>(
+			this.#db,
+			"SELECT id, workspace, repository, archivedAt, worktreeRemoved FROM coding_tasks ORDER BY createdAt DESC",
+		).map((row) => ({
+			id: row.id,
+			path: row.worktreeRemoved ? null : row.workspace,
+			repository: row.repository,
+			archivedAt: row.archivedAt,
+		}));
+	}
+
+	/**
+	 * Resolve the project ID owning a working directory (exact indexed workspace match first,
+	 * then subdirectory match against task workspaces and project checkouts) without loading turns.
+	 */
+	findProjectForCwd(cwd: string): string | null {
+		const real = (path: string) => {
+			try {
+				return realpathSync(path);
+			} catch {
+				return resolve(path);
+			}
+		};
+		const resolved = resolve(cwd);
+		const target = real(cwd);
+		const exact = dbGet<{ projectId: string }>(
+			this.#db,
+			"SELECT projectId FROM coding_tasks WHERE (workspace=? OR workspace=?) AND projectId IS NOT NULL AND worktreeRemoved=0 ORDER BY createdAt DESC LIMIT 1",
+			target,
+			resolved,
+		);
+		if (exact?.projectId) return exact.projectId;
+
+		const inside = (root: string | null | undefined) => {
+			if (!root) return false;
+			const base = real(root);
+			return target === base || target.startsWith(`${base}${sep}`);
+		};
+		const taskRows = dbAll<{ projectId: string; workspace: string }>(
+			this.#db,
+			"SELECT projectId, workspace FROM coding_tasks WHERE projectId IS NOT NULL AND workspace IS NOT NULL AND worktreeRemoved=0 ORDER BY createdAt DESC",
+		);
+		for (const row of taskRows) {
+			if (inside(row.workspace)) return row.projectId;
+		}
+		const projectRows = dbAll<{ id: string; repository: string }>(
+			this.#db,
+			"SELECT id, repository FROM projects WHERE repository IS NOT NULL ORDER BY createdAt, id",
+		);
+		for (const row of projectRows) {
+			if (inside(row.repository)) return row.id;
+		}
+		return null;
 	}
 
 	findSameWorkspaceTasks(taskId: string, workspaceDev: string | null, workspaceIno: string | null): { id: string }[] {
@@ -169,7 +228,7 @@ export class TaskStore {
 	async #provisionTask(task: CodingTaskRow, manager: WorktreeManager): Promise<void> {
 		try {
 			if (task.kind === "none") {
-				this.#db.prepare("UPDATE coding_tasks SET status='ready' WHERE id=?").run(task.id);
+				dbRun(this.#db, "UPDATE coding_tasks SET status='ready' WHERE id=?", task.id);
 				return;
 			}
 			let path = task.repository;
@@ -182,10 +241,17 @@ export class TaskStore {
 			}
 			await resolveCheckout(path);
 			const info = statSync(path, { bigint: true });
-			this.#db.prepare("UPDATE coding_tasks SET status='ready', workspace=?, message=?, workspaceDev=?, workspaceIno=? WHERE id=?")
-				.run(path, note, String(info.dev), String(info.ino), task.id);
+			dbRun(
+				this.#db,
+				"UPDATE coding_tasks SET status='ready', workspace=?, message=?, workspaceDev=?, workspaceIno=? WHERE id=?",
+				path,
+				note,
+				String(info.dev),
+				String(info.ino),
+				task.id,
+			);
 		} catch (error) {
-			this.#db.prepare("UPDATE coding_tasks SET status='attention', message=? WHERE id=?").run(this.#safeErrorMessage(error), task.id);
+			dbRun(this.#db, "UPDATE coding_tasks SET status='attention', message=? WHERE id=?", this.#safeErrorMessage(error), task.id);
 		}
 	}
 
@@ -285,23 +351,48 @@ export class TaskStore {
 					throw conflict("Model credentials changed. Retry the message.");
 				}
 				const now = Date.now();
-				this.#db.exec("BEGIN IMMEDIATE");
-				try {
+				const trimmedTitle = normalizedInput.title.trim();
+				withTransaction(this.#db, () => {
 					if (initial && this.#turns.exists(initial.id)) {
 						throw conflict("This initial message ID already belongs to another turn.");
 					}
-					this.#db.prepare("INSERT INTO coding_tasks (id,title,repository,kind,base,branch,status,createdAt,initialTurnId,projectId,initialTitle,issueUrl,issueRepository,issueNumber,issueTitle,issueState,existingBranch,attemptGroup,blueprintId) VALUES (?,?,?,?,?,?,'provisioning',?,?,?,?,?,?,?,?,?,?,?,?)")
-						.run(input.id, input.title.trim(), repository, input.kind, base, branch, now, initial?.id ?? null, normalizedInput.projectId, input.title.trim(),
-							githubIssue?.url ?? null, githubIssue?.repository ?? null, githubIssue?.number ?? null, githubIssue?.title ?? null, githubIssue?.state ?? null, prepared ? 1 : 0, attemptGroup, blueprintId);
+					dbRun(
+						this.#db,
+						"INSERT INTO coding_tasks (id,title,repository,kind,base,branch,status,createdAt,initialTurnId,projectId,initialTitle,issueUrl,issueRepository,issueNumber,issueTitle,issueState,existingBranch,attemptGroup,blueprintId) VALUES (?,?,?,?,?,?,'provisioning',?,?,?,?,?,?,?,?,?,?,?,?)",
+						normalizedInput.id,
+						trimmedTitle,
+						repository,
+						normalizedInput.kind,
+						base,
+						branch,
+						now,
+						initial?.id ?? null,
+						normalizedInput.projectId,
+						trimmedTitle,
+						githubIssue?.url ?? null,
+						githubIssue?.repository ?? null,
+						githubIssue?.number ?? null,
+						githubIssue?.title ?? null,
+						githubIssue?.state ?? null,
+						prepared ? 1 : 0,
+						attemptGroup,
+						blueprintId,
+					);
 					if (initial) {
-						this.#db.prepare("INSERT INTO turns (id,mode,content,provider,model,reasoning,status,createdAt,updatedAt,taskId) VALUES (?,'coding',?,?,?,?,'pending',?,?,?)")
-							.run(initial.id, initial.content, initial.provider, initial.model, initial.reasoning, now, now, input.id);
+						dbRun(
+							this.#db,
+							"INSERT INTO turns (id,mode,content,provider,model,reasoning,status,createdAt,updatedAt,taskId) VALUES (?,'coding',?,?,?,?,'pending',?,?,?)",
+							initial.id,
+							initial.content,
+							initial.provider,
+							initial.model,
+							initial.reasoning,
+							now,
+							now,
+							normalizedInput.id,
+						);
 					}
-					this.#db.exec("COMMIT");
-				} catch (error) {
-					this.#db.exec("ROLLBACK");
-					throw error;
-				}
+				});
 				task = this.get(input.id);
 			}
 		}
