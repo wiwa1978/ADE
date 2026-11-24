@@ -23,8 +23,24 @@ export type SessionStageRecord = {
 	feedback?: Record<string, string>;
 	/** What ADE's own run of each stage's checks found (latest run). */
 	checks?: Record<string, StageChecks>;
+	/** The independent review ADE saw for each review stage (latest attempt). */
+	reviews?: Record<string, ReviewEvidence>;
 	/** What happened, newest last: shown in the Stages view. */
-	history: Array<{ at: number; stageId: string; event: "started" | "finished" | "approved" | "changes_requested" | "looped_back" | "escalated" | "checks_passed" | "checks_failed"; note?: string }>;
+	history: Array<{ at: number; stageId: string; event: "started" | "finished" | "approved" | "changes_requested" | "looped_back" | "escalated" | "checks_passed" | "checks_failed" | "review_done"; note?: string }>;
+};
+
+/** Proof that a review stage's independent review really ran: a fresh read-only subagent, and on which model. */
+export type ReviewEvidence = {
+	subagentId: string;
+	/** "provider/model" it ran on, or null when it used the session's own. */
+	model: string | null;
+	/** True when it ran on a different model family than the Captain. */
+	independent: boolean;
+	status: "running" | "completed" | "failed";
+	/** What the reviewer reported (the end of it). */
+	report: string;
+	startedAt: number;
+	endedAt: number | null;
 };
 
 export type StageView = {
@@ -41,6 +57,8 @@ export type StageView = {
 	verdict: StageVerdict | null;
 	/** ADE's own run of the stage's checks, if it ran any. */
 	checks: StageChecks | null;
+	/** The independent review, for review stages. */
+	review: ReviewEvidence | null;
 	startedAt: number | null;
 	endedAt: number | null;
 };
@@ -163,6 +181,48 @@ export class SessionBlueprints {
 		return this.finish(sessionId, { ...input, summary: `${input.summary.trim()}\n\n${line}`.trim() });
 	}
 
+	/** The stage the session is working on right now (running or waiting for the user), or null. */
+	currentStage(sessionId: string): BlueprintStage | null {
+		const row = this.#row(sessionId);
+		const record = row ? this.#record(row) : null;
+		const blueprint = row?.blueprintId ? getBlueprint(row.blueprintId) : undefined;
+		if (!record || !blueprint || record.run.status !== "running") return null;
+		const stage = blueprint.stages[record.run.currentStageIndex];
+		const status = record.run.stages[record.run.currentStageIndex]?.status;
+		return stage && (status === "running" || status === "awaiting_approval") ? stage : null;
+	}
+
+	/** The current stage when it is a review that is running now: the one that needs an independent reviewer. */
+	reviewStage(sessionId: string): BlueprintStage | null {
+		const stage = this.currentStage(sessionId);
+		const row = this.#row(sessionId);
+		const record = row ? this.#record(row) : null;
+		return stage?.contextIsolation === "goldfish" && record?.run.stages[record.run.currentStageIndex]?.status === "running" ? stage : null;
+	}
+
+	/** A review subagent was started for the current review stage. */
+	reviewStarted(sessionId: string, evidence: { subagentId: string; model: string | null; independent: boolean }) {
+		const row = this.#row(sessionId);
+		const stage = this.reviewStage(sessionId);
+		const record = row ? this.#record(row) : null;
+		if (!row || !record || !stage) return;
+		record.reviews = { ...record.reviews, [stage.id]: { ...evidence, status: "running", report: "", startedAt: this.#now(), endedAt: null } };
+		this.#save(sessionId, row.blueprintId!, record);
+	}
+
+	/** A review subagent ended: keep what it reported. */
+	reviewFinished(sessionId: string, subagentId: string, status: "completed" | "failed", report: string) {
+		const row = this.#row(sessionId);
+		const record = row ? this.#record(row) : null;
+		const entry = record?.reviews && Object.entries(record.reviews).find(([, review]) => review.subagentId === subagentId);
+		if (!row || !record || !entry) return;
+		const [stageId, review] = entry;
+		const now = this.#now();
+		record.reviews = { ...record.reviews, [stageId]: { ...review, status, report: report.trim().slice(-3000), endedAt: now } };
+		if (status === "completed") record.history.push({ at: now, stageId, event: "review_done", note: `Independent review by ${review.model ?? "the session's model"}${review.independent ? " (a different model family)" : ""}` });
+		this.#save(sessionId, row.blueprintId!, record);
+	}
+
 	/** A new turn begins (the user wrote, or decided): the gate stop is over. */
 	unlock(sessionId: string) {
 		this.#gated.delete(sessionId);
@@ -237,6 +297,7 @@ export class SessionBlueprints {
 					summary: record.summaries[stage.id] ?? null,
 					verdict: state.verdict ?? null,
 					checks: record.checks?.[stage.id] ?? null,
+					review: record.reviews?.[stage.id] ?? null,
 					startedAt: state.startedAt ?? null,
 					endedAt: state.endedAt ?? null,
 				};
@@ -303,11 +364,20 @@ export class SessionBlueprints {
 		if (!stage || record.run.status === "completed") return { reply: "All stages are already done.", waiting: false };
 		if (input.stageId !== stage.id) return { reply: `The current stage is "${stage.id}" (${stage.name}), not "${input.stageId}". Finish the current stage first.`, waiting: false };
 		if (state.status !== "running" && state.status !== "awaiting_approval") return { reply: `Stage "${stage.id}" isn't running (it's ${state.status}).`, waiting: false };
+		// A review stage can't be finished on the Captain's word: an independent reviewer has to have run.
+		const review = record.reviews?.[stage.id];
+		const needsReview = stage.contextIsolation === "goldfish" && state.status === "running";
+		if (needsReview && (!review || review.startedAt < (state.startedAt ?? 0))) {
+			return { reply: `"${stage.name}" is an independent review, and ADE hasn't seen one yet. Start a fresh readonly subagent (spawn_subagent, mode readonly) briefed only with where the spec or plan is and that it should review this branch against it; ADE runs it on a different model when one is available. Wait for its report, then call finish_stage again.`, waiting: false };
+		}
+		if (needsReview && review?.status === "running") return { reply: "The independent reviewer is still working. Wait for its report (wait_subagent), then call finish_stage again.", waiting: false };
+		if (needsReview && review?.status === "failed") return { reply: `The independent reviewer ended without a report${review.report ? `: ${review.report.slice(-300)}` : ""}. Start another readonly subagent to review, then call finish_stage again.`, waiting: false };
 		if (stage.onChangesRequestedStageId && !input.verdict) {
 			return { reply: `Stage "${stage.id}" is a review: call finish_stage again with a verdict (pass, changes_requested or escalate_human) and its findings.`, waiting: false };
 		}
 		const now = this.#now();
-		const summary = input.summary.trim().slice(0, 4000);
+		const reviewLine = needsReview && review ? `Independent review by ${review.model ?? "the session's model"}${review.independent ? " (a different model family from the Captain's)" : " (same model family as the Captain: no other model is set up)"}.${review.report ? `\n\nThe reviewer reported:\n${review.report.slice(-1500)}` : ""}` : "";
+		const summary = [input.summary.trim(), reviewLine].filter(Boolean).join("\n\n").slice(0, 4000);
 		record.summaries[stage.id] = summary;
 		if (record.feedback) delete record.feedback[stage.id];
 		const result = completeStage(record.run, blueprint, { stageId: stage.id, artifactPaths: (input.artifacts ?? []).slice(0, 20), verdict: input.verdict, now });

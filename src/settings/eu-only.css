@@ -1,0 +1,23 @@
+.ade-eu { border: 1px solid rgb(var(--border)); border-radius: 12px; padding: 14px 16px; margin: 0 0 18px; background: rgb(var(--nav)); display: flex; flex-direction: column; gap: 10px; }
+.ade-eu.is-on { border-color: rgb(var(--primary) / 0.6); }
+.ade-eu-head { display: flex; align-items: center; gap: 12px; }
+.ade-eu-title { display: flex; flex-direction: column; gap: 2px; flex: 1; font-size: 13px; }
+.ade-eu-title span { color: rgb(var(--muted)); font-size: 12px; }
+.ade-eu-switch { position: relative; width: 38px; height: 22px; flex: none; cursor: pointer; }
+.ade-eu-switch input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.ade-eu-switch span { position: absolute; inset: 0; border-radius: 999px; background: rgb(var(--foreground) / 0.2); transition: background 0.15s; }
+.ade-eu-switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
+.ade-eu-switch input:checked + span { background: rgb(var(--primary)); }
+.ade-eu-switch input:checked + span::after { transform: translateX(16px); }
+.ade-eu-switch input:focus-visible + span { outline: 2px solid rgb(var(--primary)); outline-offset: 2px; }
+.ade-eu-declare { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; }
+.ade-eu-declare em { color: rgb(var(--muted)); font-style: normal; }
+.ade-eu-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ade-eu-list li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; font-size: 12.5px; }
+.ade-eu-list li.is-blocked { background: rgb(220 70 70 / 0.08); }
+.ade-eu-name { flex: 1; display: flex; flex-direction: column; }
+.ade-eu-name small { color: rgb(var(--muted)); font-size: 11px; }
+.ade-eu-region { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: rgb(var(--foreground) / 0.08); }
+.ade-eu-region.is-eu, .ade-eu-region.is-local { background: rgb(60 170 100 / 0.18); }
+.ade-eu-region.is-non-eu { background: rgb(217 155 56 / 0.2); }
+.ade-eu-allow { display: inline-flex; align-items: center; gap: 6px; min-width: 110px; justify-content: flex-end; font-size: 12px; }

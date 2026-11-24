@@ -9,7 +9,7 @@ import { map, unknown } from "@earendil-works/pi-schema";
 import type { RuntimeEventBus } from "./events.ts";
 import { runHostMigrations } from "./db/migrations.ts";
 import { isErrorCode, logger } from "./log.ts";
-import { badRequest, notFound } from "./http-error.ts";
+import { badRequest, conflict, notFound } from "./http-error.ts";
 
 export type McpServerConfig = {
 	id: string;
@@ -191,6 +191,17 @@ export class McpManager {
 	#db: DatabaseSync;
 	#events: RuntimeEventBus;
 	#runtime = new Map<string, ConnectedServer>();
+	#guard: ((server: { id: string; transport: "stdio" | "http"; url?: string }) => string | null) | null = null;
+
+	/** EU-only mode: servers the guard blocks don't connect, and the ones connected now are disconnected. */
+	setGuard(guard: (server: { id: string; transport: "stdio" | "http"; url?: string }) => string | null) {
+		this.#guard = guard;
+		this.applyGuard();
+	}
+
+	applyGuard() {
+		for (const server of this.#all()) if (this.#guard?.(server) && this.#runtime.has(server.id)) this.disconnect(server.id);
+	}
 
 	constructor(db: DatabaseSync, events: RuntimeEventBus) {
 		this.#db = db;
@@ -303,6 +314,8 @@ export class McpManager {
 	async connect(id: string): Promise<McpServerStatus> {
 		const server = this.#all().find(s => s.id === id);
 		if (!server) throw notFound("MCP server not found.");
+		const blocked = this.#guard?.(server);
+		if (blocked) throw conflict(blocked);
 		this.disconnect(id);
 		const client = server.transport === "http"
 			? new HttpMcpClient(server.url!, server.headers)

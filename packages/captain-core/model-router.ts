@@ -175,12 +175,21 @@ export class EuComplianceViolationError extends Error {
   }
 }
 
+export type ResolveOptions = {
+  /** Is this model usable here (provider configured, model in its catalog)? Profile defaults that aren't are skipped. */
+  available?: (ref: ModelRef) => boolean;
+  /** Use the profile's role models at all. Off when the project never picked a profile, so a stage doesn't swap the user's own model for a profile's. Default on. */
+  useProfileRoles?: boolean;
+};
+
 /**
- * Resolves the active model for a blueprint stage / subagent using the 4-level hierarchy:
- *   1. Run/subagent override (highest priority)
+ * Resolves the active model for a blueprint stage / subagent, first match wins:
+ *   1. Run/subagent override
  *   2. Stage override (config.stageOverrides[stage.id] or stage.modelOverride)
- *   3. Role default (config.roleDefaults[role] or selected ModelProfile[role])
- *   4. Project override -> App default
+ *   3. Role default the user set (config.roleDefaults[role])
+ *   4. Project override (the model the project names)
+ *   5. The profile's model for the stage's role, when the profile is in use and that model is available
+ *   6. App default (the session's own model)
  *
  * Enforces fail-closed EU-Only Mode whenever config.compliance.euOnlyMode is true.
  */
@@ -188,8 +197,10 @@ export function resolveStageModel(
   stage: Pick<BlueprintStage, "id" | "defaultModelRole" | "modelOverride">,
   config: ModelRoutingConfig,
   runOverrideKey?: string,
+  options: ResolveOptions = {},
 ): ResolvedModel {
   const profile = getModelProfile(config.profile);
+  const profileRef = profile.roles[stage.defaultModelRole];
 
   let ref: ModelRef;
   let source: ResolvedModel["source"];
@@ -209,9 +220,6 @@ export function resolveStageModel(
   } else if (config.roleDefaults?.[stage.defaultModelRole]) {
     ref = config.roleDefaults[stage.defaultModelRole] as ModelRef;
     source = "role-default";
-  } else if (profile.roles[stage.defaultModelRole]) {
-    ref = profile.roles[stage.defaultModelRole];
-    source = "role-default";
   } else if (config.projectOverride?.provider && config.projectOverride?.model) {
     ref = {
       ...config.appDefault,
@@ -220,6 +228,9 @@ export function resolveStageModel(
       model: config.projectOverride.model,
     };
     source = "project-override";
+  } else if (profileRef && options.useProfileRoles !== false && (options.available?.(profileRef) ?? true)) {
+    ref = profileRef;
+    source = "role-default";
   } else {
     ref = { ...config.appDefault };
     source = "app-default";

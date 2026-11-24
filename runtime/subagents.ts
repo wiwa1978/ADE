@@ -46,6 +46,14 @@ type SubagentToolsOptions = {
 	onSubagentCreated?: (conversationId: string | number) => void;
 	/** The team board tools (tasks, plans, posts, claims), shared with every Pi subagent. */
 	teamTools?: readonly ModelToolEntry[];
+	/** The independent review of a review stage: which model a fresh readonly reviewer gets, and proof it ran. */
+	reviews?: {
+		begin(): Promise<{ model: { provider: string; modelId: string } | null; label: string | null; independent: boolean } | null>;
+		started(subagentId: string, info: { model: string | null; independent: boolean }): void;
+		finished(subagentId: string, status: "completed" | "failed", report: string): void;
+	};
+	/** EU-only mode: why a model provider or agent CLI may not be used (null when it may). */
+	euBlock?: { provider(id: string): string | null; engine(id: string): string | null };
 };
 
 function toConvId(raw: string): ConversationIdParam {
@@ -195,6 +203,8 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 				throw new Error("Provide a subagent name (<=100 chars) and task (<=12000 chars).");
 			}
 
+			// A review stage's reviewer: ADE picks its model (another family when it can) and keeps the proof it ran.
+			const review = mode === "readonly" ? await opts.reviews?.begin().catch(() => null) ?? null : null;
 			const subUuid = randomUUID();
 			const selected = await selectModelTools(mode, subUuid);
 			// Pick the harness: the user's fixed choice, else the main agent's pick when it's usable.
@@ -206,7 +216,15 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 				note = `${harnessNames[harness]} needs a workspace, so this subagent runs on Pi.`;
 				harness = "pi";
 			}
+			const euEngine = harness !== "pi" ? opts.euBlock?.engine(harness) : null;
+			if (euEngine) {
+				note = `${euEngine} This subagent runs on Pi.`;
+				harness = "pi";
+			}
 			const [piProvider, ...piModelParts] = policy.piModel.split("/");
+			const wanted = review?.model ?? (policy.piModel ? { provider: piProvider, modelId: piModelParts.join("/") } : null);
+			// EU-only mode: a subagent model outside the EU is dropped; the subagent uses the session's own model.
+			const subModel = harness === "pi" && wanted && !opts.euBlock?.provider(wanted.provider) ? wanted : null;
 
 			const id = await api.commit(async tx => {
 				if (!background) {
@@ -223,7 +241,7 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 					maxTurns: 24,
 					instructions: buildInstructions(role || name, mode, selected.workspacePath),
 					// Pi subagents can use another model than the main agent (Settings → Subagents).
-					...(harness === "pi" && policy.piModel ? { model: { provider: piProvider, modelId: piModelParts.join("/") } } : {}),
+					...(subModel ? { model: subModel } : {}),
 				});
 				const meta: SubagentRecordMetadata = {
 					name,
@@ -241,6 +259,11 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 			}, ctx);
 
 			opts.onSubagentCreated?.(id);
+			if (review) opts.reviews?.started(String(id), { model: review.label, independent: review.independent });
+			const done = <T extends { status: string; report: string }>(result: T): T => {
+				if (review) opts.reviews?.finished(String(id), result.status === "completed" ? "completed" : "failed", result.report);
+				return result;
+			};
 			await api.details({
 				conversationId: id,
 				name,
@@ -263,7 +286,7 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 					readOnly: mode === "readonly",
 					task: `You are a subagent named "${name}" (${role}) working for a coordinating agent. ${mode === "readonly" ? "Only read and investigate; don't change files." : "Make the changes in this folder and verify them."}\n\nTask:\n${taskText}\n\n${GUARDRAIL_INSTRUCTIONS}\n\nEnd with a short report: what you did, what you found, and anything left to do.`,
 				});
-				const report = () => external.wait(opts.sessionId, String(id)).then(result => ({ status: result.status, report: result.text || `(${harnessNames[harness]} finished without a text report)` }));
+				const report = () => external.wait(opts.sessionId, String(id)).then(result => ({ status: result.status, report: result.text || `(${harnessNames[harness]} finished without a text report)` })).then(done);
 				if (background) {
 					backgroundPromises.set(String(id), report().finally(() => opts.events?.emit("subagents.update", { sessionId: opts.sessionId, subagentId: String(id) }, opts.sessionId)));
 					return {
@@ -285,7 +308,8 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 			const reqId = `ade-subagent:${api.taskId}:${id}`;
 			const submission = await child.submit({ type: "input", content: taskText, requestId: reqId }, ctx);
 
-			const awaitReport = async (): Promise<{ status: string; report: string }> => {
+			const awaitReport = () => awaitReportRaw().then(done);
+			const awaitReportRaw = async (): Promise<{ status: string; report: string }> => {
 				const settled = await submission.wait(context);
 				if (settled.status !== "done") {
 					return { status: "failed", report: `Subagent "${name}" ended without a report: ${settled.reason}` };

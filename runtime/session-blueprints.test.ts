@@ -14,6 +14,15 @@ function setup(blueprintId: string | null) {
 	return { db, blueprints, events };
 }
 
+let reviews = 0;
+/** A review stage only finishes once an independent reviewer ran: record one the way the runtime does. */
+function withReview(blueprints: SessionBlueprints, independent = true) {
+	const subagentId = `reviewer-${++reviews}`;
+	blueprints.reviewStarted("s1", { subagentId, model: independent ? "openai/gpt-5" : null, independent });
+	blueprints.reviewFinished("s1", subagentId, "completed", "No blockers found.");
+	return blueprints;
+}
+
 test("the way of working: the session's choice, else the project's default, and a lock wins", () => {
 	assert.equal(resolveSessionBlueprint(null, undefined), "vibe");
 	assert.equal(resolveSessionBlueprint({ blueprintId: "speckit" }, undefined), "speckit");
@@ -84,19 +93,19 @@ test("Spec Kit: stages run in order, gates wait for the user, feedback sends a s
 test("a review that asks for changes loops back to building, then needs the user after the allowed rounds", () => {
 	const { blueprints } = setup("automated-factory");
 	for (const stageId of ["triage", "plan", "implement", "verify"]) assert.equal(blueprints.finish("s1", { stageId, summary: `${stageId} done` }).waiting, false);
-	assert.match(blueprints.finish("s1", { stageId: "review", summary: "Reviewed" }).reply, /needs? a verdict|with a verdict/);
+	assert.match(withReview(blueprints).finish("s1", { stageId: "review", summary: "Reviewed" }).reply, /needs? a verdict|with a verdict/);
 	const changes = { outcome: "changes_requested" as const, summary: "Missing tests", findings: [{ severity: "major" as const, file: "src/login.ts", message: "No test for lockout" }] };
-	let result = blueprints.finish("s1", { stageId: "review", summary: "Changes needed", verdict: changes });
+	let result = withReview(blueprints).finish("s1", { stageId: "review", summary: "Changes needed", verdict: changes });
 	assert.match(result.reply, /Back to stage "implement"[\s\S]*\[major\] src\/login\.ts: No test for lockout[\s\S]*Current stage: Implement/);
 	for (let round = 0; round < 1; round++) {
 		blueprints.finish("s1", { stageId: "implement", summary: "fixed" });
 		blueprints.finish("s1", { stageId: "verify", summary: "ok" });
-		result = blueprints.finish("s1", { stageId: "review", summary: "Still missing", verdict: changes });
+		result = withReview(blueprints).finish("s1", { stageId: "review", summary: "Still missing", verdict: changes });
 		assert.match(result.reply, /Back to stage "implement"/);
 	}
 	blueprints.finish("s1", { stageId: "implement", summary: "fixed" });
 	blueprints.finish("s1", { stageId: "verify", summary: "ok" });
-	result = blueprints.finish("s1", { stageId: "review", summary: "Still missing", verdict: changes });
+	result = withReview(blueprints).finish("s1", { stageId: "review", summary: "Still missing", verdict: changes });
 	assert.equal(result.waiting, true);
 	assert.match(result.reply, /needs the user's decision/);
 	// The user accepts; the PR stage asks before it starts.
@@ -127,7 +136,7 @@ test("switching: to Vibe drops the stages, to a blueprint starts at its first st
 test("Request changes on a stage that hasn't started keeps it waiting; nothing is 'redone'", () => {
 	const { blueprints } = setup("automated-factory");
 	for (const stageId of ["triage", "plan", "implement", "verify"]) blueprints.finish("s1", { stageId, summary: `${stageId} done` });
-	blueprints.finish("s1", { stageId: "review", summary: "Reviewed", verdict: { outcome: "pass", summary: "Fine" } });
+	withReview(blueprints).finish("s1", { stageId: "review", summary: "Reviewed", verdict: { outcome: "pass", summary: "Fine" } });
 	const gate = blueprints.summary("s1")!.stage!;
 	assert.deepEqual([gate.id, gate.status], ["publish_pr", "awaiting_approval"], "the PR stage asks before it starts");
 
@@ -222,4 +231,45 @@ test("if the checks can't run, or there is nothing to run, the stage isn't block
 	const view = second.blueprints.view("s1");
 	assert.match(view.stages.find(stage => stage.id === "verify")!.summary ?? "", /Not available here: lint, typecheck, test\./, "the summary says which checks this project has no command for");
 	assert.ok(!view.history.some(entry => entry.event.startsWith("checks")), "nothing ran, so nothing is logged as run");
+});
+
+test("a review stage can't be finished on the Captain's word: an independent reviewer has to have run", () => {
+	const { blueprints } = setup("automated-factory");
+	for (const stageId of ["triage", "plan", "implement", "verify"]) blueprints.finish("s1", { stageId, summary: `${stageId} done` });
+	const pass = { outcome: "pass" as const, summary: "Fine" };
+	assert.equal(blueprints.reviewStage("s1")?.id, "review");
+	// Nobody reviewed: refused, and the agent is told how.
+	const refused = blueprints.finish("s1", { stageId: "review", summary: "Looks good", verdict: pass });
+	assert.match(refused.reply, /independent review[\s\S]*spawn_subagent/);
+	assert.equal(blueprints.summary("s1")!.stage?.id, "review");
+	// A reviewer that is still running, or that failed, doesn't count.
+	blueprints.reviewStarted("s1", { subagentId: "r1", model: "openai/gpt-5", independent: true });
+	assert.match(blueprints.finish("s1", { stageId: "review", summary: "ok", verdict: pass }).reply, /still working/);
+	blueprints.reviewFinished("s1", "r1", "failed", "provider error");
+	assert.match(blueprints.finish("s1", { stageId: "review", summary: "ok", verdict: pass }).reply, /ended without a report[\s\S]*provider error/);
+	assert.equal(blueprints.summary("s1")!.stage?.id, "review");
+	// A completed review passes, and the stage records who reviewed and what they said.
+	blueprints.reviewStarted("s1", { subagentId: "r2", model: "openai/gpt-5", independent: true });
+	blueprints.reviewFinished("s1", "r2", "completed", "One minor naming issue.");
+	blueprints.finish("s1", { stageId: "review", summary: "Reviewed", verdict: pass });
+	const stage = blueprints.view("s1").stages.find(item => item.id === "review")!;
+	assert.match(stage.summary ?? "", /Independent review by openai\/gpt-5 \(a different model family[\s\S]*One minor naming issue/);
+	assert.equal(stage.review?.status, "completed");
+	assert.equal(stage.review?.independent, true);
+	assert.ok(blueprints.view("s1").history.some(item => item.event === "review_done"));
+});
+
+test("when only one model family is set up, the review says so instead of claiming independence", () => {
+	const { blueprints } = setup("automated-factory");
+	for (const stageId of ["triage", "plan", "implement", "verify"]) blueprints.finish("s1", { stageId, summary: `${stageId} done` });
+	withReview(blueprints, false).finish("s1", { stageId: "review", summary: "Reviewed", verdict: { outcome: "pass", summary: "Fine" } });
+	assert.match(blueprints.view("s1").stages.find(item => item.id === "review")!.summary ?? "", /same model family as the Captain/);
+});
+
+test("after the review asks for changes, the next attempt needs a new review", () => {
+	const { blueprints } = setup("automated-factory");
+	for (const stageId of ["triage", "plan", "implement", "verify"]) blueprints.finish("s1", { stageId, summary: `${stageId} done` });
+	withReview(blueprints).finish("s1", { stageId: "review", summary: "Needs work", verdict: { outcome: "changes_requested", summary: "Tests missing" } });
+	for (const stageId of ["implement", "verify"]) blueprints.finish("s1", { stageId, summary: `${stageId} again` });
+	assert.match(blueprints.finish("s1", { stageId: "review", summary: "Fine now", verdict: { outcome: "pass", summary: "ok" } }).reply, /hasn't seen one yet/);
 });

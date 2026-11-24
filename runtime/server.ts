@@ -25,6 +25,7 @@ import { registerWorkspaceRoutes } from "./routes/workspace.ts";
 import { registerBrowserRoutes } from "./routes/browser.ts";
 import { registerApprovalRoutes } from "./routes/approvals.ts";
 import { registerMcpRoutes } from "./routes/mcp.ts";
+import { registerEuRoutes } from "./routes/eu.ts";
 import { registerSystemRoutes } from "./routes/system.ts";
 import { registerAgentWorkflowRoutes } from "./routes/agent-workflow.ts";
 import { registerMobileRoutes } from "./routes/mobile.ts";
@@ -125,6 +126,7 @@ export function createRuntimeRouters(deps: RouteDeps): { envRouter: Router; main
 	registerBrowserRoutes(mainRouter, deps);
 	registerApprovalRoutes(mainRouter, deps);
 	registerMcpRoutes(mainRouter, deps);
+	registerEuRoutes(mainRouter, deps);
 	registerMobileRoutes(mainRouter, deps);
 
 	return { envRouter, mainRouter };

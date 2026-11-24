@@ -189,6 +189,7 @@ function StageDetail({ stage, onOpenFile }: { stage: StageView; onOpenFile?: (pa
       </div>
       {stage.summary ? <p className="ade-stage-summary">{stage.summary}</p> : <p className="ade-muted ade-xs">{stage.status === "running" ? "The agent is working on this stage." : stage.status === "pending" ? "Not started yet." : ""}</p>}
       {stage.checks ? <StageChecksBlock checks={stage.checks} /> : null}
+      {stage.review ? <StageReviewBlock review={stage.review} /> : stage.goldfish && stage.status === "running" ? <p className="ade-muted ade-xs">An independent reviewer has to look at this before it can finish.</p> : null}
       {stage.verdict ? (
         <div className={`ade-stage-verdict is-${stage.verdict.outcome}`}>
           <strong>{stage.verdict.outcome === "pass" ? "Review passed" : stage.verdict.outcome === "changes_requested" ? "Review asked for changes" : "Review needs your decision"}</strong>
@@ -233,6 +234,20 @@ function StageChecksBlock({ checks }: { checks: NonNullable<StageView["checks"]>
         </div>
       ))}
       {checks.missing.length ? <p className="ade-muted ade-xs" style={{ margin: 0 }}>No command in this project for: {checks.missing.join(", ")}. Add a check script in the project's settings to include them.</p> : null}
+    </div>
+  )
+}
+
+/** Proof that the independent review ran: on which model, and what it reported. */
+function StageReviewBlock({ review }: { review: NonNullable<StageView["review"]> }) {
+  const state = review.status === "running" ? "reviewing now" : review.status === "failed" ? "failed" : review.independent ? "a different model family" : "same model family (no other model is set up)"
+  return (
+    <div className={`ade-stage-checks ${review.status === "failed" ? "is-failed" : ""}`}>
+      <div className="ade-stage-checks-head">
+        <strong>Independent review</strong>
+        <span className="ade-muted ade-xs">{review.model ?? "the session's model"} · {state}</span>
+      </div>
+      {review.report ? <pre className="ade-stage-check-output">{review.report}</pre> : null}
     </div>
   )
 }

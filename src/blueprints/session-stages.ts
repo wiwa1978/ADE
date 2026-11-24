@@ -19,6 +19,8 @@ export type StageView = {
   summary: string | null
   verdict: StageVerdict | null
   checks: StageChecksView | null
+  /** The independent review, for review stages. */
+  review: { model: string | null; independent: boolean; status: "running" | "completed" | "failed"; report: string } | null
   startedAt: number | null
   endedAt: number | null
 }

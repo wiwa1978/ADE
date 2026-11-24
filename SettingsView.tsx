@@ -1,3 +1,4 @@
+import { EuOnlySettings } from "./src/settings/EuOnlySettings"
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react"
 import {
   ArrowLeft, Bell, Blocks, Bot, Workflow, Check, Gauge, GitPullRequest, Palette, Search, Server, Settings2, Smartphone, Sparkles, Terminal, X, type LucideIcon,
@@ -559,6 +560,7 @@ export function SettingsView({
           <p className="st-lede">{selected.description}</p>
           {error ? <p className="st-banner is-error" role="alert">{error}</p> : null}
           {runtimeError && !runtime?.online ? <p className="st-banner is-error" role="alert">{runtimeError}</p> : null}
+          {selectedCategory === "models" ? <EuOnlySettings /> : null}
           {content}
         </div>
       </div>

@@ -49,6 +49,7 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	const scriptRunner = new ScriptRunner({ events: host.events });
 	const checkpoints = createCheckpoints();
 	const engines = new EngineManager({ stateDirectory, events: host.events });
+	engines.setGuard(engine => host.eu.engineBlock(engine));
 	/** Sessions as the UI sees them: sessions run by Claude Code or Codex report that engine's status. */
 	const viewSessions = (): Conversation[] => host.sessions().map(session => {
 		const engine = engines.get(session.id);

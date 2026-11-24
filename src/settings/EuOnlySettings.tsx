@@ -1,0 +1,76 @@
+import { useCallback, useEffect, useState } from "react"
+import { Globe2, ShieldCheck } from "lucide-react"
+import { request } from "../../api"
+import "./eu-only.css"
+
+type Region = "eu" | "local" | "non-eu"
+type Item = { kind: "provider" | "engine" | "mcp"; id: string; name: string; region: Region; allowed: boolean; exception: boolean }
+type EuState = { settings: { euOnly: boolean; exceptions: string[]; compatibleInEu: boolean }; items: Item[] }
+
+const regionLabel: Record<Region, string> = { eu: "EU", local: "This computer", "non-eu": "Outside the EU" }
+const kindLabel: Record<Item["kind"], string> = { provider: "Model provider", engine: "Agent CLI", mcp: "Tool server" }
+
+/**
+ * EU-only mode: one switch. On, everything that would send your code outside the EU stays off
+ * (models, agent CLIs, remote tool servers). The only way around it is an exception, set here.
+ */
+export function EuOnlySettings() {
+  const [state, setState] = useState<EuState | null>(null)
+  const [error, setError] = useState("")
+  const load = useCallback(async () => {
+    try { setState(await request<EuState>("/api/eu")) } catch (err) { setError(err instanceof Error ? err.message : "Could not load EU-only mode.") }
+  }, [])
+  useEffect(() => {
+    let alive = true
+    request<EuState>("/api/eu").then(next => { if (alive) setState(next) }, err => { if (alive) setError(err instanceof Error ? err.message : "Could not load EU-only mode.") })
+    return () => { alive = false }
+  }, [])
+
+  const save = async (patch: Partial<EuState["settings"]>) => {
+    setError("")
+    try {
+      await request("/api/eu", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) })
+      await load()
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not save.") }
+  }
+  if (!state) return error ? <p className="st-banner is-error" role="alert">{error}</p> : null
+  const { settings, items } = state
+  const toggleException = (item: Item) => {
+    const key = `${item.kind}:${item.id}`
+    void save({ exceptions: item.exception ? settings.exceptions.filter(entry => entry !== key) : [...settings.exceptions, key] })
+  }
+  return (
+    <section className={`ade-eu ${settings.euOnly ? "is-on" : ""}`} aria-label="EU-only mode">
+      <div className="ade-eu-head">
+        <ShieldCheck className="size-5" aria-hidden="true" />
+        <div className="ade-eu-title">
+          <strong>EU-only mode</strong>
+          <span>Keeps your code and prompts in the EU or on this computer. Anything that would leave stays off, unless you allow it below.</span>
+        </div>
+        <label className="ade-eu-switch">
+          <input type="checkbox" role="switch" checked={settings.euOnly} onChange={event => void save({ euOnly: event.target.checked })} aria-label="EU-only mode" />
+          <span aria-hidden="true" />
+        </label>
+      </div>
+      {error ? <p className="st-banner is-error" role="alert">{error}</p> : null}
+      <label className="ade-eu-declare">
+        <input type="checkbox" checked={settings.compatibleInEu} onChange={event => void save({ compatibleInEu: event.target.checked })} />
+        <span>My OpenAI-compatible endpoint runs in the EU <em>(ADE already knows Mistral, Scaleway, OVHcloud, IONOS, Hetzner and local servers)</em></span>
+      </label>
+      <ul className="ade-eu-list">
+        {items.map(item => (
+          <li key={`${item.kind}:${item.id}`} className={`is-${item.region} ${item.allowed ? "" : "is-blocked"}`}>
+            <Globe2 className="size-3.5" aria-hidden="true" />
+            <span className="ade-eu-name">{item.name}<small>{kindLabel[item.kind]}</small></span>
+            <span className={`ade-eu-region is-${item.region}`}>{regionLabel[item.region]}</span>
+            {item.region === "non-eu" ? (
+              settings.euOnly ? (
+                <label className="ade-eu-allow"><input type="checkbox" checked={item.exception} onChange={() => toggleException(item)} /> Allow anyway</label>
+              ) : <span className="ade-eu-allow ade-muted">Would be off</span>
+            ) : <span className="ade-eu-allow ade-muted">Allowed</span>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}

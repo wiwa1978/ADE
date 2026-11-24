@@ -24,6 +24,8 @@ import type { ConversationTimelineSnapshot } from "./timeline.ts";
 import type { WorktreeManager } from "./worktrees.ts";
 import { createStartFrom } from "./start-from.ts";
 import { SessionBlueprints } from "./session-blueprints.ts";
+import { EuPolicy, hostRegion } from "./eu-policy.ts";
+import { ModelRouting } from "./model-routing.ts";
 import { TeamBoard } from "./team-board.ts";
 
 const startFromService = createStartFrom();
@@ -48,6 +50,9 @@ export class LocalAgentHost {
 	readonly mcp: McpManager;
 	/** Each session's way of working (Vibe or a blueprint) and its stage progress. */
 	readonly blueprints: SessionBlueprints;
+	/** EU-only mode: what may leave the EU (models, agent CLIs, tool servers). */
+	readonly eu: EuPolicy;
+	readonly routing: ModelRouting;
 	/** Each session's team board: tasks, plans, posts, file claims and the flow events. */
 	readonly team: TeamBoard;
 
@@ -71,6 +76,9 @@ export class LocalAgentHost {
 		this.approvals.setGate((sessionId, toolName) => this.blueprints.gateReason(sessionId, toolName));
 		this.team = new TeamBoard(stateDirectory, this.events);
 		this.#models = new ModelConfigService({ db: this.#db, stateDirectory, environment, modelConfigFactory });
+		this.eu = new EuPolicy(stateDirectory, () => this.#models.compatibleUrl());
+		this.routing = new ModelRouting(async () => (await this.#models.modelCatalog()).providers.map(provider => ({ id: provider.id, configured: provider.configured, defaultModel: provider.defaultModel, models: provider.models })), this.eu);
+		this.mcp.setGuard(server => this.eu.blockReason("mcp", server.id, server.transport === "http" && server.url ? hostRegion(server.url, false) : "local"));
 		this.#projects = new ProjectStore(this.#db, githubIssueFetcher);
 		this.#turns = new TurnStore(this.#db);
 		this.#tasks = new TaskStore({
@@ -101,6 +109,8 @@ export class LocalAgentHost {
 			safeErrorMessage: (error) => this.safeErrorMessage(error),
 			blueprints: this.blueprints,
 			team: this.team,
+			eu: this.eu,
+			routing: this.routing,
 		});
 		this.#turnExecutor = new TurnExecutor({
 			db: this.#db,
@@ -112,6 +122,7 @@ export class LocalAgentHost {
 			sessions: this.#sessionManager,
 			listSessions: () => this.sessions(),
 			gateNote: taskId => this.blueprints.gateNote(taskId),
+			guardProvider: provider => this.eu.guardProvider(provider),
 		});
 	}
 

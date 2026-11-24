@@ -33,6 +33,8 @@ import { createShellTools, type ProcessManager } from "../shell-tools.ts";
 import { buildSkillsAndRulesPrompt, createSkillsExtension, discoverSkillsAndRules } from "../skills.ts";
 import { createSubagentTools } from "../subagents.ts";
 import type { SessionBlueprints } from "../session-blueprints.ts";
+import type { EuPolicy } from "../eu-policy.ts";
+import type { ModelChoice, ModelRouting } from "../model-routing.ts";
 import { TEAM_INSTRUCTIONS, type TeamBoard } from "../team-board.ts";
 import { createTeamTools } from "../team-tools.ts";
 import {
@@ -60,6 +62,10 @@ export class SessionManager {
 	#safeErrorMessage: (error: unknown) => string;
 	#blueprints?: SessionBlueprints;
 	#team?: TeamBoard;
+	#eu?: EuPolicy;
+	#routing?: ModelRouting;
+	/** The model each open session's Captain runs on this turn (the reviewer picks a different family from it). */
+	#rootModels = new Map<string, ModelChoice>();
 	#sessions = new Map<string, OpenSession>();
 	#watches = new Map<string, WatchHandle>();
 
@@ -79,6 +85,8 @@ export class SessionManager {
 		safeErrorMessage: (error: unknown) => string;
 		blueprints?: SessionBlueprints;
 		team?: TeamBoard;
+		eu?: EuPolicy;
+		routing?: ModelRouting;
 	}) {
 		this.#stateDirectory = opts.stateDirectory;
 		this.#events = opts.events;
@@ -95,6 +103,8 @@ export class SessionManager {
 		this.#safeErrorMessage = opts.safeErrorMessage;
 		this.#blueprints = opts.blueprints;
 		this.#team = opts.team;
+		this.#eu = opts.eu;
+		this.#routing = opts.routing;
 	}
 
 	setWorktreeManager(manager: WorktreeManager): void {
@@ -158,6 +168,17 @@ export class SessionManager {
 			if (!task || task.status !== "ready") throw new Error("The task workspace is unavailable.");
 			await this.#tasks.verifyWorkspace(task);
 		}
+		// The model the Captain uses this turn: the user's pick, unless the project sets another for the current stage.
+		let provider = config.provider;
+		let model = modelId;
+		if (task && this.#routing && this.#blueprints) {
+			const project = task.projectId ? this.#projects.serialize(this.#projects.get(task.projectId)) : null;
+			const routed = await this.#routing.forTurn(this.#blueprints.currentStage(task.id), project, { provider, model });
+			provider = routed.provider;
+			model = routed.model;
+		}
+		this.#eu?.guardProvider(provider);
+		this.#rootModels.set(key, { provider, model });
 		const skillsCatalog = discoverSkillsAndRules(task?.workspace ?? null);
 		const skillsPrompt = buildSkillsAndRulesPrompt(skillsCatalog);
 		const baseInstructions = task
@@ -174,7 +195,7 @@ export class SessionManager {
 		const thinkingLevel = reasoning as "none" | "off" | "low" | "medium" | "high" | "xhigh" | "max";
 		if (openSession) {
 			await openSession.root.configure({
-				model: { provider: config.provider, modelId },
+				model: { provider, modelId: model },
 				thinkingLevel: thinkingLevel as never,
 				instructions,
 			}, context);
@@ -209,6 +230,22 @@ export class SessionManager {
 				processes: this.#processes,
 				events: this.#events,
 				teamTools: teamExt?.tools ?? [],
+				...(this.#eu ? { euBlock: { provider: id => this.#eu!.blockReason("provider", id, this.#eu!.regionOfProvider(id)), engine: id => this.#eu!.engineBlock(id) } } : {}),
+				...(this.#blueprints && this.#routing ? {
+					reviews: {
+						begin: async () => {
+							const blueprints = this.#blueprints!;
+							const stage = blueprints.reviewStage(key);
+							if (!stage) return null;
+							const project = task.projectId ? this.#projects.serialize(this.#projects.get(task.projectId)) : null;
+							const mine = this.#rootModels.get(key) ?? { provider: "", model: "" };
+							const choice = await this.#routing!.reviewer(stage, project, mine);
+							return { model: choice.model ? { provider: choice.model.provider, modelId: choice.model.model } : null, label: choice.label, independent: choice.independent };
+						},
+						started: (subagentId, info) => this.#blueprints!.reviewStarted(key, { subagentId, ...info }),
+						finished: (subagentId, status, report) => this.#blueprints!.reviewFinished(key, subagentId, status, report),
+					},
+				} : {}),
 				onSubagentCreated: (convId) => {
 					const current = this.#sessions.get(key);
 					if (current) void this.watchConversation(key, current.harness, convId, true);
@@ -237,13 +274,13 @@ export class SessionManager {
 		try {
 			const root = await harness.root(context, {
 				agent: {
-					model: { provider: config.provider, modelId },
+					model: { provider, modelId: model },
 					thinkingLevel: thinkingLevel as never,
 					instructions,
 				},
 			});
 			await root.configure({
-				model: { provider: config.provider, modelId },
+				model: { provider, modelId: model },
 				thinkingLevel: thinkingLevel as never,
 				instructions,
 			}, context);

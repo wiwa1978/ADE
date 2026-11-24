@@ -29,6 +29,11 @@ export class ModelConfigService {
 		this.#runtimeModels = opts.modelConfigFactory ? undefined : createRuntimeModels(opts.environment, opts.stateDirectory);
 	}
 
+	/** Where the OpenAI-compatible endpoint is ("" when none is set). */
+	compatibleUrl(): string {
+		return this.#runtimeModels?.compatibleStatus().url ?? this.#environment.ADE_COMPATIBLE_URL ?? "";
+	}
+
 	get credentialRevision(): number {
 		return this.#credentialRevision;
 	}

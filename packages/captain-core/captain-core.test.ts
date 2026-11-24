@@ -169,3 +169,28 @@ test("EGM blueprint exposes Elephant brainstorm/draft and two Goldfish audit gat
   );
   assert.equal(goldfishStages.every((s) => s.requiresSandbox === false && s.useCodeMode === true), true);
 });
+
+test("ModelRouter: the project's own model and the app default are reachable, and unavailable profile models are skipped", () => {
+  const stage = openSpecBlueprint.stages.find((s) => s.id === "propose_delta")!; // role: reasoning
+  const base: ModelRoutingConfig = {
+    profile: "max-quality",
+    appDefault: { provider: "openai", model: "gpt-5-mini" },
+    compliance: { euOnlyMode: false },
+  };
+  // The profile's model is used when it can be used here...
+  assert.equal(resolveStageModel(stage, base).ref.model, "claude-opus-4-5");
+  // ...but not when the provider isn't set up: the app's own model is used instead of failing later.
+  const none = resolveStageModel(stage, base, undefined, { available: () => false });
+  assert.equal(none.source, "app-default");
+  assert.equal(none.ref.model, "gpt-5-mini");
+  // A project that names a model gets it, ahead of the profile's.
+  const project = resolveStageModel(stage, { ...base, projectOverride: { provider: "mistral", model: "mistral-large-latest" } });
+  assert.equal(project.source, "project-override");
+  assert.equal(project.ref.model, "mistral-large-latest");
+  // A project that never chose a profile keeps the session's model.
+  const keep = resolveStageModel(stage, base, undefined, { useProfileRoles: false });
+  assert.equal(keep.source, "app-default");
+  // A stage override still wins over everything.
+  const pinned = resolveStageModel(stage, { ...base, projectOverride: { provider: "mistral", model: "x" }, stageOverrides: { propose_delta: { provider: "openai", model: "gpt-5" } } });
+  assert.equal(pinned.source, "stage-override");
+});
