@@ -660,3 +660,14 @@ body.panel-resizing:has(.panel-resize-bottom){cursor:row-resize}
 }
 .project-form .project-check{display:flex;flex-direction:row;align-items:center;gap:8px;margin-top:10px;font-weight:500}
 .project-form .project-check input{width:auto;margin:0}
+
+/* Side panel: which session its tabs are about (lights up briefly on a session switch). */
+.ade-beside-context{display:flex;align-items:center;gap:7px;min-width:0;height:28px;padding:0 12px;border-bottom:1px solid rgb(var(--border) / .7);background:rgb(var(--nav));font-size:11.5px;color:rgb(var(--muted));animation:ade-beside-switch 1.2s ease-out}
+.ade-beside-context strong{color:rgb(var(--foreground));font-weight:600;min-width:0}
+.ade-beside-context-label{flex:none;padding:1px 6px;border-radius:5px;background:rgb(var(--primary) / .14);color:rgb(var(--primary));font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+.ade-beside-context-project{flex:none;max-width:30%}
+.ade-beside-context-branch{margin-left:auto;max-width:40%;font-size:10.5px}
+@keyframes ade-beside-switch{0%{background:rgb(var(--primary) / .22)}100%{background:rgb(var(--nav))}}
+/* Drag handle on the left edge of a right-hand panel (the project page's files, artefacts and settings). */
+.ade-pane-resizer{flex:none;align-self:stretch;width:7px;margin:0 -4px 0 -3px;position:relative;z-index:3;cursor:col-resize;background:transparent;transition:background .12s ease}
+.ade-pane-resizer:hover,.ade-pane-resizer:active,.ade-pane-resizer:focus-visible{background:rgb(var(--primary) / .45);outline:none}

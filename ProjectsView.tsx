@@ -312,7 +312,10 @@ export function GitHubRepositoryPicker({
   </div>
 }
 
-export function ProjectSettings({ project, open, initialDraft, githubConnection, githubStatusError, environmentName, onSave, onClose, onOpenSettings, onSearchRepositories }: {
+export function ProjectSettings({ project, open, initialDraft, githubConnection, githubStatusError, environmentName, onSave, onClose, onOpenSettings, onSearchRepositories, width, paneRef }: {
+  /** Set by the project page's resizable right panel. */
+  width?: number
+  paneRef?: React.Ref<HTMLElement>
   project: Project; open: boolean; environmentName?: string; onSave: (input: ProjectInput) => Promise<Project>; onClose: () => void
   initialDraft?: ProjectInput; githubConnection: GitHubConnection | null; githubStatusError: string
   onOpenSettings: (draft: ProjectInput) => void
@@ -392,7 +395,7 @@ export function ProjectSettings({ project, open, initialDraft, githubConnection,
     }
   }
 
-  return <aside id="project-settings" className="inspector project-settings" aria-labelledby="project-settings-title" hidden={!open}>
+  return <aside ref={paneRef} id="project-settings" className="inspector project-settings" aria-labelledby="project-settings-title" hidden={!open} style={width ? { width } : undefined}>
     <div className="panel-title"><h2 id="project-settings-title">Project settings</h2><button className="icon-button" aria-label="Close project settings" onClick={onClose}><PanelRight size={16} /></button></div>
     <form className="project-form" onSubmit={save}>
       {!project.repository && !project.githubUrl ? (

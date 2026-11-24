@@ -21,6 +21,8 @@ import { AppOverlays } from "./src/layout/AppOverlays"
 import type { AddProjectSource } from "./src/projects/AddProjectWizard"
 import { isEditableTarget, matchesChord, resolveKeybindings } from "./src/keybindings"
 import { MobileAuthGate, type MobileSessionState } from "./src/mobile/MobileAuthGate"
+import { MobileAppShell } from "./src/mobile/MobileAppShell"
+import { useIsMobile } from "./src/mobile/useIsMobile"
 import { request } from "./api"
 
 type LastView = { screen?: Screen; activeSessionId?: string; selectedProjectId?: string | null; expandedProjects?: string[] }
@@ -77,6 +79,7 @@ function AppInner() {
   const [externalOpenRequest, setExternalOpenRequest] = useState<WorkspaceTab | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameText, setRenameText] = useState("")
+  const isMobile = useIsMobile()
   const [mobileSession, setMobileSession] = useState<MobileSessionState | null>(null)
   const [pairedToastDismissed, setPairedToastDismissed] = useState(false)
   const [urlFlags] = useState(() => {
@@ -383,6 +386,70 @@ function AppInner() {
         pairError={urlFlags.pairError}
         onPaired={() => window.location.replace("/?paired=1")}
       />
+    )
+  }
+
+  if (isMobile) {
+    return (
+      <>
+        {mobileSession?.mobileBridge && mobileSession.paired && urlFlags.paired && !pairedToastDismissed ? (
+          <div className="ade-mobile-paired-toast" role="status">
+            <span>Connected to <strong>{mobileSession.hostName}</strong>{mobileSession.device?.name ? ` · ${mobileSession.device.name}` : ""}</span>
+            <button type="button" className="ade-chip-btn" onClick={() => setPairedToastDismissed(true)}>Done</button>
+          </div>
+        ) : null}
+        <MobileAppShell
+          mobileSession={mobileSession}
+          hostName={mobileSession?.hostName || env.activeEnvironmentName}
+          runtimeOnline={Boolean(model.runtime?.online)}
+          sseConnected={stream.sseConnected}
+          resolvedTheme={resolved}
+          onToggleTheme={() => update({ theme: resolved === "dark" ? "light" : "dark" })}
+          sessions={sess.sessions}
+          activeSession={sess.activeSession}
+          projects={visibleProjects}
+          pinnedIds={sess.pinnedIds}
+          unreadIds={sess.unreadIds}
+          archivedIds={sess.archivedIds}
+          inboxEntries={inbox.entries}
+          inboxCount={inboxCount}
+          timeline={stream.timeline}
+          subagents={stream.subagents}
+          approvals={stream.approvals}
+          approvalPolicy={stream.approvalPolicy}
+          artifacts={stream.artifacts}
+          gitSummary={stream.gitSummary}
+          skillsCatalog={stream.skillsCatalog}
+          modelCatalog={model.effectiveCatalog}
+          selectedProvider={model.effectiveProvider}
+          selectedModel={model.selectedModel}
+          reasoning={settings.reasoning}
+          draft={sess.draft}
+          attachments={sess.attachments}
+          creatingSession={sess.creatingSession}
+          launchError={sess.launchError}
+          composerRef={composerRef}
+          onSelectSession={openSession}
+          onSelectModel={(provider, id) => update({ provider, model: id })}
+          onSelectReasoning={level => update({ reasoning: level })}
+          onChangeApprovalPolicy={p => void stream.setApprovalPolicy(p, sess.activeSession.id)}
+          onDraftChange={sess.setDraft}
+          onAttachFiles={files => void sess.attachFiles(files)}
+          onRemoveAttachment={id => sess.setAttachments(prev => prev.filter(a => a.id !== id))}
+          onSendMessage={text => void sess.sendMessage(text, id => void stream.refreshTimeline(id))}
+          onAskAgent={text => sess.askAgent(text, id => void stream.refreshTimeline(id))}
+          onSteerSession={(text, mode) => void sess.steerSession(text, mode)}
+          onAbortSession={() => void sess.abortSession()}
+          onCompactSession={() => void sess.compactSession()}
+          onResolveApproval={stream.resolveApproval}
+          onReviewArtifact={handleReviewArtifact}
+          onRefreshGit={() => void stream.refreshGit(sess.activeSession.id)}
+          onRefreshSessions={sess.loadSessions}
+          onCreateChatThread={mode => void sess.createChatThread(mode)}
+          onStartNewSession={sess.startNewSession}
+          onOpenExternalBrowser={url => void stream.openExternalBrowser(url)}
+        />
+      </>
     )
   }
 

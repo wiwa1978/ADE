@@ -52,6 +52,7 @@ import { PullRequestPanel, type PullRequestInfo } from "../panels/PullRequestPan
 
 export function BesidePane({
   splitRatio,
+  projectName,
   session,
   workspacePath,
   hasWorkspace,
@@ -105,6 +106,8 @@ export function BesidePane({
   onOpenProjectSettings,
 }: {
   splitRatio: number
+  /** The session's project, shown above the tabs with the session. */
+  projectName?: string
   session: Conversation
   workspacePath: string | null
   hasWorkspace: boolean
@@ -187,6 +190,13 @@ export function BesidePane({
 
   return (
     <section className="ade-pane ade-pane-beside" style={{ width: `${100 - splitRatio}%` }}>
+      {/* Everything in this panel is about this session; it lights up briefly when you switch. */}
+      <div key={session.id} className="ade-beside-context" title="Everything in this panel is about this session">
+        <span className="ade-beside-context-label">Session</span>
+        {projectName ? <span className="ade-beside-context-project ade-truncate">{projectName} /</span> : null}
+        <strong className="ade-truncate">{session.label}</strong>
+        {session.workspace?.branch ? <span className="ade-beside-context-branch ade-mono ade-truncate">{session.workspace.branch}</span> : null}
+      </div>
       <div className="ade-tab-bar">
         <div className="ade-tab-list" role="tablist">
           {besideTabs.map(tab => (

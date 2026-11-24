@@ -1,4 +1,5 @@
-import type { RefObject } from "react"
+import { useRef, useState, type RefObject } from "react"
+import { PaneResizer } from "./PaneResizer"
 import { InboxView } from "../inbox/InboxView"
 import { sessionStateInfo, type InboxEntry } from "../session-state"
 import { FolderTree, Layers, PanelRight, Settings2, Sparkles } from "lucide-react"
@@ -123,7 +124,19 @@ type AppMainColumnProps = {
   onSessionContextMenu?: (session: Conversation, x: number, y: number) => void
 }
 
+const PROJECT_PANE_STANDARD = 320
+
 export function AppMainColumn(props: AppMainColumnProps) {
+  // The project page's right panel (files, artefacts, settings): one width, resizable and remembered.
+  const [projectPaneWidth, setProjectPaneWidth] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem("ade.project-pane-width"))
+      return saved >= 260 && saved <= 760 ? saved : PROJECT_PANE_STANDARD
+    } catch {
+      return PROJECT_PANE_STANDARD
+    }
+  })
+  const projectPaneRef = useRef<HTMLElement | null>(null)
   const {
     screen,
     newSessionOpen,
@@ -307,7 +320,23 @@ export function AppMainColumn(props: AppMainColumnProps) {
               props.onOpenExternalRequest({ id: `subagent:${agent.id}`, kind: "subagent", title: agent.name, subagentId: agent.id })
             }}
           />
+          {projectRightPane ? (
+            <PaneResizer
+              width={projectPaneWidth}
+              min={260}
+              max={760}
+              standard={PROJECT_PANE_STANDARD}
+              paneRef={projectPaneRef}
+              label="Resize the project panel"
+              onChange={width => {
+                setProjectPaneWidth(width)
+                try { localStorage.setItem("ade.project-pane-width", String(width)) } catch { /* private mode */ }
+              }}
+            />
+          ) : null}
           <aside
+            ref={projectRightPane !== "settings" ? projectPaneRef : undefined}
+            style={{ width: projectPaneWidth }}
             id="project-files-panel"
             className="inspector ade-project-files-inspector"
             aria-label={projectRightPane === "artifacts" ? "Project artefacts" : "Project files"}
@@ -372,6 +401,8 @@ export function AppMainColumn(props: AppMainColumnProps) {
           </aside>
           <ProjectSettings
             key={selectedProject.id}
+            width={projectPaneWidth}
+            paneRef={projectRightPane === "settings" ? projectPaneRef : undefined}
             project={selectedProject}
             environmentName={activeEnvironmentName}
             initialDraft={projectDrafts[selectedProject.id]}

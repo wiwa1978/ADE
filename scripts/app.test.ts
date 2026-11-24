@@ -784,3 +784,47 @@ test("Phone & Mobile QR pairing opens from activity bar, generates scannable SVG
   await click("Tailscale")
   assert.match(container.textContent ?? "", /100\.88\.12\.5:4320/)
 })
+
+test("Mobile PWA companion shell renders 4 tabs (Inbox with 1-tap approvals, Sessions, Chat, Artefacts) on phone viewports", async () => {
+  projectRecords.push({ id: "proj-1", name: "Alpha Project", githubUrl: null, repository: "/tmp/alpha" })
+  sessionRecords[0] = { ...sessionRecords[0], projectId: "proj-1" }
+  browser.window.history.replaceState({}, "", "/?mobile=1")
+  try {
+    await act(async () => root.render(React.createElement(App)))
+
+    const shell = container.querySelector('[data-mobile-shell="true"]')
+    assert.ok(shell, "Expected dedicated MobileAppShell on mobile viewport")
+
+    // 1. Inbox tab shows 1-tap command approval and pending plan
+    assert.match(shell.textContent ?? "", /Approvals waiting/)
+    assert.match(shell.textContent ?? "", /npm run build/)
+    assert.match(shell.textContent ?? "", /Implementation Plan/)
+
+    // 2. Switch to Sessions tab -> shows project + sessions + New button
+    const nav = shell.querySelector('nav[aria-label="Mobile navigation"]')
+    assert.ok(nav, "Expected bottom mobile tab bar")
+    const sessionsTab = [...nav.querySelectorAll("button")].find(b => b.textContent?.includes("Sessions"))
+    assert.ok(sessionsTab)
+    await act(async () => { (sessionsTab as HTMLElement).click() })
+    assert.match(shell.textContent ?? "", /Alpha Project/)
+    assert.match(shell.textContent ?? "", /Build split-pane ADE/)
+
+    // 3. Tap session -> jumps into Chat tab with clickable poem.txt link
+    const sessBtn = [...shell.querySelectorAll(".ade-mob-session-row")].find(el => el.textContent?.includes("Build split-pane ADE"))
+    assert.ok(sessBtn)
+    await act(async () => { (sessBtn as HTMLElement).click() })
+    const poemLink = [...shell.querySelectorAll("a.ade-inline-file-link")].find(el => el.textContent?.includes("poem.txt"))
+    assert.ok(poemLink, "Expected clickable poem.txt link in mobile chat")
+    await act(async () => { (poemLink as HTMLElement).click() })
+    assert.match(shell.textContent ?? "", /Two branches reach into the sky/)
+
+    // 4. Switch to Artefacts tab -> previews session & project artefacts
+    const artTab = [...nav.querySelectorAll("button")].find(b => b.textContent?.includes("Artefacts"))
+    assert.ok(artTab)
+    await act(async () => { (artTab as HTMLElement).click() })
+    assert.match(shell.textContent ?? "", /script\.py/)
+    assert.match(shell.textContent ?? "", /chart\.jpg/)
+  } finally {
+    browser.window.history.replaceState({}, "", "/")
+  }
+})

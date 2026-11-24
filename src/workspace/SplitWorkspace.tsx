@@ -27,6 +27,7 @@ import type { RunStatus } from "../panels/RunPanel"
 import { confirmRestore, restoreCheckpoint, type CheckpointInfo } from "../panels/checkpoint-actions"
 import type { PullRequestInfo } from "../panels/PullRequestPanel"
 import { WorkspaceHeaderBar } from "./WorkspaceHeaderBar"
+import { tabsForNextSession } from "./side-panel-tabs"
 import { StagesPanel, WayOfWorkingSelect } from "../blueprints/StagesPanel"
 import { StageBar } from "../blueprints/StageBar"
 import { useSessionStages } from "../blueprints/session-stages"
@@ -228,10 +229,12 @@ export function SplitWorkspace({
     })
   }, [])
 
+  // Switching sessions keeps the side panel open: the same tabs, now about the new session.
   if (session.id !== prevSessionId) {
     setPrevSessionId(session.id)
-    setBesideTabs(prev => prev.filter(t => t.kind === "browser"))
-    setActiveBesideId(prev => (prev === "browser" ? "browser" : null))
+    const next = tabsForNextSession(besideTabs, activeBesideId, hasWorkspace)
+    setBesideTabs(next.tabs)
+    setActiveBesideId(next.activeId)
     setPullRequest(null)
   }
 
@@ -527,6 +530,7 @@ export function SplitWorkspace({
               title="Drag to resize split panes"
             />
             <BesidePane
+              projectName={projectName}
               menuItems={sidePanelItems}
               onOpenMenu={openSideMenu}
               onStartFromIssue={onStartFromIssue}

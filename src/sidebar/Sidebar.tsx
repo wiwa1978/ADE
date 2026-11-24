@@ -333,7 +333,15 @@ export function Sidebar(props: SidebarProps) {
                           </div>
                         ))}
                         {sessions.length === 0 && runs.length === 0 ? (
-                          <button type="button" className="ade-nav-row ade-nav-row-child opacity-60 hover:opacity-100" onClick={() => props.onNewSession(project.id)}>
+                          <button
+                            type="button"
+                            className="ade-nav-row ade-nav-row-child opacity-60 hover:opacity-100"
+                            onClick={() => props.onNewSession(project.id)}
+                            onContextMenu={event => {
+                              event.preventDefault()
+                              props.onContextMenu({ kind: "project", project, x: event.clientX, y: event.clientY })
+                            }}
+                          >
                             <Plus className="size-3 shrink-0" />
                             <span className="ade-truncate">New session</span>
                           </button>
