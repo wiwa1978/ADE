@@ -259,6 +259,20 @@ All three exist as pure code in `packages/captain-core` and are **not wired into
 
 ---
 
+### M. Code-quality backlog (from the audit of the last sessions' code)
+
+Audit date 2026-11-24 over everything since commit `0359c0d` (119 files). Measured, not guessed:
+
+- **Types:** `strict`, `noUnusedLocals/Parameters` and `noFallthroughCasesInSwitch` are on. New code has **0** `any`, **0** `@ts-ignore`, no lint disables. Remaining loose spots: 3× `as unknown as` (SQLite row casts in `capabilities.ts`, `mcp.ts`, `skill-library.ts`, the same pattern the rest of the runtime uses) and 1× `as never` (`model-routing.ts`, profile id from a string). Non-null `!` went from 15 to ~9 (left in `SwarmGraph.tsx`/`SwarmBoardTab.tsx`/`SwarmMembersTab.tsx`; replace with guards when touching them). Client calls use `request<T>` which trusts the server's shape: acceptable for a same-repo API, but add runtime validation (zod is a dependency) before exposing the API to third parties.
+- **Duplication (done):** the JSON request boilerplate (`request(url, { method, headers: {content-type…}, body: JSON.stringify(...) })`) appeared 120 times; it is now `requestJson(url, method, body?)` in `api.ts` (100+ sites converted by codemod). ~14 sites with other shapes remain (`useSessions.ts` ×6, `useProjects.ts`, `BrowserPanel.tsx`, `AddProjectWizard.tsx`, `RunPanel.tsx`, `IntegrationsSettings.tsx`, `ProjectAutomationsTab.tsx`): convert by hand. The merge-a-subagent logic existed twice (Agents view and Swarm); it is now `src/agents/useMergeSubagent.ts`.
+- **Duplication (open):** `ComposerDock` receives the same ~25 props from three places (`SplitWorkspace.tsx`, `NewSessionView.tsx`, `MobileAppShell.tsx`). Extract a `useComposerProps()` hook or a small context so a new composer feature is wired once.
+- **Modularity (done):** `src/swarm/SwarmView.tsx` was 937 lines; it is now `SwarmView.tsx` (shell, 268) + `GoalCard`, `ThreadCard`, `SwarmBoardTab`, `SwarmMembersTab`, `MemberBadge`.
+- **Modularity (open), largest files:** `MobileAppShell.tsx` 803, `ProvidersPanel.tsx` 767, `NewSessionView.tsx` 737 (project/workspace/blueprint/run-on pickers are separate popovers: one component each), `SplitWorkspace.tsx` 718 (the side-panel item list and the drawer are separable), `SettingsView.tsx` 715 (one file per settings category), `App.tsx` 693, `runtime/execution-targets.ts` 663 (docker / ssh / wsl / boat into separate modules behind one interface), `runtime/session-blueprints.ts` 624 (state store vs. gates/checks/reviews/tool policy), `runtime/mcp.ts` 624 (config files, clients, manager). Split only with tests green before and after; moves, not rewrites.
+- **Security:** every mutating route is default-deny for foreign origins (`runtime/router.ts`: `originError` or a generic 403); the new routes have a server test (`runtime/routes-security.test.ts`). `npm audit --omit=dev`: 0 vulnerabilities. `dangerouslySetInnerHTML` is used only with static translation strings (`McpSettingsSection`, `MobilePairingSection`); never put runtime values in them. Fixed in this pass: untrusted `.mcp.json` servers could be started through the API; the team board had no size limits and accepted made-up session ids. Still open: event-stream bearer auth for remote hosts (item J), client-side response validation (above).
+- **Dead code:** 83 exports in the changed files are not imported elsewhere (mostly types and helpers used inside their own file). Un-export when convenient; none is a bug.
+
+---
+
 ## 4. Housekeeping the owner decides
 
 - Delete old merged local/remote branches (overnight, run-targets, roadmap-*, ade-server, docker-runs) — ask first.
