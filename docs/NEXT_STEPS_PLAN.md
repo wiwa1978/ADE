@@ -279,6 +279,12 @@ Audit date 2026-11-24 over everything since commit `0359c0d` (119 files). Measur
 
 ---
 
+### O. A Personal Bot profile
+
+[PERSONAL_BOT_PLAN.md](./PERSONAL_BOT_PLAN.md) designs a second profile next to Coding: an always-on personal agent reachable through chat apps, with memory, proactivity, connectors, a strict action-approval model and a handoff to Coding sessions. It is a **proposal awaiting the owner's decisions** (its §8); start with its phase 0 spike only after they are answered.
+
+---
+
 ## 4. Housekeeping the owner decides
 
 - Delete old merged local/remote branches (overnight, run-targets, roadmap-*, ade-server, docker-runs) — ask first.
