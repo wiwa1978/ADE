@@ -1,7 +1,7 @@
 import { EuOnlySettings } from "./src/settings/EuOnlySettings"
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react"
 import {
-  ArrowLeft, Bell, Blocks, Bot, Workflow, Check, Gauge, GitPullRequest, Globe, Palette, Pipette, Search, Server, Settings2, Smartphone, Sparkles, Terminal, X, type LucideIcon,
+  ArrowLeft, Bell, Blocks, Bot, Workflow, Check, Gauge, GitPullRequest, Globe, Palette, Pipette, Puzzle, Search, Server, Settings2, Smartphone, Sparkles, Terminal, X, type LucideIcon,
 } from "lucide-react"
 import { EnvironmentSettings } from "./EnvironmentSettings"
 import {
@@ -12,6 +12,7 @@ import type { Project } from "./ProjectsView"
 import type { Settings } from "./useSettings"
 import type { useConnections } from "./useConnections"
 import { McpAndSecuritySettings } from "./src/panels/McpSettingsSection"
+import { SkillsToolsSettings } from "./src/settings/SkillsToolsSettings"
 import { request } from "./api"
 import { UsageSettings } from "./src/usage/UsageSettings"
 import { IntegrationsSettings } from "./src/integrations/IntegrationsSettings"
@@ -31,7 +32,7 @@ import { useI18n } from "./src/i18n/I18nContext"
 
 /** Settings categories. Every category here changes something real; nothing is a placeholder. */
 export type SettingsCategory =
-  | "general" | "appearance" | "localization" | "models" | "agents" | "usage" | "subagents" | "integrations" | "github" | "terminal" | "notifications" | "environments" | "mobile"
+  | "general" | "appearance" | "localization" | "models" | "agents" | "skills" | "usage" | "subagents" | "integrations" | "github" | "terminal" | "notifications" | "environments" | "mobile"
 
 type SettingsItemSpec = { id: SettingsCategory; labelKey: TranslationKey; icon: LucideIcon; descKey: TranslationKey; keywords: string }
 
@@ -50,6 +51,7 @@ const groupSpecs: { labelKey: TranslationKey; items: SettingsItemSpec[] }[] = [
     items: [
       { id: "models", labelKey: "settings.cat.models.label", icon: Sparkles, descKey: "settings.cat.models.desc", keywords: "openai anthropic claude copilot codex pi cursor opencode radius ollama compatible api key provider reasoning models" },
       { id: "agents", labelKey: "settings.cat.agents.label", icon: Bot, descKey: "settings.cat.agents.desc", keywords: "approval policy autopilot ask mcp skills rules permissions browser chrome limit cost budget overnight usage limit fallback queue concurrent rechten goedkeuringen" },
+      { id: "skills", labelKey: "settings.cat.skills.label", icon: Puzzle, descKey: "settings.cat.skills.desc", keywords: "skill skills mcp tool server tools git repository import trust claude codex cursor gemini .mcp.json vaardigheden toolservers" },
       { id: "subagents", labelKey: "settings.cat.subagents.label", icon: Workflow, descKey: "settings.cat.subagents.desc", keywords: "harness claude code codex pi durable subagent model delegate" },
       { id: "usage", labelKey: "settings.cat.usage.label", icon: Gauge, descKey: "settings.cat.usage.desc", keywords: "cost spend tokens budget billing price money verbruik kosten" },
     ],
@@ -589,12 +591,15 @@ export function SettingsView({
     {onChangeApprovalPolicy && onDeleteApprovalRule && onRefreshMcp ? (
       <Section title={t("settings.agents.approvalsAndMcp")} plain>
         <div className="st-embedded">
-          <McpAndSecuritySettings mcpServers={mcpServers} approvalPolicy={approvalPolicy} approvalRules={approvalRules} onRefreshMcp={onRefreshMcp} onChangeApprovalPolicy={onChangeApprovalPolicy} onDeleteApprovalRule={onDeleteApprovalRule} onAddApprovalRule={onAddApprovalRule} />
+          <McpAndSecuritySettings approvalPolicy={approvalPolicy} approvalRules={approvalRules} onChangeApprovalPolicy={onChangeApprovalPolicy} onDeleteApprovalRule={onDeleteApprovalRule} onAddApprovalRule={onAddApprovalRule} />
         </div>
       </Section>
     ) : null}
     <OvernightSettings modelCatalog={modelCatalog} />
   </>
+
+  // --- Skills & tools ---
+  const skillsTools = <SkillsToolsSettings projects={projects} onRefreshMcp={onRefreshMcp} />
 
   // --- Git & GitHub ---
   const github = <>
@@ -661,7 +666,7 @@ export function SettingsView({
   const integrations = <IntegrationsSettings />
   const subagents = <SubagentSettings modelCatalog={modelCatalog} />
   const mobile = <MobilePairingSection />
-  const content = { general, appearance, localization, models, agents, usage, subagents, integrations, github, terminal, notifications, environments, mobile }[selectedCategory]
+  const content = { general, appearance, localization, models, agents, skills: skillsTools, usage, subagents, integrations, github, terminal, notifications, environments, mobile }[selectedCategory]
 
   return <main className="st-layout">
     <aside className="st-nav" aria-label={t("settings.navAria")}>

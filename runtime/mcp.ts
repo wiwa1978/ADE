@@ -8,8 +8,17 @@ import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { map, unknown } from "@earendil-works/pi-schema";
 import type { RuntimeEventBus } from "./events.ts";
 import { runHostMigrations } from "./db/migrations.ts";
+import { CapabilitySettings } from "./capabilities.ts";
 import { isErrorCode, logger } from "./log.ts";
 import { badRequest, conflict, notFound } from "./http-error.ts";
+
+export type McpOrigin = {
+	/** ade: added in ADE (database). file: read live from another tool's config. project: the repository's .mcp.json. */
+	kind: "ade" | "file" | "project";
+	label: string;
+	/** The config file, for file and project servers. */
+	path?: string;
+};
 
 export type McpServerConfig = {
 	id: string;
@@ -20,6 +29,7 @@ export type McpServerConfig = {
 	env?: Record<string, string>;
 	url?: string;
 	headers?: Record<string, string>;
+	/** Global on/off (everything is on unless turned off). */
 	enabled: boolean;
 };
 
@@ -33,7 +43,22 @@ export type McpServerStatus = McpServerConfig & {
 	status: "disconnected" | "connecting" | "connected" | "error";
 	error: string | null;
 	tools: McpDiscoveredTool[];
+	/** The key on/off settings use (the id, or "project:<name>" for a repository's servers). */
+	key: string;
+	origin: McpOrigin;
+	/** Servers from files are edited in their file (or copied into ADE first). */
+	readOnly: boolean;
+	/** On for the project asked about (after inheritance), and usable (not shadowed, trusted). */
+	active: boolean;
+	globalSetting: boolean | null;
+	projectSetting: boolean | null;
+	/** A repository's .mcp.json runs code from the repo: it needs trust once per project. */
+	needsTrust: boolean;
+	/** Another server with the same name wins (ADE beats project beats other tools). */
+	shadowedBy: string | null;
 };
+
+export type McpScope = { workspace?: string | null; projectId?: string | null };
 
 type JsonRpcResponse = {
 	id?: number;
@@ -64,8 +89,9 @@ class StdioMcpClient {
 	#buffer = "";
 	#pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 
-	constructor(command: string, args: string[], env?: Record<string, string>) {
+	constructor(command: string, args: string[], env?: Record<string, string>, cwd?: string) {
 		this.#child = spawn(command, args, {
+			cwd,
 			env: { ...process.env, ...(env ?? {}) },
 			stdio: ["pipe", "pipe", "pipe"],
 		});
@@ -89,6 +115,11 @@ class StdioMcpClient {
 					logger.debug("Ignored non-JSON stdout line from MCP server", { error, context: { line: trimmed.slice(0, 120) } });
 				}
 			}
+		});
+		// A missing command must not crash the runtime: fail the pending requests instead.
+		this.#child.once("error", (error) => {
+			for (const p of this.#pending.values()) p.reject(error);
+			this.#pending.clear();
 		});
 		this.#child.once("exit", () => {
 			for (const p of this.#pending.values()) p.reject(new Error("MCP server process exited."));
@@ -187,9 +218,69 @@ type ConnectedServer = {
 	tools: McpDiscoveredTool[];
 };
 
+type ResolvedServer = Omit<McpServerStatus, "status" | "error" | "tools"> & { cwd?: string };
+
+type FileServerDef = {
+	type?: string;
+	command?: string;
+	args?: unknown;
+	env?: Record<string, string>;
+	url?: string;
+	serverUrl?: string;
+	httpUrl?: string;
+	headers?: Record<string, string>;
+	disabled?: boolean;
+};
+
+const ORIGIN_RANK: Record<McpOrigin["kind"], number> = { ade: 0, project: 1, file: 2 };
+
+function slug(value: string) {
+	return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function toConfig(def: FileServerDef): StoredMcpConfig & { transport: "stdio" | "http" } | null {
+	if (!def || typeof def !== "object") return null;
+	const url = def.url ?? def.serverUrl ?? def.httpUrl;
+	if (typeof url === "string" && url) return { transport: "http", url, headers: def.headers && typeof def.headers === "object" ? def.headers : {} };
+	if (typeof def.command === "string" && def.command) {
+		return { transport: "stdio", command: def.command, args: Array.isArray(def.args) ? def.args.map(String) : [], env: def.env && typeof def.env === "object" ? def.env : {} };
+	}
+	return null;
+}
+
+/** Reads the `mcpServers` (or `servers`) map of a JSON config file; empty when missing or invalid. */
+export function readMcpConfigFile(path: string): Record<string, FileServerDef> {
+	if (!existsSync(path)) return {};
+	try {
+		const parsed = JSON.parse(readFileSync(path, "utf8")) as { mcpServers?: unknown; servers?: unknown };
+		const servers = parsed?.mcpServers ?? parsed?.servers;
+		return servers && typeof servers === "object" ? servers as Record<string, FileServerDef> : {};
+	} catch (error) {
+		logger.warn("Could not read MCP config file", { error, context: { path } });
+		return {};
+	}
+}
+
+/** Accepts `{"mcpServers": {...}}`, `{"servers": {...}}`, or a bare `{ "name": { ... } }` map. */
+export function parseMcpJson(text: string): Record<string, FileServerDef> {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text);
+	} catch {
+		throw badRequest("That isn't valid JSON.");
+	}
+	if (!parsed || typeof parsed !== "object") throw badRequest("Paste a JSON object with MCP servers.");
+	const rec = parsed as Record<string, unknown>;
+	const map = (rec.mcpServers ?? rec.servers ?? rec) as Record<string, FileServerDef>;
+	if (!map || typeof map !== "object" || !Object.keys(map).length) throw badRequest("No MCP servers found in the JSON.");
+	return map;
+}
+
 export class McpManager {
 	#db: DatabaseSync;
 	#events: RuntimeEventBus;
+	#home: string;
+	#caps: CapabilitySettings;
 	#runtime = new Map<string, ConnectedServer>();
 	#guard: ((server: { id: string; transport: "stdio" | "http"; url?: string }) => string | null) | null = null;
 
@@ -200,45 +291,29 @@ export class McpManager {
 	}
 
 	applyGuard() {
-		for (const server of this.#all()) if (this.#guard?.(server) && this.#runtime.has(server.id)) this.disconnect(server.id);
+		for (const server of this.#resolve()) if (this.#guard?.(server) && this.#runtime.has(server.id)) this.disconnect(server.id);
 	}
 
-	constructor(db: DatabaseSync, events: RuntimeEventBus) {
+	constructor(db: DatabaseSync, events: RuntimeEventBus, options: { home?: string; capabilities?: CapabilitySettings } = {}) {
 		this.#db = db;
 		this.#events = events;
+		this.#home = options.home ?? homedir();
 		runHostMigrations(this.#db);
-		this.#importDiskConfig();
+		this.#caps = options.capabilities ?? new CapabilitySettings(db);
 	}
 
-	#importDiskConfig(): void {
-		const path = join(homedir(), ".ade", "mcp.json");
-		if (!existsSync(path)) return;
-		try {
-			const parsed = JSON.parse(readFileSync(path, "utf8")) as { mcpServers?: unknown; servers?: unknown };
-			const servers = parsed?.mcpServers ?? parsed?.servers;
-			if (!servers || typeof servers !== "object") return;
-			for (const [name, rawDef] of Object.entries(servers as Record<string, unknown>)) {
-				const def = (rawDef && typeof rawDef === "object" ? rawDef : {}) as StoredMcpConfig;
-				const exists = this.#db.prepare("SELECT 1 FROM mcp_servers WHERE name=?").get(name);
-				if (exists) continue;
-				const transport = def.url ? "http" : "stdio";
-				this.#db.prepare("INSERT INTO mcp_servers (id, name, transport, configJson, enabled, createdAt) VALUES (?, ?, ?, ?, 1, ?)")
-					.run(randomUUID(), name, transport, JSON.stringify({
-						command: def.command,
-						args: Array.isArray(def.args) ? def.args : [],
-						env: def.env ?? {},
-						url: def.url,
-						headers: def.headers ?? {},
-					}), Date.now());
-			}
-		} catch (error) {
-			logger.warn("Could not import ~/.ade/mcp.json", { error, context: { path } });
-		}
+	/** Config files of other tools that ADE reads live (never writes). */
+	#configFiles(): { label: string; path: string }[] {
+		return [
+			{ label: "~/.ade/mcp.json", path: join(this.#home, ".ade", "mcp.json") },
+			{ label: "Claude Code", path: join(this.#home, ".claude.json") },
+			{ label: "Cursor", path: join(this.#home, ".cursor", "mcp.json") },
+			{ label: "Gemini CLI", path: join(this.#home, ".gemini", "settings.json") },
+		];
 	}
 
-	/** The servers with their real env and headers: for connecting only, never sent to the app. */
-	#all(): McpServerStatus[] {
-		const rows = this.#db.prepare("SELECT * FROM mcp_servers ORDER BY createdAt ASC").all() as unknown as McpServerRow[];
+	#dbServers(): ResolvedServer[] {
+		const rows = this.#db.prepare("SELECT * FROM mcp_servers ORDER BY createdAt ASC").all() as unknown as (McpServerRow & { origin?: string })[];
 		return rows.map(row => {
 			let cfg: StoredMcpConfig = {};
 			try {
@@ -246,17 +321,69 @@ export class McpManager {
 			} catch (error) {
 				logger.warn("Malformed configJson for MCP server", { error, context: { serverId: row.id, name: row.name } });
 			}
-			const rt = this.#runtime.get(row.id);
 			return {
-				id: row.id,
-				name: row.name,
-				transport: row.transport,
-				command: cfg.command,
-				args: cfg.args ?? [],
-				env: cfg.env ?? {},
-				url: cfg.url,
-				headers: cfg.headers ?? {},
-				enabled: Boolean(row.enabled),
+				id: row.id, key: row.id, name: row.name, transport: row.transport,
+				command: cfg.command, args: cfg.args ?? [], env: cfg.env ?? {}, url: cfg.url, headers: cfg.headers ?? {},
+				origin: { kind: "ade", label: row.origin && row.origin !== "ade" ? `ADE (from ${row.origin})` : "ADE" },
+				readOnly: false, enabled: true, active: true, globalSetting: null, projectSetting: null, needsTrust: false, shadowedBy: null,
+			} satisfies ResolvedServer;
+		});
+	}
+
+	#fileServers(path: string, origin: McpOrigin, idPrefix: string, keyPrefix: string, cwd?: string): ResolvedServer[] {
+		const servers: ResolvedServer[] = [];
+		for (const [name, def] of Object.entries(readMcpConfigFile(path))) {
+			const cfg = toConfig(def);
+			if (!cfg) continue;
+			servers.push({
+				id: `${idPrefix}${name}`, key: `${keyPrefix}${name}`, name, transport: cfg.transport,
+				command: cfg.command, args: cfg.args ?? [], env: cfg.env ?? {}, url: cfg.url, headers: cfg.headers ?? {},
+				origin, readOnly: true, enabled: def.disabled !== true, active: true, globalSetting: null, projectSetting: null, needsTrust: false, shadowedBy: null,
+				cwd,
+			});
+		}
+		return servers;
+	}
+
+	/** Every server for a scope, with real secrets: for connecting only, never sent to the app. */
+	#resolve(scope: McpScope = {}): ResolvedServer[] {
+		const servers: ResolvedServer[] = [...this.#dbServers()];
+		if (scope.workspace) {
+			const path = join(scope.workspace, ".mcp.json");
+			servers.push(...this.#fileServers(path, { kind: "project", label: "Project .mcp.json", path }, `project:${scope.workspace}:`, "project:", scope.workspace));
+		}
+		for (const file of this.#configFiles()) {
+			servers.push(...this.#fileServers(file.path, { kind: "file", label: file.label, path: file.path }, `file:${slug(file.label)}:`, `file:${slug(file.label)}:`));
+		}
+		const state = this.#caps.resolver("mcp", scope.projectId);
+		const trusted = scope.projectId ? this.#caps.state("mcp-trust", ".mcp.json", scope.projectId, false).active : false;
+		const winners = new Map<string, string>();
+		const ordered = servers.sort((a, b) => ORIGIN_RANK[a.origin.kind] - ORIGIN_RANK[b.origin.kind]);
+		for (const server of ordered) {
+			const name = server.name.toLowerCase();
+			server.shadowedBy = winners.get(name) ?? null;
+			if (!server.shadowedBy) winners.set(name, server.id);
+			const s = state(server.key);
+			// A server its own file marks "disabled" starts off, unless ADE has a setting for it.
+			const fallback = server.enabled;
+			server.globalSetting = s.global;
+			server.projectSetting = s.project;
+			server.enabled = s.global ?? fallback;
+			server.needsTrust = server.origin.kind === "project" && !trusted;
+			server.active = (s.project ?? s.global ?? fallback) && !server.shadowedBy && !server.needsTrust;
+		}
+		return ordered;
+	}
+
+	/** The servers as the app sees them: env and header values are masked (names stay), as are secrets in the URL. */
+	list(scope: McpScope = {}): McpServerStatus[] {
+		return this.#resolve(scope).map(({ cwd: _cwd, ...server }) => {
+			const rt = this.#runtime.get(server.id);
+			return {
+				...server,
+				env: maskValues(server.env),
+				headers: maskValues(server.headers),
+				url: server.url ? maskUrl(server.url) : server.url,
 				status: rt?.status ?? "disconnected",
 				error: rt?.error ?? null,
 				tools: rt?.tools ?? [],
@@ -264,14 +391,8 @@ export class McpManager {
 		});
 	}
 
-	/** The servers as the app sees them: env and header values are masked (names stay), as are secrets in the URL. */
-	list(): McpServerStatus[] {
-		return this.#all().map(server => ({
-			...server,
-			env: maskValues(server.env),
-			headers: maskValues(server.headers),
-			url: server.url ? maskUrl(server.url) : server.url,
-		}));
+	#emit() {
+		this.#events.emit("mcp.update", { servers: this.list() });
 	}
 
 	save(input: Partial<McpServerConfig>): McpServerStatus {
@@ -285,44 +406,94 @@ export class McpManager {
 			throw badRequest("Provide a URL for HTTP MCP servers.");
 		}
 		const id = input.id || randomUUID();
+		const existingRow = this.#db.prepare("SELECT configJson FROM mcp_servers WHERE id=?").get(id) as { configJson: string } | undefined;
+		if (input.id && !existingRow) throw notFound("MCP server not found. Servers from other tools' files are edited in that file, or copied into ADE first.");
+		let previous: StoredMcpConfig = {};
+		try {
+			previous = existingRow ? JSON.parse(existingRow.configJson) as StoredMcpConfig : {};
+		} catch {
+			previous = {};
+		}
+		// The app only ever sees masked values: a value left masked keeps what was stored.
+		const keep = (next: Record<string, string> | undefined, old: Record<string, string> | undefined) =>
+			Object.fromEntries(Object.entries(next ?? {}).map(([key, value]) => [key, value === MASKED && old?.[key] !== undefined ? old[key] : String(value)]));
+		const url = input.url?.trim() || undefined;
 		const configJson = JSON.stringify({
 			command: input.command?.trim() || undefined,
 			args: Array.isArray(input.args) ? input.args.map(String) : [],
-			env: input.env ?? {},
-			url: input.url?.trim() || undefined,
-			headers: input.headers ?? {},
+			env: keep(input.env, previous.env),
+			url: url && url.includes(MASKED) && previous.url ? previous.url : url,
+			headers: keep(input.headers, previous.headers),
 		});
-		const enabled = input.enabled === false ? 0 : 1;
-		const existing = this.#db.prepare("SELECT id FROM mcp_servers WHERE id=?").get(id);
-		if (existing) {
-			this.#db.prepare("UPDATE mcp_servers SET name=?, transport=?, configJson=?, enabled=? WHERE id=?")
-				.run(name, transport, configJson, enabled, id);
+		if (existingRow) {
+			this.#db.prepare("UPDATE mcp_servers SET name=?, transport=?, configJson=? WHERE id=?").run(name, transport, configJson, id);
 		} else {
-			this.#db.prepare("INSERT INTO mcp_servers (id, name, transport, configJson, enabled, createdAt) VALUES (?, ?, ?, ?, ?, ?)")
-				.run(id, name, transport, configJson, enabled, Date.now());
+			this.#db.prepare("INSERT INTO mcp_servers (id, name, transport, configJson, enabled, createdAt) VALUES (?, ?, ?, ?, 1, ?)")
+				.run(id, name, transport, configJson, Date.now());
 		}
-		this.#events.emit("mcp.update", { servers: this.list() });
+		if (input.enabled === false) this.#caps.set("global", null, "mcp", id, false);
+		else if (input.enabled === true && !existingRow) this.#caps.set("global", null, "mcp", id, null);
+		// Changed config: the next session connects with the new settings.
+		if (existingRow) this.disconnect(id);
+		this.#emit();
 		return this.list().find(s => s.id === id)!;
 	}
 
-	remove(id: string): void {
-		this.disconnect(id);
-		this.#db.prepare("DELETE FROM mcp_servers WHERE id=?").run(id);
-		this.#events.emit("mcp.update", { servers: this.list() });
+	/** Add every server in a pasted JSON block (servers with the same name are updated). */
+	importJson(text: string, origin = "pasted JSON"): McpServerStatus[] {
+		const map = parseMcpJson(text);
+		const saved: string[] = [];
+		for (const [name, def] of Object.entries(map)) {
+			const cfg = toConfig(def);
+			if (!cfg) throw badRequest(`"${name}" needs a command (stdio) or a url (HTTP).`);
+			const existing = this.#db.prepare("SELECT id FROM mcp_servers WHERE name=?").get(name) as { id: string } | undefined;
+			const id = existing?.id ?? randomUUID();
+			const configJson = JSON.stringify({ command: cfg.command, args: cfg.args ?? [], env: cfg.env ?? {}, url: cfg.url, headers: cfg.headers ?? {} });
+			if (existing) this.#db.prepare("UPDATE mcp_servers SET transport=?, configJson=? WHERE id=?").run(cfg.transport, configJson, id);
+			else this.#db.prepare("INSERT INTO mcp_servers (id, name, transport, configJson, enabled, createdAt, origin) VALUES (?, ?, ?, ?, 1, ?, ?)").run(id, name, cfg.transport, configJson, Date.now(), origin);
+			saved.push(id);
+		}
+		this.#emit();
+		const all = this.list();
+		return all.filter(server => saved.includes(server.id));
 	}
 
-	async connect(id: string): Promise<McpServerStatus> {
-		const server = this.#all().find(s => s.id === id);
+	/** Copy a server from another tool's file into ADE, so it can be edited here. ADE's copy then wins by name. */
+	adopt(id: string, scope: McpScope = {}): McpServerStatus {
+		const server = this.#resolve(scope).find(item => item.id === id);
+		if (!server) throw notFound("MCP server not found.");
+		if (!server.readOnly) return this.list(scope).find(item => item.id === id)!;
+		const newId = randomUUID();
+		this.#db.prepare("INSERT INTO mcp_servers (id, name, transport, configJson, enabled, createdAt, origin) VALUES (?, ?, ?, ?, 1, ?, ?)").run(
+			newId, server.name, server.transport,
+			JSON.stringify({ command: server.command, args: server.args ?? [], env: server.env ?? {}, url: server.url, headers: server.headers ?? {} }),
+			Date.now(), server.origin.label,
+		);
+		this.#emit();
+		return this.list(scope).find(item => item.id === newId)!;
+	}
+
+	remove(id: string): void {
+		const exists = this.#db.prepare("SELECT 1 FROM mcp_servers WHERE id=?").get(id);
+		if (!exists) throw badRequest("Only servers added in ADE can be removed here. Turn this one off, or remove it from its config file.");
+		this.disconnect(id);
+		this.#db.prepare("DELETE FROM mcp_servers WHERE id=?").run(id);
+		this.#caps.set("global", null, "mcp", id, null);
+		this.#emit();
+	}
+
+	async connect(id: string, scope: McpScope = {}): Promise<McpServerStatus> {
+		const server = this.#resolve(scope).find(s => s.id === id);
 		if (!server) throw notFound("MCP server not found.");
 		const blocked = this.#guard?.(server);
 		if (blocked) throw conflict(blocked);
 		this.disconnect(id);
 		const client = server.transport === "http"
 			? new HttpMcpClient(server.url!, server.headers)
-			: new StdioMcpClient(server.command!, server.args ?? [], server.env);
+			: new StdioMcpClient(server.command!, server.args ?? [], server.env, server.cwd);
 		const state: ConnectedServer = { client, status: "connecting", error: null, tools: [] };
 		this.#runtime.set(id, state);
-		this.#events.emit("mcp.update", { servers: this.list() });
+		this.#emit();
 		try {
 			await client.request("initialize", {
 				protocolVersion: "2024-11-05",
@@ -345,8 +516,8 @@ export class McpManager {
 			state.status = "error";
 			state.error = error instanceof Error ? error.message : "Failed to connect to MCP server.";
 		}
-		this.#events.emit("mcp.update", { servers: this.list() });
-		return this.list().find(s => s.id === id)!;
+		this.#emit();
+		return this.list(scope).find(s => s.id === id)!;
 	}
 
 	disconnect(id: string): void {
@@ -354,12 +525,26 @@ export class McpManager {
 		if (rt) {
 			rt.client.close();
 			this.#runtime.delete(id);
-			this.#events.emit("mcp.update", { servers: this.list() });
+			this.#emit();
 		}
 	}
 
-	createExtension() {
-		const createTool = (serverName: string, rt: ConnectedServer, tool: McpDiscoveredTool) => {
+	/** The servers a session in this scope gets: on, not shadowed, and trusted. */
+	active(scope: McpScope): McpServerStatus[] {
+		return this.list(scope).filter(server => server.active);
+	}
+
+	/** Connect the active servers a session needs (servers connect when a session needs them, not by hand). */
+	async ensureConnected(scope: McpScope): Promise<void> {
+		const pending = this.active(scope).filter(server => server.status !== "connected" && server.status !== "connecting");
+		await Promise.all(pending.map(server => this.connect(server.id, scope).catch(error => {
+			logger.warn("Could not connect MCP server for a session", { error, context: { server: server.name } });
+		})));
+	}
+
+	createExtension(scope: McpScope = {}) {
+		const isStillActive = (id: string) => this.list(scope).some(server => server.id === id && server.active);
+		const createTool = (serverId: string, serverName: string, tool: McpDiscoveredTool) => {
 			const safeServer = serverName.toLowerCase().replace(/[^a-z0-9_]/g, "_").slice(0, 24);
 			const safeTool = tool.name.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 40);
 			return defineTool({
@@ -367,7 +552,19 @@ export class McpManager {
 				description: `[MCP:${serverName}] ${tool.description || tool.name}`,
 				parameters: map(unknown()),
 				replay: "unsafe",
-				async execute(args) {
+				execute: async (args) => {
+					// Turning a server off applies straight away, even in a running session.
+					if (!isStillActive(serverId)) {
+						return { isError: true, output: [{ type: "text", text: `The MCP server "${serverName}" is turned off for this project. Ask the user to turn it on in Settings → Skills & MCP.` }] };
+					}
+					let rt = this.#runtime.get(serverId);
+					if (!rt || rt.status !== "connected") {
+						await this.connect(serverId, scope);
+						rt = this.#runtime.get(serverId);
+					}
+					if (!rt || rt.status !== "connected") {
+						return { isError: true, output: [{ type: "text", text: `The MCP server "${serverName}" isn't connected${rt?.error ? `: ${rt.error}` : "."}` }] };
+					}
 					const res = await rt.client.request<{ content?: Array<{ type?: string; text?: string }>; isError?: boolean }>("tools/call", { name: tool.name, arguments: args ?? {} });
 					const content = Array.isArray(res?.content)
 						? res.content.map((c) => (c.type === "text" ? String(c.text ?? "") : JSON.stringify(c))).join("\n")
@@ -380,12 +577,14 @@ export class McpManager {
 			});
 		};
 		const tools: ReturnType<typeof createTool>[] = [];
-		for (const server of this.list()) {
-			if (!server.enabled || server.status !== "connected") continue;
-			const rt = this.#runtime.get(server.id);
-			if (!rt) continue;
-			for (const tool of rt.tools) {
-				tools.push(createTool(server.name, rt, tool));
+		const names = new Set<string>();
+		for (const server of this.active(scope)) {
+			if (server.status !== "connected") continue;
+			for (const tool of server.tools) {
+				const created = createTool(server.id, server.name, tool);
+				if (names.has(created.name)) continue;
+				names.add(created.name);
+				tools.push(created);
 			}
 		}
 		if (!tools.length) return null;

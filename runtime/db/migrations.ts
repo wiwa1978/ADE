@@ -223,6 +223,41 @@ export const HOST_MIGRATIONS: readonly SchemaMigration[] = [
 			db.exec("UPDATE projects SET blueprintId='vibe' WHERE blueprintId IS NULL OR blueprintId='automated-factory'");
 		},
 	},
+	{
+		version: 6,
+		name: "skills_and_mcp_control",
+		up(db) {
+			// Skills and MCP servers: everything is on unless turned off, globally or per project.
+			db.exec(`
+				CREATE TABLE IF NOT EXISTS capability_settings (
+					scopeKind TEXT NOT NULL,
+					scopeId TEXT NOT NULL,
+					itemKind TEXT NOT NULL,
+					itemKey TEXT NOT NULL,
+					enabled INTEGER NOT NULL,
+					updatedAt INTEGER NOT NULL,
+					PRIMARY KEY (scopeKind, scopeId, itemKind, itemKey)
+				);
+				CREATE TABLE IF NOT EXISTS skill_sources (
+					id TEXT PRIMARY KEY,
+					url TEXT NOT NULL,
+					ref TEXT,
+					subpath TEXT,
+					dir TEXT NOT NULL,
+					commitSha TEXT,
+					syncedAt INTEGER,
+					status TEXT NOT NULL DEFAULT 'ready',
+					error TEXT,
+					createdAt INTEGER NOT NULL
+				);
+			`);
+			// Where an MCP server in the database came from: added in ADE, or imported from a file.
+			ensureColumn(db, "mcp_servers", "origin", "TEXT NOT NULL DEFAULT 'ade'");
+			// The old per-server "enabled" flag becomes the global on/off setting.
+			db.exec(`INSERT OR IGNORE INTO capability_settings (scopeKind, scopeId, itemKind, itemKey, enabled, updatedAt)
+				SELECT 'global', '', 'mcp', id, 0, ${Date.now()} FROM mcp_servers WHERE enabled=0`);
+		},
+	},
 ];
 
 export const LATEST_HOST_SCHEMA_VERSION = HOST_MIGRATIONS[HOST_MIGRATIONS.length - 1].version;

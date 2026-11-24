@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { obj, str } from "@earendil-works/pi-schema";
 import { isErrorCode, logger } from "./log.ts";
+import { effectiveSkills, parseFrontmatter, scanSkillLandscape } from "./skill-catalog.ts";
 
 export type SkillSummary = {
 	name: string;
@@ -64,49 +65,6 @@ const BUILTIN_COMMANDS: SlashCommandSummary[] = [
 		scope: "builtin",
 	},
 ];
-
-function parseFrontmatter(raw: string): { name?: string; description?: string; body: string } {
-	const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(raw);
-	if (!match) return { body: raw };
-	const meta: Record<string, string> = {};
-	for (const line of match[1].split(/\r?\n/)) {
-		const idx = line.indexOf(":");
-		if (idx <= 0) continue;
-		const k = line.slice(0, idx).trim().toLowerCase();
-		const v = line.slice(idx + 1).trim().replace(/^["']|["']$/g, "");
-		meta[k] = v;
-	}
-	return { name: meta.name, description: meta.description, body: match[2] };
-}
-
-function scanSkillsDir(dir: string, scope: "global" | "workspace"): SkillSummary[] {
-	if (!existsSync(dir)) return [];
-	const results: SkillSummary[] = [];
-	try {
-		for (const entry of readdirSync(dir, { withFileTypes: true })) {
-			if (!entry.isDirectory()) continue;
-			const skillFile = join(dir, entry.name, "SKILL.md");
-			if (!existsSync(skillFile)) continue;
-			try {
-				const raw = readFileSync(skillFile, "utf8");
-				const parsed = parseFrontmatter(raw);
-				results.push({
-					name: parsed.name || entry.name,
-					description: parsed.description || parsed.body.trim().split("\n")[0]?.slice(0, 160) || "Custom skill",
-					path: skillFile,
-					scope,
-				});
-			} catch (error) {
-				logger.warn("Skipped unreadable skill file", { error, context: { skillFile, scope } });
-			}
-		}
-	} catch (error) {
-		if (!isErrorCode(error, "ENOENT", "EACCES")) {
-			logger.warn("Could not scan skills directory", { error, context: { dir, scope } });
-		}
-	}
-	return results;
-}
 
 function scanRules(workspace?: string | null): RuleSummary[] {
 	const rules: RuleSummary[] = [];
@@ -200,21 +158,18 @@ function scanCommands(workspace?: string | null): SlashCommandSummary[] {
 	return [...map.values()];
 }
 
-export function discoverSkillsAndRules(workspace?: string | null): SkillsAndRulesCatalog {
-	const home = homedir();
-	const skillsMap = new Map<string, SkillSummary>();
-	for (const skill of scanSkillsDir(join(home, ".ade", "skills"), "global")) {
-		skillsMap.set(skill.name, skill);
-	}
-	if (workspace) {
-		for (const dir of [join(workspace, ".ade", "skills"), join(workspace, ".agents", "skills")]) {
-			for (const skill of scanSkillsDir(dir, "workspace")) {
-				skillsMap.set(skill.name, skill);
-			}
-		}
-	}
+export type SkillFilter = (name: string) => boolean;
+
+/**
+ * The skills, rules and slash commands a session sees. Skills come from the whole landscape
+ * (see skill-catalog.ts): one per name, and only those that are on (`isActive`).
+ */
+export function discoverSkillsAndRules(workspace?: string | null, isActive: SkillFilter = () => true): SkillsAndRulesCatalog {
+	const skills = effectiveSkills(scanSkillLandscape({ workspace }))
+		.filter(skill => isActive(skill.name))
+		.map(skill => ({ name: skill.name, description: skill.description, path: skill.path, scope: skill.scope }));
 	return {
-		skills: [...skillsMap.values()],
+		skills,
 		rules: scanRules(workspace),
 		commands: scanCommands(workspace),
 	};
@@ -237,14 +192,15 @@ export function buildSkillsAndRulesPrompt(catalog: SkillsAndRulesCatalog): strin
 	return sections.join("\n\n");
 }
 
-export function createSkillsExtension(workspace?: string | null) {
+export function createSkillsExtension(workspace?: string | null, isActive: SkillFilter = () => true) {
 	const readSkill = defineTool({
 		name: "read_skill",
 		description: "Load the full SKILL.md instructions for an available skill by name.",
 		parameters: obj({ name: str({ description: "Skill name" }) }),
 		replay: "safe",
 		async execute(args) {
-			const catalog = discoverSkillsAndRules(workspace);
+			// Checked on every call, so turning a skill off applies straight away.
+			const catalog = discoverSkillsAndRules(workspace, isActive);
 			const match = catalog.skills.find(s => s.name.toLowerCase() === args.name.trim().toLowerCase());
 			if (!match) {
 				const names = catalog.skills.map(s => s.name).join(", ") || "(none)";

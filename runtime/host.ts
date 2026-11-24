@@ -16,6 +16,9 @@ import {
 import { RuntimeEventBus } from "./events.ts";
 import { badRequest, notFound } from "./http-error.ts";
 import { McpManager } from "./mcp.ts";
+import { CapabilitySettings } from "./capabilities.ts";
+import { configureSkillCatalog } from "./skill-catalog.ts";
+import { SkillLibrary } from "./skill-library.ts";
 import { ModelConfigService, type ModelConfigFactory } from "./services/model-config-service.ts";
 import { SessionManager } from "./services/session-manager.ts";
 import { TurnExecutor } from "./services/turn-executor.ts";
@@ -48,6 +51,10 @@ export class LocalAgentHost {
 	readonly artifacts: ArtifactManager;
 	readonly browser: BrowserManager;
 	readonly mcp: McpManager;
+	/** Which skills and MCP servers are on (globally and per project; on unless turned off). */
+	readonly capabilities: CapabilitySettings;
+	/** Skills from Git repositories and skills written in ADE. */
+	readonly skillLibrary: SkillLibrary;
 	/** Each session's way of working (Vibe or a blueprint) and its stage progress. */
 	readonly blueprints: SessionBlueprints;
 	/** EU-only mode: what may leave the EU (models, agent CLIs, tool servers). */
@@ -56,8 +63,10 @@ export class LocalAgentHost {
 	/** Each session's team board: tasks, plans, posts, file claims and the flow events. */
 	readonly team: TeamBoard;
 
-	constructor({ stateDirectory, environment = process.env, modelConfigFactory, githubIssueFetcher = fetch, worktreeManager }: {
+	constructor({ stateDirectory, environment = process.env, modelConfigFactory, githubIssueFetcher = fetch, worktreeManager, skillsHome }: {
 		stateDirectory: string;
+		/** Home folder to look for skills and MCP configs in (tests point this at a temp folder). */
+		skillsHome?: string;
 		environment?: NodeJS.ProcessEnv;
 		modelConfigFactory?: ModelConfigFactory;
 		githubIssueFetcher?: typeof fetch;
@@ -70,7 +79,11 @@ export class LocalAgentHost {
 		this.processes = new ProcessManager(this.events);
 		this.artifacts = new ArtifactManager(this.#db, this.events);
 		this.browser = new BrowserManager(stateDirectory, this.events);
-		this.mcp = new McpManager(this.#db, this.events);
+		this.capabilities = new CapabilitySettings(this.#db);
+		this.skillLibrary = new SkillLibrary({ db: this.#db, home: skillsHome });
+		// The catalog is module-wide; once this host is closed its database is too, so look no further than an empty list.
+		configureSkillCatalog({ sources: () => { try { return this.skillLibrary.list(); } catch { return []; } }, home: skillsHome });
+		this.mcp = new McpManager(this.#db, this.events, { capabilities: this.capabilities, home: skillsHome });
 
 		this.blueprints = new SessionBlueprints(this.#db, this.events);
 		this.approvals.setGate((sessionId, toolName, args, isLead) => this.blueprints.toolBlockReason(sessionId, toolName, args, isLead));
@@ -112,6 +125,7 @@ export class LocalAgentHost {
 			team: this.team,
 			eu: this.eu,
 			routing: this.routing,
+			capabilities: this.capabilities,
 		});
 		this.#turnExecutor = new TurnExecutor({
 			db: this.#db,
@@ -265,6 +279,11 @@ export class LocalAgentHost {
 
 	latestTurn(sessionId: string) {
 		return this.#turns.latestForSession(sessionId) ?? null;
+	}
+
+	/** The project a session belongs to, if any. */
+	sessionProjectId(sessionId: string): string | null {
+		return this.#tasks.get(sessionId)?.projectId ?? null;
 	}
 
 	getWorkspacePath(sessionId: string): string | null {

@@ -318,6 +318,14 @@ beforeEach(() => {
           },
         ],
       }
+    } else if (url.startsWith("/api/skills/landscape") && method === "GET") {
+      payload = {
+        skills: [
+          { key: "ade:/h/.ade/skills:deploy", name: "deploy", description: "Ship it", path: "/h/.ade/skills/deploy/SKILL.md", dir: "/h/.ade/skills/deploy", scope: "global", origin: { kind: "ade", label: "ADE", root: "/h/.ade/skills" }, bytes: 400, tokens: 100, extraFiles: 0, shadowedBy: null, state: { active: true, global: null, project: null } },
+          { key: "tool:/h/.claude/skills:review", name: "review", description: "Review code", path: "/h/.claude/skills/review/SKILL.md", dir: "/h/.claude/skills/review", scope: "global", origin: { kind: "tool", label: "Claude Code", tool: "Claude Code", root: "/h/.claude/skills" }, bytes: 800, tokens: 200, extraFiles: 2, shadowedBy: null, state: { active: false, global: false, project: null } },
+        ],
+        sources: [],
+      }
     } else if (url.startsWith("/api/skills")) {
       payload = {
         skills: [{ name: "demo-skill", description: "Demo", path: "/tmp/SKILL.md", scope: "workspace" }],
@@ -331,6 +339,10 @@ beforeEach(() => {
       payload = { available: true, chromePath: "/Applications/Google Chrome.app", running: false, url: "about:blank", title: "New Tab", loading: false, canGoBack: false, canGoForward: false, agentDriving: false, viewport: { width: 1280, height: 800, preset: "desktop" }, lastFrame: null, error: null }
     } else if (url === "/api/browser/open-external") {
       payload = { url: body?.url, launched: true }
+    } else if (url.startsWith("/api/mcp/scoped") && method === "GET") {
+      payload = { servers: [{ id: "file:cursor:docs", key: "file:cursor:docs", name: "docs", transport: "http", enabled: true, status: "disconnected", error: null, tools: [], origin: { kind: "file", label: "Cursor" }, readOnly: true, active: true, globalSetting: null, projectSetting: null, needsTrust: false, shadowedBy: null }] }
+    } else if (url === "/api/capabilities" && method === "PUT") {
+      payload = { ok: true }
     } else if (url === "/api/mcp" && method === "GET") {
       payload = { servers: mcpRecords }
     } else if (url === "/api/mcp" && method === "POST") {
@@ -486,8 +498,9 @@ test("composer slash command autocomplete and Settings MCP + appearance persist"
   await click("Light")
   assert.equal(browser.document.documentElement.dataset.theme, "light")
   await click("Agents & permissions")
-  assert.match(container.textContent ?? "", /MCP Servers/)
   assert.match(container.textContent ?? "", /Command Approvals/)
+  await click("Skills & tools")
+  assert.match(container.textContent ?? "", /MCP Servers/)
 })
 
 test("3-column ModelPicker searches models across providers, switches thinking level, and changes access mode", async () => {
@@ -921,4 +934,24 @@ test("Localization settings switch display language between English and Dutch an
   })
   assert.equal(browser.document.documentElement.lang, "en-US")
   assert.match(container.textContent ?? "", /Display language/)
+})
+
+test("Skills & tools lists every skill with where it came from, and switching one off is saved for the chosen scope", async () => {
+  await act(async () => root.render(React.createElement(App)))
+  await click("Settings")
+  await click("Skills & tools")
+  const text = () => container.textContent ?? ""
+  assert.match(text(), /deploy/)
+  assert.match(text(), /Claude Code/, "the origin is shown")
+  assert.match(text(), /1 of 2 on/, "review is off, deploy is on")
+  assert.match(text(), /Off \(from all projects\)/)
+  assert.match(text(), /Read-only: edit it in Cursor/)
+  assert.match(text(), /Copy into ADE/)
+
+  const toggle = container.querySelector('button[role="switch"][aria-label="deploy on or off"]') as HTMLElement | null
+  assert.ok(toggle, "deploy has a switch")
+  assert.equal(toggle.getAttribute("aria-checked"), "true")
+  await act(async () => { toggle.click() })
+  const saved = requests.filter(item => item.url === "/api/capabilities" && item.method === "PUT").at(-1)
+  assert.deepEqual(saved?.body, { scope: "global", kind: "skill", key: "deploy", enabled: false })
 })

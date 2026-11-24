@@ -28,6 +28,7 @@ import type { RuntimeEventBus } from "../events.ts";
 import { badRequest, conflict, notFound } from "../http-error.ts";
 import { logger } from "../log.ts";
 import type { McpManager } from "../mcp.ts";
+import type { CapabilitySettings } from "../capabilities.ts";
 import { createSearchTools } from "../search-tools.ts";
 import { createShellTools, type ProcessManager } from "../shell-tools.ts";
 import { buildSkillsAndRulesPrompt, createSkillsExtension, discoverSkillsAndRules } from "../skills.ts";
@@ -64,6 +65,7 @@ export class SessionManager {
 	#team?: TeamBoard;
 	#eu?: EuPolicy;
 	#routing?: ModelRouting;
+	#capabilities?: CapabilitySettings;
 	/** The model each open session's Captain runs on this turn (the reviewer picks a different family from it). */
 	#rootModels = new Map<string, ModelChoice>();
 	#sessions = new Map<string, OpenSession>();
@@ -87,6 +89,7 @@ export class SessionManager {
 		team?: TeamBoard;
 		eu?: EuPolicy;
 		routing?: ModelRouting;
+		capabilities?: CapabilitySettings;
 	}) {
 		this.#stateDirectory = opts.stateDirectory;
 		this.#events = opts.events;
@@ -105,6 +108,7 @@ export class SessionManager {
 		this.#team = opts.team;
 		this.#eu = opts.eu;
 		this.#routing = opts.routing;
+		this.#capabilities = opts.capabilities;
 	}
 
 	setWorktreeManager(manager: WorktreeManager): void {
@@ -179,7 +183,11 @@ export class SessionManager {
 		}
 		this.#eu?.guardProvider(provider);
 		this.#rootModels.set(key, { provider, model });
-		const skillsCatalog = discoverSkillsAndRules(task?.workspace ?? null);
+		// Skills and MCP servers that are on for this session's project (everything is on unless turned off).
+		const projectId = task?.projectId ?? null;
+		const skillOn = (name: string) => this.#capabilities?.isActive("skill", name, projectId) ?? true;
+		const mcpScope = { workspace: task?.workspace ?? null, projectId };
+		const skillsCatalog = discoverSkillsAndRules(task?.workspace ?? null, skillOn);
 		const skillsPrompt = buildSkillsAndRulesPrompt(skillsCatalog);
 		const baseInstructions = task
 			? `You are ADE's coding lead inside an Agentic Development Environment. ${task.workspace ? "You have full workspace tools (list_files, read, write, edit, grep_search, find_files) and shell command tools (run_command, manage_process) in the bound workspace." : "This session has no bound local workspace: do not claim local file access."} You can spawn 1 or more parallel subagents using spawn_subagent (readonly, workspace, or isolated worktree mode; foreground or background) and coordinate with message_subagent, wait_subagent, list_subagents, and stop_subagent. You also have built-in browser tools (browser_navigate, browser_snapshot, browser_click, browser_type, browser_scroll, browser_screenshot, browser_eval, browser_open_external), structured artifact tools (write_artifact, update_tasks), and skills (read_skill). Keep responses concise and well-structured.`
@@ -257,8 +265,10 @@ export class SessionManager {
 		}
 		registry.install(this.#artifacts.createExtension(key));
 		if (task && this.#blueprints) registry.install(this.#blueprints.createExtension(key));
-		registry.install(createSkillsExtension(task?.workspace ?? null));
-		const mcpExt = this.#mcp.createExtension();
+		registry.install(createSkillsExtension(task?.workspace ?? null, skillOn));
+		// Active servers connect when a session needs them; a server turned off later refuses its calls.
+		await this.#mcp.ensureConnected(mcpScope);
+		const mcpExt = this.#mcp.createExtension(mcpScope);
 		if (mcpExt) registry.install(mcpExt);
 
 		let harnessRef: Harness | null = null;

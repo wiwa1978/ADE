@@ -156,6 +156,8 @@ export function registerWorkspaceRoutes(router: Router, { host, worktreeManager 
 	router.get("/api/skills", (ctx) => {
 		const sessionId = ctx.url.searchParams.get("sessionId") ?? "";
 		const workspace = sessionId ? host.getWorkspacePath(sessionId) : null;
-		ctx.json(200, discoverSkillsAndRules(workspace));
+		// Only the skills that are on for the session's project (everything is on unless turned off).
+		const state = host.capabilities.resolver("skill", sessionId ? host.sessionProjectId(sessionId) : null);
+		ctx.json(200, discoverSkillsAndRules(workspace, name => state(name).active));
 	});
 }
