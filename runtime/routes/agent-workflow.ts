@@ -15,6 +15,11 @@ export function registerAgentWorkflowRoutes(
 	router: Router,
 	{ host, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, usage, secrets, automations, automationRunner, integrations, executionTargets, subagentPolicies, limitGuard, usageWaiter, subagentKey, scheduler, sendToAgent }: RouteDeps,
 ): void {
+	/** The team board is kept per session id: only real sessions get one. */
+	const requireSession = (id: string) => {
+		if (!host.sessions().some(session => session.id === id)) throw notFound("Session not found.");
+	};
+
 	// --- Ways of working: Vibe or a blueprint, per project (default) and per session ---
 	router.get("/api/blueprints/session-options", (ctx) => {
 		ctx.json(200, { blueprints: sessionBlueprintOptions() });
@@ -79,6 +84,7 @@ export function registerAgentWorkflowRoutes(
 
 	// You can set or refine the Swarm title and goal directly from the Swarm Overview pane.
 	router.put("/api/sessions/:id/team/overview", async (ctx) => {
+		requireSession(ctx.params.id);
 		const body = await ctx.readBody() as { title?: unknown; goalTitle?: unknown; goalSummary?: unknown } | null;
 		const message = host.team.setSwarmOverview(ctx.params.id, "user", {
 			title: typeof body?.title === "string" ? body.title : undefined,
@@ -90,6 +96,7 @@ export function registerAgentWorkflowRoutes(
 
 	// Create or update a workstream thread from the Swarm UI.
 	router.post("/api/sessions/:id/team/threads", async (ctx) => {
+		requireSession(ctx.params.id);
 		const body = await ctx.readBody() as { id?: unknown; title?: unknown; summary?: unknown; status?: unknown; focus?: unknown } | null;
 		const id = host.team.upsertThread(ctx.params.id, "user", {
 			id: typeof body?.id === "string" ? body.id : undefined,
@@ -103,6 +110,7 @@ export function registerAgentWorkflowRoutes(
 
 	// Add a task on the shared swarm/team board from the UI.
 	router.post("/api/sessions/:id/team/tasks", async (ctx) => {
+		requireSession(ctx.params.id);
 		const body = await ctx.readBody() as { title?: unknown; detail?: unknown; owner?: unknown; dependsOn?: unknown; threadId?: unknown } | null;
 		if (typeof body?.title !== "string") throw badRequest("A task needs a title.");
 		const dependsOn = Array.isArray(body.dependsOn) ? body.dependsOn.filter((item): item is string => typeof item === "string") : [];
@@ -118,6 +126,7 @@ export function registerAgentWorkflowRoutes(
 
 	// You decide on a plan (instead of, or before, the lead).
 	router.post("/api/sessions/:id/team/plans/:taskId", async (ctx) => {
+		requireSession(ctx.params.id);
 		const body = await ctx.readBody() as { decision?: unknown; note?: unknown } | null;
 		if (body?.decision !== "approve" && body?.decision !== "return") throw badRequest("Approve, or return the plan.");
 		const message = host.team.decidePlan(ctx.params.id, "user", ctx.params.taskId, body.decision, typeof body.note === "string" ? body.note : "");
@@ -126,13 +135,15 @@ export function registerAgentWorkflowRoutes(
 
 	// You post on the team board, e.g. to answer an agent's question.
 	router.post("/api/sessions/:id/team/posts", async (ctx) => {
+		requireSession(ctx.params.id);
 		const body = await ctx.readBody() as { text?: unknown; to?: unknown; re?: unknown } | null;
 		if (typeof body?.text !== "string") throw badRequest("Write something to post.");
-		const to = Array.isArray(body.to) ? body.to.filter((item): item is string => typeof item === "string") : [];
+		const to = Array.isArray(body.to) ? body.to.filter((item): item is string => typeof item === "string").slice(0, 20) : [];
 		ctx.json(200, { message: host.team.post(ctx.params.id, "user", { text: body.text, kind: "answer", to, re: typeof body.re === "number" ? body.re : null }) });
 	}, { originError: "Use ADE to post on the team board." });
 
 	router.put("/api/sessions/:id/team/settings", async (ctx) => {
+		requireSession(ctx.params.id);
 		const body = await ctx.readBody() as { requirePlans?: unknown } | null;
 		if (typeof body?.requirePlans !== "boolean") throw badRequest("Say whether plans need approval.");
 		host.team.setRequirePlans(ctx.params.id, body.requirePlans);

@@ -98,7 +98,7 @@ test("skills written in ADE live in ~/.ade/skills and only those can be changed 
 	assert.throws(() => library.readUserSkill(created.path), /not found/i);
 }));
 
-test("tool servers: a repository's .mcp.json needs trust once, other tools' servers are read-only until copied into ADE", () => temp(home => {
+test("tool servers: a repository's .mcp.json needs trust once, other tools' servers are read-only until copied into ADE", () => temp(async home => {
 	const db = new DatabaseSync(":memory:");
 	const caps = new CapabilitySettings(db);
 	const mcp = new McpManager(db, { emit() {} } as never, { home, capabilities: caps });
@@ -124,6 +124,14 @@ test("tool servers: a repository's .mcp.json needs trust once, other tools' serv
 	caps.set("global", null, "mcp", docs.key, false);
 	assert.equal(mcp.list(scope).find(item => item.name === "docs")!.active, false, "turned off globally");
 	assert.deepEqual(mcp.active(scope).map(item => item.name), ["local"]);
+
+	// Untrusted repository servers can't be started by hand either (the API enforces it, not only the buttons).
+	caps.clearProject("p1");
+	await assert.rejects(mcp.connect(project.id, scope), /isn't trusted yet/);
+	caps.set("project", "p1", "mcp-trust", ".mcp.json", true);
+	const tried = await mcp.connect(project.id, scope);
+	assert.notEqual(tried.status, "connected", "a command that is no MCP server just reports an error");
+	mcp.close();
 
 	const copy = mcp.adopt(docs.id, scope);
 	assert.equal(copy.readOnly, false);

@@ -1,27 +1,22 @@
 // Skills and tool servers: what ADE can find, where each came from, and what is on. Everything is
 // on unless turned off; a project's setting beats the global one. Skills also come from Git
 // repositories (previewed before they are installed) and from ADE's own folder.
-import { existsSync } from "node:fs";
 import { badRequest } from "../http-error.ts";
 import { scanSkillLandscape } from "../skill-catalog.ts";
 import type { CapabilityKind, CapabilityScope } from "../capabilities.ts";
 import type { Router } from "../router.ts";
 import type { RouteDeps } from "./context.ts";
+import { projectWorkspace } from "./scope.ts";
 
 const KINDS: CapabilityKind[] = ["skill", "mcp", "mcp-trust"];
 
 export function registerCapabilityRoutes(router: Router, { host }: RouteDeps): void {
-	/** The folder of a project's repository, when it has one on this computer. */
-	const projectWorkspace = (projectId: string | null): string | null => {
-		if (!projectId) return null;
-		const project = host.projects().find(item => item.id === projectId);
-		return project?.repository && existsSync(project.repository) ? project.repository : null;
-	};
+	const projectWorkspaceOf = (projectId: string | null) => projectWorkspace(host, projectId);
 
 	router.get("/api/skills/landscape", (ctx) => {
 		const projectId = ctx.url.searchParams.get("projectId");
 		const state = host.capabilities.resolver("skill", projectId);
-		const skills = scanSkillLandscape({ workspace: projectWorkspace(projectId), sources: host.skillLibrary.list() }).map(skill => ({ ...skill, state: state(skill.name) }));
+		const skills = scanSkillLandscape({ workspace: projectWorkspaceOf(projectId), sources: host.skillLibrary.list() }).map(skill => ({ ...skill, state: state(skill.name) }));
 		ctx.json(200, { skills, sources: host.skillLibrary.list() });
 	});
 
@@ -89,7 +84,7 @@ export function registerCapabilityRoutes(router: Router, { host }: RouteDeps): v
 	// --- Tool servers: the same list per project, import, and copy-into-ADE ---
 	router.get("/api/mcp/scoped", (ctx) => {
 		const projectId = ctx.url.searchParams.get("projectId");
-		ctx.json(200, { servers: host.mcp.list({ projectId, workspace: projectWorkspace(projectId) }) });
+		ctx.json(200, { servers: host.mcp.list({ projectId, workspace: projectWorkspaceOf(projectId) }) });
 	});
 
 	router.post("/api/mcp/import", async (ctx) => {
@@ -100,6 +95,6 @@ export function registerCapabilityRoutes(router: Router, { host }: RouteDeps): v
 
 	router.post("/api/mcp/:id/adopt", async (ctx) => {
 		const projectId = ctx.url.searchParams.get("projectId");
-		ctx.json(200, { server: host.mcp.adopt(ctx.params.id, { projectId, workspace: projectWorkspace(projectId) }) });
+		ctx.json(200, { server: host.mcp.adopt(ctx.params.id, { projectId, workspace: projectWorkspaceOf(projectId) }) });
 	}, { originError: "Use ADE Settings to configure MCP servers." });
 }

@@ -74,6 +74,11 @@ export type TeamState = {
 };
 
 const MAX_EVENTS = 400;
+/** A runaway agent can't grow a session's board without limit (the file is rewritten on every change). */
+const MAX_TASKS = 500;
+const MAX_THREADS = 50;
+const MAX_POSTS = 1000;
+const POST_KINDS: readonly PostKind[] = ["question", "finding", "answer", "update"];
 const FOLD_MS = 90_000;
 const empty = (): TeamState => ({ version: 1, title: "", goal: null, threads: [], focus: {}, tasks: [], posts: [], claims: [], events: [], readSeq: {}, requirePlans: false, nextTask: 1, nextThread: 1, nextSeq: 1 });
 const clip = (text: string, max = 160) => {
@@ -219,7 +224,10 @@ export class TeamBoard {
 			}
 			const title = clip(input.title ?? "", 160);
 			if (!title) throw badRequest("A thread needs a title.");
-			const id = rawId && /^[\w-]{1,40}$/.test(rawId) ? rawId : `TH${state.nextThread++}`;
+			if (state.threads.length >= MAX_THREADS) throw conflict(`There are already ${MAX_THREADS} threads. Reuse one, or mark finished ones done.`);
+			// A chosen id must not collide with one already taken (including the TH1, TH2… ids made later).
+			let id = rawId && /^[\w-]{1,40}$/.test(rawId) ? rawId : "";
+			while (!id || state.threads.some(entry => entry.id.toLowerCase() === id.toLowerCase())) id = `TH${state.nextThread++}`;
 			state.threads.push({
 				id,
 				title,
@@ -273,6 +281,7 @@ export class TeamBoard {
 		const title = clip(input.title ?? "", 200);
 		if (!title) throw badRequest("A task needs a title.");
 		return this.#change(sessionId, state => {
+			if (state.tasks.length >= MAX_TASKS) throw conflict(`The task board is full (${MAX_TASKS} tasks). Finish or drop some first.`);
 			const dependsOn = (input.dependsOn ?? []).map(dep => this.#task(state, dep).id);
 			const threadId = input.threadId?.trim() ? this.#thread(state, input.threadId).id : null;
 			const id = `T${state.nextTask++}`;
@@ -383,11 +392,13 @@ export class TeamBoard {
 		if (!text) throw badRequest("Write something to post.");
 		return this.#change(sessionId, state => {
 			const seq = (state.posts.at(-1)?.seq ?? 0) + 1;
-			const to = input.to?.length ? input.to : ["all"];
-			state.posts.push({ seq, at: this.#now(), author, to, kind: input.kind ?? "update", text: text.slice(0, 4000), re: input.re ?? null });
+			const to = input.to?.length ? input.to.slice(0, 20).map(party => String(party).slice(0, 80)) : ["all"];
+			const kind = input.kind && POST_KINDS.includes(input.kind) ? input.kind : "update";
+			state.posts.push({ seq, at: this.#now(), author, to, kind, text: text.slice(0, 4000), re: input.re ?? null });
+			if (state.posts.length > MAX_POSTS) state.posts.splice(0, state.posts.length - MAX_POSTS);
 			// Your own post counts as read, but only when nothing before it is still unread.
 			if ((state.readSeq[author] ?? 0) >= seq - 1) state.readSeq[author] = seq;
-			this.#log(state, { part: "board", action: "post", direction: "in", from: author, to, subject: `#${seq}`, text: `${input.kind ?? "update"}: ${clip(text, 140)}` });
+			this.#log(state, { part: "board", action: "post", direction: "in", from: author, to, subject: `#${seq}`, text: `${kind}: ${clip(text, 140)}` });
 			return `Posted #${seq}.`;
 		});
 	}

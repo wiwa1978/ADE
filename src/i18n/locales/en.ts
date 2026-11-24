@@ -1048,7 +1048,7 @@ export const en = {
   "tl.done": "Done",
   "tl.working": "Working",
   "tl.openBeside": "Open beside",
-  "tl.runningTool": "Running <code>{name}</code>…",
+  "tl.runningTool": "Running {name}…",
   "tl.hideReport": "Hide report",
   "tl.viewReport": "View report",
   "tl.viewFileTitle": "View {file} in right sidebar",

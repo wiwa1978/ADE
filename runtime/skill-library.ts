@@ -68,7 +68,9 @@ async function git(args: string[], cwd?: string): Promise<string> {
 		return stdout.trim();
 	} catch (error) {
 		const stderr = (error as { stderr?: string }).stderr?.trim();
-		throw badRequest(stderr ? `git ${args[0]} failed: ${stderr.split("\n").slice(-2).join(" ")}` : `git ${args[0]} failed.`);
+		// Keep git's reason, not its progress lines or our staging folder.
+		const reason = stderr?.split("\n").map(line => line.trim()).filter(line => line && !/^(Cloning into|Receiving|Resolving|remote: (Enumerating|Counting|Compressing|Total))/.test(line)).slice(-2).join(" ").replaceAll(/'[^']*[\\/]skill-sources[\\/][^']*'/g, "the repository");
+		throw badRequest(reason ? `git ${args[0]} failed: ${reason}` : `git ${args[0]} failed.`);
 	}
 }
 

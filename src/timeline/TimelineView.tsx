@@ -138,7 +138,7 @@ function ToolCallCard({
         {activeSubTool ? (
           <div className="ade-subagent-inline-live">
             <Loader2 className="size-3 animate-spin" />
-            <span dangerouslySetInnerHTML={{ __html: t("tl.runningTool", { name: activeSubTool.name.replace(/[<>&]/g, "") }) }} />
+            <span>{t("tl.runningTool", { name: "§N§" }).split("§N§").flatMap((part, index) => index === 0 ? [part] : [<code key={index}>{activeSubTool.name}</code>, part])}</span>
           </div>
         ) : null}
         {tool.output ? (

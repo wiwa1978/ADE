@@ -1050,7 +1050,7 @@ export const nl: Record<TranslationKey, string> = {
   "tl.done": "Klaar",
   "tl.working": "Bezig",
   "tl.openBeside": "Ernaast openen",
-  "tl.runningTool": "<code>{name}</code> wordt uitgevoerd…",
+  "tl.runningTool": "{name} wordt uitgevoerd…",
   "tl.hideReport": "Rapport verbergen",
   "tl.viewReport": "Rapport bekijken",
   "tl.viewFileTitle": "{file} bekijken in de rechterzijbalk",

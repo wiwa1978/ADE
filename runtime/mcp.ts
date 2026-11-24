@@ -485,6 +485,8 @@ export class McpManager {
 	async connect(id: string, scope: McpScope = {}): Promise<McpServerStatus> {
 		const server = this.#resolve(scope).find(s => s.id === id);
 		if (!server) throw notFound("MCP server not found.");
+		// A repository's .mcp.json starts programs from that repository: never before the person trusts it.
+		if (server.needsTrust) throw conflict("This repository's .mcp.json isn't trusted yet. Trust it for the project in Settings → Skills & tools first.");
 		const blocked = this.#guard?.(server);
 		if (blocked) throw conflict(blocked);
 		this.disconnect(id);

@@ -135,3 +135,24 @@ test("swarm overview: goal, threads, live focus, and automatic thread status syn
 		t.cleanup();
 	}
 });
+
+test("a runaway agent can't grow the board without limit, and a chosen thread id never collides with a made one", () => {
+	const board = new TeamBoard(mkdtempSync(join(tmpdir(), "ade-board-limits-")));
+	// A chosen id TH2 is taken before the generated ones reach it.
+	const first = board.upsertThread("s1", "lead", { title: "One", id: "TH2" });
+	assert.equal(first, "TH2");
+	const second = board.upsertThread("s1", "lead", { title: "Two" });
+	const third = board.upsertThread("s1", "lead", { title: "Three" });
+	assert.deepEqual([second, third], ["TH1", "TH3"], "TH2 is skipped, not reused");
+	assert.equal(new Set(board.state("s1").threads.map(thread => thread.id)).size, 3);
+	for (let i = 0; i < 47; i++) board.upsertThread("s1", "lead", { title: `T${i}` });
+	assert.throws(() => board.upsertThread("s1", "lead", { title: "one too many" }), /already 50 threads/);
+	for (let i = 0; i < 500; i++) board.addTask("s1", "lead", { title: `task ${i}` });
+	assert.throws(() => board.addTask("s1", "lead", { title: "one too many" }), /task board is full/);
+	for (let i = 0; i < 1005; i++) board.post("s1", "lead", { text: `post ${i}` });
+	const posts = board.state("s1").posts;
+	assert.equal(posts.length, 1000);
+	assert.equal(posts.at(-1)?.text, "post 1004", "the newest posts are kept");
+	board.post("s1", "lead", { text: "odd kind", kind: "<script>" as never });
+	assert.equal(board.state("s1").posts.at(-1)?.kind, "update", "an unknown kind becomes a plain update");
+});
