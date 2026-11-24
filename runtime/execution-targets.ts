@@ -170,7 +170,7 @@ function inside(child: string, parent: string) {
 
 function real(path: string) {
 	try {
-		return realpathSync(path);
+		return realpathSync.native(path);
 	} catch {
 		return resolve(path);
 	}
@@ -336,20 +336,20 @@ export class ExecutionTargets {
 			}
 		}
 		this.#update(sessionId, { state: "preparing", message: `Pulling ${record.image} if needed and starting the container…` });
-		const workspace = realpathSync(paths.workspace);
+		const workspace = realpathSync.native(paths.workspace);
 		const mounts = new Set<string>([workspace]);
 		// The worktree's Git metadata lives in the main repository; mount it so git works inside.
 		try {
 			const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: workspace, encoding: "utf8", timeout: 5000 }).trim();
-			if (common) mounts.add(realpathSync(common));
+			if (common) mounts.add(realpathSync.native(common));
 		} catch {
 			// Not a Git checkout.
 		}
 		// Subagents create their own worktrees next to the session's; mount that folder too.
-		if (this.#worktreesRoot && existsSync(this.#worktreesRoot)) mounts.add(realpathSync(this.#worktreesRoot));
+		if (this.#worktreesRoot && existsSync(this.#worktreesRoot)) mounts.add(realpathSync.native(this.#worktreesRoot));
 		// Claude Code and Codex keep their sign-in and conversations here; mount them so they work inside.
 		const home = homedir();
-		const agentHomes = [join(home, ".codex"), join(home, ".claude")].filter(path => existsSync(path)).map(path => realpathSync(path));
+		const agentHomes = [join(home, ".codex"), join(home, ".claude")].filter(path => existsSync(path)).map(path => realpathSync.native(path));
 		const agentFiles = [join(home, ".claude.json")].filter(path => existsSync(path));
 		const list = [...mounts].sort((a, b) => a.length - b.length).filter((path, index, all) => !all.slice(0, index).some(parent => inside(path, parent)));
 		const port = record.port ?? await freePort();
