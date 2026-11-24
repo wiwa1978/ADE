@@ -73,7 +73,8 @@ export class LocalAgentHost {
 		this.mcp = new McpManager(this.#db, this.events);
 
 		this.blueprints = new SessionBlueprints(this.#db, this.events);
-		this.approvals.setGate((sessionId, toolName) => this.blueprints.gateReason(sessionId, toolName));
+		this.approvals.setGate((sessionId, toolName, args, isLead) => this.blueprints.toolBlockReason(sessionId, toolName, args, isLead));
+		this.blueprints.setWorkspace(sessionId => this.#tasks.getWorkspacePath(sessionId));
 		this.team = new TeamBoard(stateDirectory, this.events);
 		this.#models = new ModelConfigService({ db: this.#db, stateDirectory, environment, modelConfigFactory });
 		this.eu = new EuPolicy(stateDirectory, () => this.#models.compatibleUrl());

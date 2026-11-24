@@ -3,6 +3,8 @@
 // stage engine from captain-core, tells the main agent which stage it's in, and records each stage
 // when the agent calls finish_stage. Gates wait for the user's Approve / Request changes.
 import { randomUUID } from "node:crypto";
+import { existsSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { arr, obj, opt, str } from "@earendil-works/pi-schema";
@@ -12,6 +14,7 @@ import type { BlueprintRunState, BlueprintStage, FactoryBlueprint, ModelRoutingC
 import { badRequest, conflict, notFound } from "./http-error.ts";
 import { checksLine, failureText, type StageChecks } from "./stage-checks.ts";
 import { dbGet } from "./db/schema.ts";
+import { allowedStageTools, stageToolBlock } from "./stage-tools.ts";
 import type { RuntimeEventBus } from "./events.ts";
 
 /** What's stored per session, next to the engine's own run state. */
@@ -89,6 +92,7 @@ export class SessionBlueprints {
 	/** Sessions whose agent just stopped at a gate: until the next turn begins, it may only read and talk. */
 	#gated = new Set<string>();
 	/** Runs a stage's checks in the session's workspace; null when there is nothing to run them in. */
+	#workspace: ((sessionId: string) => string | null) | null = null;
 	#checker: ((sessionId: string, stage: BlueprintStage) => Promise<StageChecks | null>) | null = null;
 
 	constructor(db: DatabaseSync, events?: RuntimeEventBus, now: () => number = Date.now) {
@@ -232,10 +236,33 @@ export class SessionBlueprints {
 	 * Why a tool may not run right now: the agent stopped at a gate and must wait for the user. Only
 	 * reading and talking to the team pass; anything that changes things is refused for the rest of that turn.
 	 */
-	gateReason(sessionId: string, toolName: string): string | null {
-		if (!this.#gated.has(sessionId) || GATE_ALLOWED.has(toolName)) return null;
-		const stage = this.summary(sessionId)?.stage;
-		return `Stopped: "${stage?.name ?? "this stage"}" is waiting for the user's approval. End your turn now (a short summary is enough); the user approves or asks for changes in ADE, and you continue after that.`;
+	/** The session's workspace folder (where a stage's artifacts live), or null when it has none. */
+	setWorkspace(resolver: (sessionId: string) => string | null) {
+		this.#workspace = resolver;
+	}
+
+	/**
+	 * Whether the Captain may call a tool right now. While the stage waits for the user (a gate, or
+	 * a decision it escalated) only looking around and talking to the team work: this follows the
+	 * stored state, so a new message from the user doesn't lift it, only their decision does. In a
+	 * running stage the Captain gets the tools the stage's groups allow (subagents are not limited).
+	 */
+	toolBlockReason(sessionId: string, toolName: string, args: Record<string, unknown> = {}, isLead = true): string | null {
+		const row = this.#row(sessionId);
+		const record = row ? this.#record(row) : null;
+		const blueprint = row?.blueprintId ? getBlueprint(row.blueprintId) : undefined;
+		if (!row || !record || !blueprint || record.run.status === "completed" || record.run.status === "cancelled") return null;
+		const stage = blueprint.stages[record.run.currentStageIndex];
+		const state = record.run.stages[record.run.currentStageIndex];
+		if (!stage || !state) return null;
+		const waiting = state.status === "awaiting_approval" || record.run.status === "awaiting_human" || this.#gated.has(sessionId);
+		if (waiting) {
+			if (GATE_ALLOWED.has(toolName)) return null;
+			return `Stopped: "${stage.name}" is waiting for the user's approval. End your turn now (a short summary is enough); the user approves or asks for changes in ADE, and you continue after that.`;
+		}
+		if (!isLead || state.status !== "running") return null;
+		const artifact = stage.artifactPathPattern ? this.#artifactPath(stage.artifactPathPattern, row) : null;
+		return stageToolBlock(stage, toolName, args, artifact, this.#workspace?.(sessionId) ?? null);
 	}
 
 	blueprintId(sessionId: string) {
@@ -306,6 +333,18 @@ export class SessionBlueprints {
 		};
 	}
 
+	/** The path of the stage's document when the workspace doesn't have it (or it is empty); null when it's there or can't be checked. */
+	#missingArtifact(sessionId: string, row: TaskRow, stage: BlueprintStage): string | null {
+		const workspace = this.#workspace?.(sessionId);
+		if (!workspace || !stage.artifactPathPattern) return null;
+		const path = this.#artifactPath(stage.artifactPathPattern, row);
+		try {
+			return statSync(join(workspace, path)).size > 0 ? null : path;
+		} catch {
+			return existsSync(workspace) ? path : null;
+		}
+	}
+
 	#artifactPath(pattern: string, row: TaskRow) {
 		const slug = row.issueNumber ? `issue-${row.issueNumber}` : (row.branch ?? row.id.slice(0, 8)).split("/").pop()!.replace(/[^\w.-]+/g, "-");
 		return pattern.replaceAll("{issue}", slug);
@@ -364,6 +403,9 @@ export class SessionBlueprints {
 		if (!stage || record.run.status === "completed") return { reply: "All stages are already done.", waiting: false };
 		if (input.stageId !== stage.id) return { reply: `The current stage is "${stage.id}" (${stage.name}), not "${input.stageId}". Finish the current stage first.`, waiting: false };
 		if (state.status !== "running" && state.status !== "awaiting_approval") return { reply: `Stage "${stage.id}" isn't running (it's ${state.status}).`, waiting: false };
+		// The stage's document has to exist on the branch: ADE looks, it doesn't take the agent's word.
+		const missing = state.status === "running" ? this.#missingArtifact(sessionId, row, stage) : null;
+		if (missing) return { reply: `"${stage.name}" is supposed to produce ${missing}, and it isn't on this branch yet (or it is empty). Write it, then call finish_stage again.`, waiting: false };
 		// A review stage can't be finished on the Captain's word: an independent reviewer has to have run.
 		const review = record.reviews?.[stage.id];
 		const needsReview = stage.contextIsolation === "goldfish" && state.status === "running";
@@ -520,6 +562,12 @@ export function stageInstructions(stage: BlueprintStage, artifactPath: string | 
 	if (stage.contextIsolation === "goldfish") {
 		lines.push("This is an independent review: give it to a fresh read-only subagent (spawn_subagent, readonly mode) that hasn't seen this conversation. Brief it only with where the spec or plan is and that it should review this branch's changes against them and the codebase. Don't share your reasoning. Use its findings for the verdict.");
 	}
+	const tools = allowedStageTools(stage);
+	const limits = [
+		!tools.has("write") ? (artifactPath ? `edit files only in ${dirname(artifactPath)}/` : "edit files") : "",
+		!tools.has("run_command") ? "run commands" : "",
+	].filter(Boolean);
+	if (limits.length) lines.push(`ADE limits this stage's tools: you can't ${limits.join(" or ")}${artifactPath && !tools.has("write") ? " outside that folder" : ""} here. Later stages get the tools they need.`);
 	if (stage.deterministicChecks?.length) lines.push(`Checks: ${stage.deterministicChecks.map(check => `\`${check}\``).join(", ")} (use the project's own commands when these don't exist).`);
 	if (artifactPath) lines.push(`Write the stage's result to \`${artifactPath}\` and commit it on this branch.`);
 	lines.push(`When the stage is done, call finish_stage with stageId "${stage.id}", a short summary${artifactPath ? " and the files you wrote" : ""}${stage.onChangesRequestedStageId ? ", and a verdict: pass, or changes_requested with the findings" : ""}.${stage.approvalGate === "after" ? " The user reviews the result before the next stage starts." : ""}`);

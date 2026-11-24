@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -18,9 +18,11 @@ test("at an approval gate ADE ends the agent's turn itself: it can't carry on ed
 	execFileSync("git", ["init", "-q"], { cwd: repoDir });
 	writeFileSync(join(repoDir, "app.ts"), "export const answer = 41;\n");
 	const faux = fauxProvider();
-	// The model finishes Constitution, then Specify (which has a gate), then ignores the gate and tries to write a file.
-	faux.setResponses([
+	// The model finishes Constitution, writes the spec and finishes Specify (which has a gate), then ignores the gate and tries to write a file.
+	const respond = (specPath: string) => faux.setResponses([
 		fauxAssistantMessage(fauxToolCall("finish_stage", { stageId: "constitution", summary: "Principles loaded." }), { stopReason: "toolUse" }),
+		fauxAssistantMessage(fauxToolCall("write", { path: "app.ts", content: "export const answer = 42;\n" }), { stopReason: "toolUse" }),
+		fauxAssistantMessage(fauxToolCall("write", { path: specPath, content: "# Spec\nThe answer is 42.\n" }), { stopReason: "toolUse" }),
 		fauxAssistantMessage(fauxToolCall("finish_stage", { stageId: "specify", summary: "Spec written." }), { stopReason: "toolUse" }),
 		fauxAssistantMessage(fauxToolCall("write", { path: "after-the-gate.txt", content: "should never exist" }), { stopReason: "toolUse" }),
 		fauxAssistantMessage("Done, carrying on."),
@@ -34,15 +36,23 @@ test("at an approval gate ADE ends the agent's turn itself: it can't carry on ed
 	try {
 		const taskId = randomUUID();
 		await host.createCodingTask({ id: taskId, title: "Gate", repository: repoDir, kind: "checkout", blueprintId: "speckit" }, manager);
+		// The repository already has its principles.
+		for (const path of host.blueprints.view(taskId).stages.find(item => item.id === "constitution")!.artifactPaths) {
+			mkdirSync(join(repoDir, path, ".."), { recursive: true });
+			writeFileSync(join(repoDir, path), "# Principles\n");
+		}
+		respond(host.blueprints.view(taskId).stages.find(item => item.id === "specify")!.artifactPaths[0]);
 		await host.send("coding", { content: "Build it with the spec", model: faux.getModel().id, reasoning: "none" }, taskId);
 
 		const stage = host.blueprints.summary(taskId)?.stage;
 		assert.deepEqual([stage?.id, stage?.status], ["specify", "awaiting_approval"], "the gate was reached");
 		assert.equal(existsSync(join(repoDir, "after-the-gate.txt")), false, "nothing was written after the gate");
-		assert.equal(faux.state.callCount, 2, "the model was not asked again after the gate: the turn ended");
+		assert.equal(faux.state.callCount, 4, "the model was not asked again after the gate: the turn ended");
 		const timeline = await host.getTimeline(taskId);
 		const calls = timeline.items.flatMap(item => (item.kind === "assistant" ? item.toolCalls : []));
-		assert.deepEqual(calls.map(call => call.name), ["finish_stage", "finish_stage"]);
+		assert.deepEqual(calls.map(call => call.name), ["finish_stage", "write", "write", "finish_stage"]);
+		assert.equal(readFileSync(join(repoDir, "app.ts"), "utf8"), "export const answer = 41;\n", "Specify could not edit the app");
+		assert.match(readFileSync(join(repoDir, host.blueprints.view(taskId).stages.find(item => item.id === "specify")!.artifactPaths[0]), "utf8"), /answer is 42/, "but it wrote its own spec");
 	} finally {
 		await host.close();
 		manager.close();
@@ -68,7 +78,14 @@ test("ADE runs the project's tests itself before a verify stage can finish: a fa
 	try {
 		const taskId = randomUUID();
 		await host.createCodingTask({ id: taskId, title: "Checks", repository: repoDir, kind: "checkout", blueprintId: "automated-factory" }, manager);
-		for (const stageId of ["triage", "plan", "implement"]) host.blueprints.finish(taskId, { stageId, summary: `${stageId} done` });
+		for (const stageId of ["triage", "plan", "implement"]) {
+			// ADE looks for each stage's document before it lets the stage finish.
+			for (const path of host.blueprints.view(taskId).stages.find(item => item.id === stageId)!.artifactPaths) {
+				mkdirSync(join(repoDir, path, ".."), { recursive: true });
+				writeFileSync(join(repoDir, path), `# ${stageId}\n`);
+			}
+			host.blueprints.finish(taskId, { stageId, summary: `${stageId} done` });
+		}
 
 		const refused = await host.blueprints.finishChecked(taskId, { stageId: "verify", summary: "Everything passes" });
 		assert.match(refused.reply, /one failed, so "Deterministic Hooks" is not finished[\s\S]*✕ test \(`npm test`, exit 1\)/);

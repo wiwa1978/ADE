@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
-import { defineExtension, defineSignal, hook, ToolTask, type Harness } from "@earendil-works/pi-durable";
+import { defineExtension, defineSignal, hook, ROOT_CONVERSATION_ID, ToolTask, type Harness } from "@earendil-works/pi-durable";
 import { bool, obj, opt, str } from "@earendil-works/pi-schema";
 import type { ApprovalPolicy, PendingApproval } from "../packages/protocol/index.ts";
 import type { RuntimeEventBus } from "./events.ts";
@@ -121,9 +121,9 @@ export class ApprovalManager {
 
 	/** Why a call is refused outright: a hard guardrail (every mode, including Autopilot) or a block rule. */
 	/** Set by the host: why a tool must not run in a session right now (an agent stopped at a gate). */
-	#gate: ((sessionId: string, toolName: string) => string | null) | null = null;
+	#gate: ((sessionId: string, toolName: string, args: Record<string, unknown>, isLead: boolean) => string | null) | null = null;
 
-	setGate(gate: (sessionId: string, toolName: string) => string | null) {
+	setGate(gate: (sessionId: string, toolName: string, args: Record<string, unknown>, isLead: boolean) => string | null) {
 		this.#gate = gate;
 	}
 
@@ -189,7 +189,7 @@ export class ApprovalManager {
 				hook(ToolTask, {
 					beforeTool: async (call, api, ctx) => {
 						const args = (call.arguments && typeof call.arguments === "object" ? call.arguments : {}) as Record<string, unknown>;
-						const block = this.blockReason(call.name, args) ?? this.#gate?.(sessionId, call.name) ?? null;
+						const block = this.blockReason(call.name, args) ?? this.#gate?.(sessionId, call.name, args, api.conversationId === ROOT_CONVERSATION_ID) ?? null;
 						if (block) return { block };
 						if (!this.shouldRequireApproval(sessionId, call.name, args)) {
 							return undefined;

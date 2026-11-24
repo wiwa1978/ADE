@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { runHostMigrations } from "./db/migrations.ts";
@@ -164,21 +167,24 @@ test("after a gate the agent may only read and talk until the next turn; the too
 	// A stage without a gate doesn't end the turn, and nothing is locked.
 	const first = await call({ stageId: "constitution", summary: "ok" });
 	assert.equal(first.control, undefined);
-	assert.equal(blueprints.gateReason("s1", "write"), null);
+	assert.equal(blueprints.toolBlockReason("s1", "read"), null);
 
 	// Specify has a gate: the result ends the turn, and changing things is refused for the rest of it.
 	const gate = await call({ stageId: "specify", summary: "Spec written." });
 	assert.equal(gate.control?.terminate, true);
 	assert.match(gate.output[0].text, /Stop here/);
-	assert.match(blueprints.gateReason("s1", "write") ?? "", /"Specify" is waiting for the user's approval[\s\S]*End your turn/);
-	for (const tool of ["edit", "run_command", "spawn_subagent", "team_tasks", "browser_click"]) assert.ok(blueprints.gateReason("s1", tool), `${tool} is refused`);
-	for (const tool of ["read", "grep_search", "list_files", "team_read", "team_post", "finish_stage"]) assert.equal(blueprints.gateReason("s1", tool), null, `${tool} still works`);
+	assert.match(blueprints.toolBlockReason("s1", "write") ?? "", /"Specify" is waiting for the user's approval[\s\S]*End your turn/);
+	for (const tool of ["edit", "run_command", "spawn_subagent", "team_tasks", "browser_click"]) assert.ok(blueprints.toolBlockReason("s1", tool), `${tool} is refused`);
+	for (const tool of ["read", "grep_search", "list_files", "team_read", "team_post", "finish_stage"]) assert.equal(blueprints.toolBlockReason("s1", tool), null, `${tool} still works`);
 	assert.match(blueprints.gateNote("s1") ?? "", /Waiting for your approval: Specify/);
 
-	// The next turn lifts it.
+	// A new message from the user doesn't lift it: the stage still waits. Only their decision does.
 	blueprints.unlock("s1");
-	assert.equal(blueprints.gateReason("s1", "write"), null);
 	assert.equal(blueprints.gateNote("s1"), null);
+	assert.match(blueprints.toolBlockReason("s1", "write") ?? "", /waiting for the user's approval/, "chatting doesn't talk past the gate");
+	assert.equal(blueprints.toolBlockReason("s1", "read"), null, "but the agent can still read and answer");
+	blueprints.decide("s1", "approve");
+	assert.doesNotMatch(blueprints.toolBlockReason("s1", "run_command") ?? "", /waiting for the user's approval/, "approving lifts the gate");
 });
 
 test("a stage with checks can't finish while ADE's own run of them fails; passing runs are recorded", async () => {
@@ -272,4 +278,41 @@ test("after the review asks for changes, the next attempt needs a new review", (
 	withReview(blueprints).finish("s1", { stageId: "review", summary: "Needs work", verdict: { outcome: "changes_requested", summary: "Tests missing" } });
 	for (const stageId of ["implement", "verify"]) blueprints.finish("s1", { stageId, summary: `${stageId} again` });
 	assert.match(blueprints.finish("s1", { stageId: "review", summary: "Fine now", verdict: { outcome: "pass", summary: "ok" } }).reply, /hasn't seen one yet/);
+});
+
+test("a stage only gets the tools its groups allow: Specify can write its spec but not the app, and subagents are not limited", () => {
+	const { blueprints } = setup("speckit");
+	blueprints.finish("s1", { stageId: "constitution", summary: "ok" });
+	assert.equal(blueprints.summary("s1")!.stage?.id, "specify");
+	assert.equal(blueprints.toolBlockReason("s1", "write", { path: "specs/login-page/spec.md" }), null, "its own document folder is writable");
+	assert.match(blueprints.toolBlockReason("s1", "write", { path: "src/app.ts" }) ?? "", /Not allowed in the stage "Specify"[\s\S]*specs\/login-page/);
+	assert.match(blueprints.toolBlockReason("s1", "write", { path: "specs/login-page/../../src/app.ts" }) ?? "", /Not allowed/, "no walking out of the folder");
+	assert.match(blueprints.toolBlockReason("s1", "run_command", { command: "rm -rf ." }) ?? "", /can't use run_command/);
+	for (const tool of ["read", "grep_search", "spawn_subagent", "team_post", "write_artifact", "mcp_github_search"]) assert.equal(blueprints.toolBlockReason("s1", tool, {}), null, `${tool} is allowed`);
+	assert.equal(blueprints.toolBlockReason("s1", "run_command", {}, false), null, "subagents have their own tools");
+});
+
+test("Vibe sessions and finished blueprints have no tool limits", () => {
+	assert.equal(setup("vibe").blueprints.toolBlockReason("s1", "run_command"), null);
+});
+
+test("a stage that should produce a document can't finish until that file is on the branch and not empty", () => {
+	const { blueprints } = setup("speckit");
+	const folder = mkdtempSync(join(tmpdir(), "ade-artifact-"));
+	try {
+		blueprints.setWorkspace(() => folder);
+		const constitution = blueprints.view("s1").stages[0].artifactPaths;
+		const path = constitution[0];
+		assert.ok(path, "the first stage names its document");
+		const refused = blueprints.finish("s1", { stageId: "constitution", summary: "Done" });
+		assert.match(refused.reply, new RegExp(`supposed to produce ${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+		assert.equal(blueprints.summary("s1")!.stage?.id, "constitution");
+		mkdirSync(join(folder, path, ".."), { recursive: true });
+		writeFileSync(join(folder, path), "");
+		assert.match(blueprints.finish("s1", { stageId: "constitution", summary: "Done" }).reply, /isn't on this branch yet \(or it is empty\)/, "an empty file doesn't count");
+		writeFileSync(join(folder, path), "# Principles\n");
+		assert.match(blueprints.finish("s1", { stageId: "constitution", summary: "Done" }).reply, /Recorded "Constitution Check"/);
+	} finally {
+		rmSync(folder, { recursive: true, force: true });
+	}
 });
