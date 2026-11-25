@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { MessageSquare, RefreshCw, Send } from "lucide-react"
 import { Banner, Button, IconButton, Spinner } from "../../../components/ui/index.ts"
+import { useI18n } from "../../i18n/I18nContext"
 import type { FeedbackItem } from "./usePullRequestState"
 
 interface PrFeedbackSectionProps {
@@ -26,28 +27,29 @@ export function PrFeedbackSection({
   onToggleSelect,
   onAskToAddress,
 }: PrFeedbackSectionProps) {
+  const { t } = useI18n()
   const [showResolved, setShowResolved] = useState(false)
   const items = feedback?.items ?? []
   const resolvedCount = items.filter(item => item.resolved).length
   const visibleFeedback = items.filter(item => showResolved || !item.resolved)
   const askDisabled = Boolean(busy) || agentBusy
-  const askTitle = agentBusy ? "The agent is working. Try again when it is done." : undefined
+  const askTitle = agentBusy ? t("pnlx.pr.agentWorkingTryAgain") : undefined
 
   return (
-    <section className="ade-review-section" aria-label="Review comments">
+    <section className="ade-review-section" aria-label={t("pnlx.pr.reviewCommentsAria")}>
       <header>
         <MessageSquare className="size-3.5" />
-        <span>Review comments{feedback ? ` · ${items.length - resolvedCount} open` : ""}</span>
-        <IconButton aria-label="Reload review comments" title="Reload comments" onClick={onReload}>
+        <span>{feedback ? t("pnlx.pr.reviewCommentsOpen", { count: items.length - resolvedCount }) : t("pnlx.pr.reviewComments")}</span>
+        <IconButton aria-label={t("pnlx.pr.reloadCommentsAria")} title={t("pnlx.pr.reloadCommentsTitle")} onClick={onReload}>
           <RefreshCw className="size-3" />
         </IconButton>
       </header>
       {feedbackError ? (
         <Banner tone="error">{feedbackError}</Banner>
       ) : !feedback ? (
-        <div className="py-2"><Spinner size="xs" label="Loading comments…" /></div>
+        <div className="py-2"><Spinner size="xs" label={t("pnlx.pr.loadingComments")} /></div>
       ) : !items.length ? (
-        <p>No review comments yet.</p>
+        <p>{t("pnlx.pr.noReviewComments")}</p>
       ) : (
         <>
           <ul className="ade-feedback-list">
@@ -55,7 +57,7 @@ export function PrFeedbackSection({
               <li key={item.id} className={`ade-feedback-item ${item.resolved ? "is-resolved" : ""}`}>
                 <input
                   type="checkbox"
-                  aria-label={`Include comment from ${item.author}`}
+                  aria-label={t("pnlx.pr.includeCommentAria", { author: item.author })}
                   checked={selected.has(item.id)}
                   onChange={event => onToggleSelect(item.id, event.target.checked)}
                 />
@@ -65,9 +67,9 @@ export function PrFeedbackSection({
                     {item.path ? (
                       <code>{item.path}{item.line ? `:${item.line}` : ""}</code>
                     ) : (
-                      <span>{item.kind === "review" ? (item.state === "CHANGES_REQUESTED" ? "requested changes" : "reviewed") : "commented"}</span>
+                      <span>{item.kind === "review" ? (item.state === "CHANGES_REQUESTED" ? t("pnlx.pr.requestedChanges") : t("pnlx.pr.reviewed")) : t("pnlx.pr.commented")}</span>
                     )}
-                    {item.resolved ? <span>resolved</span> : item.outdated ? <span>outdated</span> : null}
+                    {item.resolved ? <span>{t("pnlx.pr.resolved")}</span> : item.outdated ? <span>{t("pnlx.pr.outdated")}</span> : null}
                   </div>
                   <div className="ade-feedback-body">{item.body}</div>
                   {item.replies?.map((reply, index) => (
@@ -87,12 +89,12 @@ export function PrFeedbackSection({
                 title={askTitle}
                 onClick={onAskToAddress}
               >
-                <Send className="size-3.5" /> {busy === "address" ? "Sending…" : `Ask the agent to address ${selected.size}`}
+                <Send className="size-3.5" /> {busy === "address" ? t("pnlx.pr.sending") : t("pnlx.pr.askAddress", { count: selected.size })}
               </Button>
             ) : null}
             {resolvedCount ? (
               <button type="button" className="ade-link-btn" onClick={() => setShowResolved(value => !value)}>
-                {showResolved ? "Hide resolved" : `Show ${resolvedCount} resolved`}
+                {showResolved ? t("pnlx.pr.hideResolved") : t("pnlx.pr.showResolved", { count: resolvedCount })}
               </button>
             ) : null}
           </div>

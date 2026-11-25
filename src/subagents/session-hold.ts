@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { request } from "../../api"
+import { formatTime } from "../i18n"
 
 export type UsageWait = { until: number; reason: string; tries: number; fallback?: string }
 export type SessionHold = {
@@ -15,7 +16,7 @@ export type SessionHold = {
 const EMPTY: SessionHold = { stop: null, usageWait: null, usageWaits: [], queued: [] }
 
 export function clock(at: number) {
-  return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  return formatTime(at)
 }
 
 /** Why a session's agents aren't running by themselves right now; refreshed while the session is open. */

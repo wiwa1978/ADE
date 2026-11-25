@@ -65,7 +65,7 @@ export function AmbientTracksBar({
   /** Open the Progress panel (from the tasks pill). */
   onOpenProgress?: () => void
 }) {
-  const { t } = useI18n()
+  const { t, formatNumber } = useI18n()
   const [expandedTrack, setExpandedTrack] = useState<"subagents" | "tasks" | null>(null)
 
   const runningSubagents = subagents.filter(s => s.status === "running" || s.status === "waiting")
@@ -253,7 +253,7 @@ export function AmbientTracksBar({
         {usage && (usage.inputTokens || usage.outputTokens) ? (
           <span
             className="ade-usage-chip ade-track-pill-right"
-            title={t("wsx.comp.usageTooltip", { input: usage.inputTokens.toLocaleString(), output: usage.outputTokens.toLocaleString() })}
+            title={t("wsx.comp.usageTooltip", { input: formatNumber(usage.inputTokens), output: formatNumber(usage.outputTokens) })}
           >
             {formatUsage({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cost: usage.totalCost ?? 0 })}
           </span>

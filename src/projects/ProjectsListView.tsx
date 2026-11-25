@@ -2,6 +2,7 @@ import { ArrowLeft, ArrowUpRight, FolderGit2, GitBranch } from "lucide-react"
 import { Banner, Button, EmptyState } from "@/components/ui"
 import type { FeatureAgent } from "../../FeatureAgents"
 import type { Project } from "../../packages/protocol/index.ts"
+import { useI18n } from "../i18n/I18nContext"
 
 export type ProjectFeatureSummary = {
   id: string
@@ -41,19 +42,21 @@ export function ProjectsListView({
   onOpenFeature,
   onOpenAgent,
 }: ProjectsListViewProps) {
+  const { t, formatTime } = useI18n()
+
   return (
     <main className="projects-scroll">
       <div className="projects-page">
         {project ? (
           <Button variant="ghost" size="sm" className="project-back w-fit" onClick={onBack}>
-            <ArrowLeft size={14} /> All projects
+            <ArrowLeft size={14} /> {t("prjx.list.allProjects")}
           </Button>
         ) : null}
 
         <header className="project-heading">
           <div>
-            <h1>{project?.name ?? "Projects"}</h1>
-            <p>{project ? "Sessions and their delegated work." : "Keep related sessions and their agents together. GitHub is optional."}</p>
+            <h1>{project?.name ?? t("prjx.list.projects")}</h1>
+            <p>{project ? t("prjx.list.projectSubtitle") : t("prjx.list.overviewSubtitle")}</p>
           </div>
         </header>
 
@@ -62,7 +65,7 @@ export function ProjectsListView({
         {project ? (
           <section className="project-features">
             <div className="list-heading">
-              <h2>Sessions</h2>
+              <h2>{t("prjx.list.sessions")}</h2>
               <span>{features.length}</span>
             </div>
             {features.length ? (
@@ -72,11 +75,11 @@ export function ProjectsListView({
                     <GitBranch size={18} />
                     <span className="project-row-copy">
                       <strong>{feature.label}</strong>
-                      <small>{feature.workspace?.branch ?? (feature.workspace?.kind === "none" ? "No workspace" : "Existing checkout")}</small>
+                      <small>{feature.workspace?.branch ?? (feature.workspace?.kind === "none" ? t("prjx.list.noWorkspace") : t("prjx.list.existingCheckout"))}</small>
                     </span>
                     <span className={`activity-label ${feature.workspace?.status === "attention" ? "blocked" : feature.status}`}>
                       <i />
-                      {feature.workspace?.status === "attention" ? "Needs attention" : feature.status === "working" ? "Working" : "Idle"}
+                      {feature.workspace?.status === "attention" ? t("prjx.list.needsAttention") : feature.status === "working" ? t("prjx.list.working") : t("prjx.list.idle")}
                     </span>
                     <ArrowUpRight size={16} />
                   </button>
@@ -85,19 +88,19 @@ export function ProjectsListView({
             ) : (
               <EmptyState
                 icon={<GitBranch size={22} />}
-                title="No sessions yet"
-                description="Use the plus beside this project in the left pane to start a session."
+                title={t("prjx.list.noSessionsTitle")}
+                description={t("prjx.list.noSessionsDesc")}
               />
             )}
 
             <div className="list-heading">
-              <h2>Subagent activity</h2>
+              <h2>{t("prjx.list.subagentActivity")}</h2>
             </div>
-            {activityError ? <Banner tone="error">Activity unavailable: {activityError}</Banner> : null}
-            {!activity && !activityError ? <p className="hint" role="status">Loading subagent activity...</p> : null}
+            {activityError ? <Banner tone="error">{t("prjx.list.activityUnavailable", { error: activityError })}</Banner> : null}
+            {!activity && !activityError ? <p className="hint" role="status">{t("prjx.list.loadingActivity")}</p> : null}
             {activity ? (
               <>
-                <p className="hint">Last checked {new Date(activity.observedAt).toLocaleTimeString()}{activityError ? " · stale" : ""}</p>
+                <p className="hint">{t("prjx.list.lastChecked", { time: formatTime(activity.observedAt, { seconds: true }) })}{activityError ? t("prjx.list.staleSuffix") : ""}</p>
                 {activity.errors.map(item => (
                   <Banner tone="error" key={item.sessionId}>{item.sessionName}: {item.message}</Banner>
                 ))}
@@ -108,15 +111,15 @@ export function ProjectsListView({
                         <span>
                           <strong>{agent.name} · {agent.sessionName}</strong>
                           <small>{agent.assignment}</small>
-                          <small>{agent.messages.filter(message => message.role === "assistant").at(-1)?.content ?? "No report yet"}</small>
-                          <small>Session ID: {agent.sessionId} · Subagent ID: {agent.id} · Assignment ID: {agent.assignmentId}</small>
+                          <small>{agent.messages.filter(message => message.role === "assistant").at(-1)?.content ?? t("prjx.list.noReportYet")}</small>
+                          <small>{t("prjx.list.agentIds", { sessionId: agent.sessionId, agentId: agent.id, assignmentId: agent.assignmentId })}</small>
                         </span>
                         <span className={`activity-label ${agent.status}`}>{agent.status}</span>
                       </button>
                     ))}
                   </div>
                 ) : !activity.errors.length ? (
-                  <p className="hint">No delegated work yet.</p>
+                  <p className="hint">{t("prjx.list.noDelegatedWork")}</p>
                 ) : null}
               </>
             ) : null}
@@ -128,7 +131,7 @@ export function ProjectsListView({
                 <FolderGit2 size={20} />
                 <span className="project-row-copy">
                   <strong>{item.name}</strong>
-                  <small>{item.githubUrl?.replace("https://github.com/", "") ?? "Local project - no GitHub link"}</small>
+                  <small>{item.githubUrl?.replace("https://github.com/", "") ?? t("prjx.list.localProjectNoGithub")}</small>
                 </span>
                 <ArrowUpRight size={17} />
               </button>
@@ -137,8 +140,8 @@ export function ProjectsListView({
         ) : (
           <EmptyState
             icon={<FolderGit2 size={24} />}
-            title="A home for your sessions"
-            description="Use the plus beside Projects in the left pane to create a project."
+            title={t("prjx.list.emptyTitle")}
+            description={t("prjx.list.emptyDesc")}
           />
         )}
       </div>

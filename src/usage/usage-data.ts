@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { request } from "../../api"
+import { formatNumber } from "../i18n"
 
 export type UsageTotals = { inputTokens: number; outputTokens: number; cost: number }
 export type UsageReport = {
@@ -13,7 +14,7 @@ export type UsageReport = {
 export function formatCost(cost: number) {
   if (!cost) return "$0"
   if (cost < 0.01) return "<$0.01"
-  return cost < 100 ? `$${cost.toFixed(2)}` : `$${Math.round(cost).toLocaleString()}`
+  return cost < 100 ? `$${cost.toFixed(2)}` : `$${formatNumber(Math.round(cost))}`
 }
 
 export function formatTokens(tokens: number) {

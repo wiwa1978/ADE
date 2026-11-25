@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Check, ChevronDown, Search, SlidersHorizontal } from "lucide-react"
+import { useI18n } from "../i18n/I18nContext"
 import {
   ensureGoogleFontLoaded,
   matchFontOption,
@@ -26,6 +27,7 @@ export function FontPicker({
   onChange: (nextValue: string) => void
   onCommit?: () => void
 }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [customMode, setCustomMode] = useState(false)
@@ -86,8 +88,8 @@ export function FontPicker({
   }
 
   const triggerLabel = isCustom
-    ? (value.trim() ? `Custom: ${value.split(",")[0].replace(/["']/g, "").trim()}` : "Custom…")
-    : (matched?.label ?? "System default")
+    ? (value.trim() ? t("stx.font.customValue", { name: value.split(",")[0].replace(/["']/g, "").trim() }) : t("stx.font.customEllipsis"))
+    : (matched?.label ?? t("stx.font.systemDefault"))
 
   const flatFiltered = filtered
 
@@ -113,14 +115,14 @@ export function FontPicker({
         </button>
 
         {open ? (
-          <div className="st-fp-popover" role="dialog" aria-label={`Choose ${label}`}>
+          <div className="st-fp-popover" role="dialog" aria-label={t("stx.font.chooseLabel", { label })}>
             <div className="st-fp-search">
               <Search className="size-3.5 opacity-55 shrink-0" />
               <input
                 ref={searchRef}
                 type="text"
                 className="st-fp-search-input"
-                placeholder={`Search ${options.length} fonts…`}
+                placeholder={t("stx.font.searchPlaceholder", { count: options.length })}
                 value={query}
                 onChange={e => {
                   setQuery(e.target.value)
@@ -149,7 +151,7 @@ export function FontPicker({
 
             <div className="st-fp-list" role="listbox" aria-label={label}>
               {grouped.length === 0 ? (
-                <div className="st-fp-empty">No fonts match “{query}”.</div>
+                <div className="st-fp-empty">{t("stx.font.noMatch", { query })}</div>
               ) : (
                 grouped.map(([category, items]) => (
                   <div key={category} className="st-fp-group">
@@ -196,7 +198,7 @@ export function FontPicker({
                 }}
               >
                 <SlidersHorizontal className="size-3.5" />
-                <span>Custom local font…</span>
+                <span>{t("stx.font.customLocal")}</span>
               </button>
             </div>
           </div>
@@ -206,7 +208,7 @@ export function FontPicker({
       {isCustom ? (
         <input
           className="st-input"
-          aria-label={`${label} (custom)`}
+          aria-label={t("stx.font.customAria", { label })}
           value={value}
           placeholder={customPlaceholder}
           spellCheck={false}

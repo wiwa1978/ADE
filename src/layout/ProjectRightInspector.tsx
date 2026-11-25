@@ -6,6 +6,7 @@ import { searchGitHubRepositories } from "../hooks/useProjects"
 import { ArtefactsBrowserPanel } from "../panels/ArtefactsBrowserPanel"
 import { FilesPanel } from "../panels/FilesPanel"
 import { PaneResizer } from "./PaneResizer"
+import { useI18n } from "../i18n/I18nContext"
 
 const PROJECT_PANE_STANDARD = 320
 
@@ -38,6 +39,7 @@ export function ProjectRightInspector({
   onOpenGitHubSettings: (draftInput: ProjectInput) => void
   onSaveProject: (input: ProjectInput) => Promise<Project>
 }) {
+  const { t } = useI18n()
   const [projectPaneWidth, setProjectPaneWidth] = useState(() => {
     try {
       const saved = Number(localStorage.getItem("ade.project-pane-width"))
@@ -57,7 +59,7 @@ export function ProjectRightInspector({
           max={760}
           standard={PROJECT_PANE_STANDARD}
           paneRef={projectPaneRef}
-          label="Resize the project panel"
+          label={t("wsx.layout.resizeProjectPanel")}
           onChange={width => {
             setProjectPaneWidth(width)
             try { localStorage.setItem("ade.project-pane-width", String(width)) } catch { /* private mode */ }
@@ -69,11 +71,11 @@ export function ProjectRightInspector({
         style={{ width: projectPaneWidth }}
         id="project-files-panel"
         className="inspector ade-project-files-inspector"
-        aria-label={pane === "artifacts" ? "Project artefacts" : "Project files"}
+        aria-label={pane === "artifacts" ? t("wsx.layout.projectArtefacts") : t("wsx.layout.projectFiles")}
         hidden={pane !== "files" && pane !== "artifacts"}
       >
         <div className="ade-project-right-head">
-          <div className="ade-project-right-tabs" role="tablist" aria-label="Right panel view">
+          <div className="ade-project-right-tabs" role="tablist" aria-label={t("wsx.layout.rightPanelView")}>
             <button
               type="button"
               role="tab"
@@ -81,7 +83,7 @@ export function ProjectRightInspector({
               className={`ade-project-right-tab ${pane === "files" ? "is-active" : ""}`}
               onClick={() => onSetPane("files")}
             >
-              <FolderTree className="size-3.5" /> Files
+              <FolderTree className="size-3.5" /> {t("wsx.layout.files")}
             </button>
             <button
               type="button"
@@ -90,7 +92,7 @@ export function ProjectRightInspector({
               className={`ade-project-right-tab ${pane === "artifacts" ? "is-active" : ""}`}
               onClick={() => onSetPane("artifacts")}
             >
-              <Layers className="size-3.5" /> Artefacts
+              <Layers className="size-3.5" /> {t("wsx.layout.artefacts")}
             </button>
             <button
               type="button"
@@ -99,14 +101,14 @@ export function ProjectRightInspector({
               className="ade-project-right-tab"
               onClick={() => onSetPane("settings")}
             >
-              <Settings2 className="size-3.5" /> Settings
+              <Settings2 className="size-3.5" /> {t("wsx.layout.settings")}
             </button>
           </div>
           <button
             type="button"
             className="ade-icon-btn"
-            aria-label="Close right panel"
-            title="Close panel"
+            aria-label={t("wsx.layout.closeRightPanel")}
+            title={t("wsx.layout.closePanel")}
             onClick={onClose}
           >
             <PanelRight className="size-4" />

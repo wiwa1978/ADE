@@ -92,7 +92,7 @@ function useWidth(ref: React.RefObject<HTMLElement | null>) {
 }
 
 export function FlowView(props: FlowViewProps) {
-  const { t } = useI18n()
+  const { t, formatDateTime } = useI18n()
   const { session, leadBusy, leadItems, subagents, subagentTimelines, tasks, stageHistory, blueprintName } = props
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
@@ -139,7 +139,7 @@ export function FlowView(props: FlowViewProps) {
       <dl className="ade-flow-stats">
         <div><dt>{t("swx.flow.statLead")}</dt><dd><span className="ade-flow-dot" style={{ background: "#8b5cf6" }} />{t("swx.flow.mainAgent")}</dd></div>
         <div><dt>{t("swx.flow.statWayOfWorking")}</dt><dd>{blueprintName ?? t("swx.flow.vibeCoding")}</dd></div>
-        <div><dt>{t("swx.flow.statStarted")}</dt><dd>{first ? new Date(first).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}</dd></div>
+        <div><dt>{t("swx.flow.statStarted")}</dt><dd>{first ? formatDateTime(first) : "—"}</dd></div>
         <div><dt>{t("swx.flow.statLastChange")}</dt><dd>{last ? ago(last, now) : "—"}</dd></div>
         <div><dt>{t("swx.flow.statRunningFor")}</dt><dd>{first && last ? duration((working ? now : last) - first, t) : "—"}</dd></div>
         {props.cost ? <div><dt>{t("swx.flow.statCost")}</dt><dd>${props.cost.toFixed(2)}</dd></div> : null}

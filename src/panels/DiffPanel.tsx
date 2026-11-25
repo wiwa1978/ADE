@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { Check, FileCode2, GitCommit, Minus, Plus, RefreshCw, RotateCcw, Send } from "lucide-react"
 import { request, requestJson } from "../../api"
 import { useConfirm } from "../../components/ui/index.ts"
+import { useI18n } from "../i18n/I18nContext"
 import { reviewFeedbackPrompt } from "../../packages/protocol/agent-prompts.ts"
 import { DiffLines } from "./DiffLines"
 import { useDiffNotes } from "./diff-notes"
@@ -29,6 +30,7 @@ export function DiffPanel({
   /** Send the line notes to the session's agent. */
   onAskAgent?: (text: string) => Promise<void>
 }) {
+  const { t } = useI18n()
   const { confirm } = useConfirm()
   const diffNotes = useDiffNotes(sessionId)
   const [sendingNotes, setSendingNotes] = useState(false)
@@ -39,9 +41,9 @@ export function DiffPanel({
     try {
       await onAskAgent(reviewFeedbackPrompt(diffNotes.notes.map(note => ({ kind: "note", body: note.code ? `${note.text}\n(at: ${note.code})` : note.text, path: note.path, line: note.line }))))
       diffNotes.clear()
-      setNotice("Notes sent to the agent.")
+      setNotice(t("pnlx.diff.notesSent"))
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send the notes.")
+      setError(err instanceof Error ? err.message : t("pnlx.diff.errSendNotes"))
     } finally {
       setSendingNotes(false)
     }
@@ -68,9 +70,9 @@ export function DiffPanel({
       setBranchFiles(res.files)
     } catch (err) {
       setBranchFiles([])
-      setError(err instanceof Error ? err.message : "Could not load the branch diff.")
+      setError(err instanceof Error ? err.message : t("pnlx.diff.errLoadBranch"))
     }
-  }, [sessionId])
+  }, [sessionId, t])
 
   useEffect(() => {
     if (mode !== "branch") return
@@ -80,11 +82,11 @@ export function DiffPanel({
       .catch(err => {
         if (!cancelled) {
           setBranchFiles([])
-          setError(err instanceof Error ? err.message : "Could not load the branch diff.")
+          setError(err instanceof Error ? err.message : t("pnlx.diff.errLoadBranch"))
         }
       })
     return () => { cancelled = true }
-  }, [mode, sessionId, summary])
+  }, [mode, sessionId, summary, t])
 
   const activeFile = summary.files.find(f => f.path === selectedPath) ?? summary.files[0] ?? null
   const activeBranchFile = branchFiles?.find(f => f.path === selectedPath) ?? branchFiles?.[0] ?? null
@@ -112,7 +114,7 @@ export function DiffPanel({
       await requestJson("/api/workspace/git/stage", "POST", { sessionId, paths })
       onRefresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to stage")
+      setError(err instanceof Error ? err.message : t("pnlx.diff.errStage"))
     } finally {
       setBusy(false)
     }
@@ -125,7 +127,7 @@ export function DiffPanel({
       await requestJson("/api/workspace/git/unstage", "POST", { sessionId, paths })
       onRefresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to unstage")
+      setError(err instanceof Error ? err.message : t("pnlx.diff.errUnstage"))
     } finally {
       setBusy(false)
     }
@@ -133,9 +135,9 @@ export function DiffPanel({
 
   const discard = async (path: string) => {
     const confirmed = await confirm({
-      title: "Discard unstaged changes?",
-      description: `Discard unstaged changes in ${path}? This cannot be undone.`,
-      confirmLabel: "Discard",
+      title: t("pnlx.diff.discardTitle"),
+      description: t("pnlx.diff.discardDesc", { path }),
+      confirmLabel: t("pnlx.diff.discardConfirm"),
       destructive: true,
     })
     if (!confirmed) return
@@ -145,7 +147,7 @@ export function DiffPanel({
       await requestJson("/api/workspace/git/discard", "POST", { sessionId, path })
       onRefresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to discard changes")
+      setError(err instanceof Error ? err.message : t("pnlx.diff.errDiscard"))
     } finally {
       setBusy(false)
     }
@@ -163,10 +165,10 @@ export function DiffPanel({
       }
       const res = await requestJson<{ commit: { hash: string } }>("/api/workspace/git/commit", "POST", { sessionId, message: commitMessage })
       setCommitMessage("")
-      setNotice(`Committed ${res.commit.hash}`)
+      setNotice(t("pnlx.diff.committed", { hash: res.commit.hash }))
       onRefresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Commit failed.")
+      setError(err instanceof Error ? err.message : t("pnlx.diff.errCommit"))
     } finally {
       setBusy(false)
     }
@@ -175,22 +177,22 @@ export function DiffPanel({
   if (!summary.isGitRepo) {
     return (
       <div className="ade-pane-empty">
-        <p>No Git repository is attached to this session.</p>
+        <p>{t("pnlx.diff.noGitRepo")}</p>
       </div>
     )
   }
 
   const stagedCount = summary.files.filter(f => f.staged).length
   const modeToggle = (
-    <div className="ade-segmented" role="tablist" aria-label="Diff scope">
+    <div className="ade-segmented" role="tablist" aria-label={t("pnlx.diff.ariaScope")}>
       <button type="button" role="tab" aria-selected={mode === "working"} className={mode === "working" ? "is-active" : ""} onClick={() => { setMode("working"); setSelectedPath(null) }}>
-        Uncommitted{summary.files.length ? ` · ${summary.files.length}` : ""}
+        {t("pnlx.diff.tabUncommitted")}{summary.files.length ? ` · ${summary.files.length}` : ""}
       </button>
       <button type="button" role="tab" aria-selected={mode === "branch"} className={mode === "branch" ? "is-active" : ""} onClick={() => { setMode("branch"); setSelectedPath(null) }}>
-        All branch changes{branchFiles?.length ? ` · ${branchFiles.length}` : ""}
+        {t("pnlx.diff.tabBranch")}{branchFiles?.length ? ` · ${branchFiles.length}` : ""}
       </button>
       <button type="button" role="tab" aria-selected={mode === "history"} className={mode === "history" ? "is-active" : ""} onClick={() => setMode("history")}>
-        History
+        {t("pnlx.diff.tabHistory")}
       </button>
     </div>
   )
@@ -206,25 +208,32 @@ export function DiffPanel({
   const noteFiles = new Set(diffNotes.notes.map(note => note.path)).size
   const notesBar = onAskAgent && diffNotes.notes.length ? (
     <div className="ade-notes-bar" role="status">
-      <span>{diffNotes.notes.length} note{diffNotes.notes.length === 1 ? "" : "s"} for the agent in {noteFiles} file{noteFiles === 1 ? "" : "s"}</span>
+      <span>
+        {t("pnlx.diff.notesForAgent", {
+          notes: diffNotes.notes.length,
+          noteWord: diffNotes.notes.length === 1 ? t("pnlx.diff.noteOne") : t("pnlx.diff.noteMany"),
+          files: noteFiles,
+          fileWord: noteFiles === 1 ? t("pnlx.diff.fileOne") : t("pnlx.diff.fileMany"),
+        })}
+      </span>
       <button
         type="button"
         className="ade-chip-btn"
         onClick={() => void confirm({
-          title: "Remove all notes?",
-          description: "All line notes in this session will be removed.",
-          confirmLabel: "Remove notes",
+          title: t("pnlx.diff.clearNotesTitle"),
+          description: t("pnlx.diff.clearNotesDesc"),
+          confirmLabel: t("pnlx.diff.clearNotesConfirm"),
           destructive: true,
         }).then(ok => { if (ok) diffNotes.clear() })}
-      >Clear</button>
+      >{t("pnlx.diff.clear")}</button>
       <button
         type="button"
         className="ade-btn ade-btn-primary ade-btn-xs"
         disabled={sendingNotes || agentBusy}
-        title={agentBusy ? "The agent is working. Send the notes when it is done." : "Send all notes to the agent as one message"}
+        title={agentBusy ? t("pnlx.diff.sendNotesBusyTitle") : t("pnlx.diff.sendNotesTitle")}
         onClick={() => void sendNotes()}
       >
-        <Send className="size-3" /> {sendingNotes ? "Sending…" : "Send to agent"}
+        <Send className="size-3" /> {sendingNotes ? t("pnlx.diff.sending") : t("pnlx.diff.sendToAgent")}
       </button>
     </div>
   ) : null
@@ -244,7 +253,7 @@ export function DiffPanel({
         <div className="ade-pane-toolbar">
           {modeToggle}
           <div className="ade-toolbar-actions">
-            <button type="button" className="ade-icon-btn" onClick={() => void loadBranchFiles()} title="Refresh branch diff" aria-label="Refresh branch diff">
+            <button type="button" className="ade-icon-btn" onClick={() => void loadBranchFiles()} title={t("pnlx.diff.refreshBranchDiff")} aria-label={t("pnlx.diff.refreshBranchDiff")}>
               <RefreshCw className="size-3.5" />
             </button>
           </div>
@@ -252,8 +261,8 @@ export function DiffPanel({
         {error ? <div className="ade-banner-error">{error}</div> : null}
         {notice ? <div className="ade-banner-ok"><Check className="size-3.5" /> {notice}</div> : null}
         {notesBar}
-        {branchFiles === null ? <div className="ade-pane-empty"><p>Loading branch changes…</p></div>
-          : branchFiles.length === 0 ? <div className="ade-pane-empty"><p>No changes on <code>{summary.branch || "HEAD"}</code> since the session started.</p></div>
+        {branchFiles === null ? <div className="ade-pane-empty"><p>{t("pnlx.diff.loadingBranch")}</p></div>
+          : branchFiles.length === 0 ? <div className="ade-pane-empty"><p>{t("pnlx.diff.noBranchChangesBefore")}<code>{summary.branch || "HEAD"}</code>{t("pnlx.diff.noBranchChangesAfter")}</p></div>
           : (
             <div className="ade-diff-split is-readonly">
               <div className="ade-diff-filelist">
@@ -286,9 +295,9 @@ export function DiffPanel({
         {modeToggle}
         <div className="ade-toolbar-actions">
           <button type="button" className="ade-chip-btn" disabled={busy || !summary.files.length} onClick={() => void stage([])}>
-            <Plus className="size-3" /> Stage all
+            <Plus className="size-3" /> {t("pnlx.diff.stageAll")}
           </button>
-          <button type="button" className="ade-icon-btn" onClick={onRefresh} title="Refresh Git status" aria-label="Refresh Git status">
+          <button type="button" className="ade-icon-btn" onClick={onRefresh} title={t("pnlx.diff.refreshGitStatus")} aria-label={t("pnlx.diff.refreshGitStatus")}>
             <RefreshCw className="size-3.5" />
           </button>
         </div>
@@ -300,7 +309,7 @@ export function DiffPanel({
 
       {summary.files.length === 0 ? (
         <div className="ade-pane-empty">
-          <p>Working tree is clean on <code>{summary.branch || "HEAD"}</code>.</p>
+          <p>{t("pnlx.diff.cleanBefore")}<code>{summary.branch || "HEAD"}</code>{t("pnlx.diff.cleanAfter")}</p>
         </div>
       ) : (
         <div className="ade-diff-split">
@@ -318,27 +327,27 @@ export function DiffPanel({
                   <span className="ade-truncate" title={file.path}>{file.path}</span>
                 </div>
                 <div className="ade-diff-file-meta">
-                  {file.staged ? <span className="ade-pill ade-pill-ok">staged</span> : null}
+                  {file.staged ? <span className="ade-pill ade-pill-ok">{t("pnlx.diff.stagedBadge")}</span> : null}
                   {file.additions > 0 ? <span className="ade-diff-add">+{file.additions}</span> : null}
                   {file.deletions > 0 ? <span className="ade-diff-del">-{file.deletions}</span> : null}
                   <div className="ade-diff-file-actions" onClick={e => e.stopPropagation()}>
                     {onOpenFile ? (
-                      <button type="button" className="ade-icon-btn" onClick={() => onOpenFile(file.path)} title="Open file">
+                      <button type="button" className="ade-icon-btn" onClick={() => onOpenFile(file.path)} title={t("pnlx.diff.openFile")}>
                         <FileCode2 className="size-3" />
                       </button>
                     ) : null}
                     {file.unstaged ? (
-                      <button type="button" className="ade-icon-btn" onClick={() => void stage([file.path])} title="Stage file">
+                      <button type="button" className="ade-icon-btn" onClick={() => void stage([file.path])} title={t("pnlx.diff.stageFile")}>
                         <Plus className="size-3" />
                       </button>
                     ) : null}
                     {file.staged ? (
-                      <button type="button" className="ade-icon-btn" onClick={() => void unstage([file.path])} title="Unstage file">
+                      <button type="button" className="ade-icon-btn" onClick={() => void unstage([file.path])} title={t("pnlx.diff.unstageFile")}>
                         <Minus className="size-3" />
                       </button>
                     ) : null}
                     {file.unstaged && file.status !== "untracked" ? (
-                      <button type="button" className="ade-icon-btn" onClick={() => void discard(file.path)} title="Discard unstaged changes">
+                      <button type="button" className="ade-icon-btn" onClick={() => void discard(file.path)} title={t("pnlx.diff.discardChanges")}>
                         <RotateCcw className="size-3" />
                       </button>
                     ) : null}
@@ -354,7 +363,7 @@ export function DiffPanel({
                 <code className="ade-mono ade-truncate">{activeFile.path}</code>
                 {activeFile.staged && activeFile.unstaged ? (
                   <button type="button" className="ade-chip-btn" onClick={() => setShowStaged(s => !s)}>
-                    {showStaged ? "Showing staged" : "Showing unstaged"}
+                    {showStaged ? t("pnlx.diff.showingStaged") : t("pnlx.diff.showingUnstaged")}
                   </button>
                 ) : null}
               </div>
@@ -366,14 +375,16 @@ export function DiffPanel({
             <input
               type="text"
               className="ade-input-sm flex-1"
-              placeholder={stagedCount ? `Commit ${stagedCount} staged file${stagedCount === 1 ? "" : "s"}…` : "Commit all changes…"}
-              aria-label="Commit message"
+              placeholder={stagedCount
+                ? t(stagedCount === 1 ? "pnlx.diff.commitStagedOne" : "pnlx.diff.commitStagedMany", { count: stagedCount })
+                : t("pnlx.diff.commitAllPlaceholder")}
+              aria-label={t("pnlx.diff.commitMessageAria")}
               value={commitMessage}
               onChange={e => setCommitMessage(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") void commit() }}
             />
             <button type="button" className="ade-btn ade-btn-primary ade-btn-xs" disabled={busy || !commitMessage.trim()} onClick={() => void commit()}>
-              <GitCommit className="size-3.5" /> Commit
+              <GitCommit className="size-3.5" /> {t("pnlx.diff.commit")}
             </button>
           </div>
         </div>

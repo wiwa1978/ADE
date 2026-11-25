@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react"
 import { Folder, GitBranch, Loader2, MessageSquare, Sparkles, X } from "lucide-react"
 import type { Project } from "../../ProjectsView"
 import type { TaskStart } from "../../app-types"
+import { useI18n } from "../i18n/I18nContext"
 
 export function MobileNewSessionSheet({
   open,
@@ -26,6 +27,7 @@ export function MobileNewSessionSheet({
     title?: string
   }) => Promise<void>
 }) {
+  const { t } = useI18n()
   const [projectId, setProjectId] = useState<string>(initialProjectId ?? projects[0]?.id ?? "")
   const [kind, setKind] = useState<TaskStart["kind"]>("worktree")
   const [title, setTitle] = useState("")
@@ -65,13 +67,13 @@ export function MobileNewSessionSheet({
         className="ade-mob-sheet"
         role="dialog"
         aria-modal="true"
-        aria-label="New mobile session"
+        aria-label={t("wsx.mob.newMobileSession")}
         onClick={e => e.stopPropagation()}
       >
         <div className="ade-mob-sheet-handle" aria-hidden="true" />
         <div className="ade-mob-sheet-head">
-          <strong>New session</strong>
-          <button type="button" className="ade-icon-btn" aria-label="Close" onClick={onClose}>
+          <strong>{t("wsx.mob.newSession")}</strong>
+          <button type="button" className="ade-icon-btn" aria-label={t("wsx.mob.close")} onClick={onClose}>
             <X className="size-4" />
           </button>
         </div>
@@ -80,13 +82,13 @@ export function MobileNewSessionSheet({
 
         <form className="ade-mob-sheet-form" onSubmit={e => void handleSubmit(e)}>
           <label className="ade-mobile-gate-label">
-            <span>Project</span>
+            <span>{t("wsx.mob.project")}</span>
             <select
               className="ade-mobile-gate-input"
               value={projectId}
               onChange={e => setProjectId(e.target.value)}
             >
-              <option value="">No project (Chat only)</option>
+              <option value="">{t("wsx.mob.noProjectChatOnly")}</option>
               {projects.map(p => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
@@ -94,48 +96,48 @@ export function MobileNewSessionSheet({
           </label>
 
           {selectedProject?.repository ? (
-            <div className="ade-mob-mode-pills" role="radiogroup" aria-label="Workspace mode">
+            <div className="ade-mob-mode-pills" role="radiogroup" aria-label={t("wsx.mob.workspaceMode")}>
               <button
                 type="button"
                 className={`ade-mob-pill-choice ${kind === "worktree" ? "is-active" : ""}`}
                 onClick={() => setKind("worktree")}
               >
-                <GitBranch className="size-3.5" /> Own branch
+                <GitBranch className="size-3.5" /> {t("wsx.mob.ownBranch")}
               </button>
               <button
                 type="button"
                 className={`ade-mob-pill-choice ${kind === "checkout" ? "is-active" : ""}`}
                 onClick={() => setKind("checkout")}
               >
-                <Folder className="size-3.5" /> Project folder
+                <Folder className="size-3.5" /> {t("wsx.mob.projectFolder")}
               </button>
               <button
                 type="button"
                 className={`ade-mob-pill-choice ${kind === "none" ? "is-active" : ""}`}
                 onClick={() => setKind("none")}
               >
-                <MessageSquare className="size-3.5" /> Chat only
+                <MessageSquare className="size-3.5" /> {t("wsx.mob.chatOnly")}
               </button>
             </div>
           ) : null}
 
           <label className="ade-mobile-gate-label">
-            <span>Session name (optional)</span>
+            <span>{t("wsx.mob.sessionNameOptional")}</span>
             <input
               type="text"
               className="ade-mobile-gate-input"
-              placeholder="e.g. Fix login redirect"
+              placeholder={t("wsx.mob.sessionNamePlaceholder")}
               value={title}
               onChange={e => setTitle(e.target.value)}
             />
           </label>
 
           <label className="ade-mobile-gate-label">
-            <span>Task or prompt</span>
+            <span>{t("wsx.mob.taskOrPrompt")}</span>
             <textarea
               className="ade-mob-sheet-textarea"
               rows={4}
-              placeholder="Describe what you want the agent to build or investigate…"
+              placeholder={t("wsx.mob.taskPromptPlaceholder")}
               value={prompt}
               onChange={e => setPrompt(e.target.value)}
             />
@@ -143,7 +145,7 @@ export function MobileNewSessionSheet({
 
           <button type="submit" className="ade-btn ade-btn-primary ade-mobile-gate-btn" disabled={starting}>
             {starting ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-            {starting ? "Starting…" : "Start session"}
+            {starting ? t("wsx.mob.starting") : t("wsx.mob.startSession")}
           </button>
         </form>
       </div>

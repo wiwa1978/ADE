@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { ExternalLink, GitPullRequest, Play, RefreshCw, Settings2 } from "lucide-react"
 import { request } from "../../api"
 import type { Project } from "../../ProjectsView"
+import { useI18n } from "../i18n/I18nContext"
 
 export type ProjectGitHubIssue = {
   repository: string
@@ -24,6 +25,7 @@ export function ProjectIssuesList({
   /** Start an agent session (worktree + chat) for the issue. */
   onStartSessionFromIssue?: (issue: ProjectGitHubIssue) => Promise<void>
 }) {
+  const { t } = useI18n()
   const [issues, setIssues] = useState<ProjectGitHubIssue[]>([])
   const [loading, setLoading] = useState(false)
   const [startingNumber, setStartingNumber] = useState<number | null>(null)
@@ -55,11 +57,11 @@ export function ProjectIssuesList({
       )
       setIssues(res.issues)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load GitHub issues via gh CLI.")
+      setError(err instanceof Error ? err.message : t("prjx.list.issues.loadError"))
     } finally {
       setLoading(false)
     }
-  }, [project])
+  }, [project, t])
 
   useEffect(() => {
     if (!project || !project.githubUrl) return
@@ -76,17 +78,17 @@ export function ProjectIssuesList({
       })
       .catch(err => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Could not load GitHub issues via gh CLI.")
+          setError(err instanceof Error ? err.message : t("prjx.list.issues.loadError"))
           setLoading(false)
         }
       })
     return () => { cancelled = true }
-  }, [project])
+  }, [project, t])
 
   if (!project) {
     return (
       <div className="flex flex-1 items-center justify-center p-8 text-sm opacity-70">
-        Select or create a project first to browse its GitHub issues.
+        {t("prjx.list.issues.noProject")}
       </div>
     )
   }
@@ -95,12 +97,12 @@ export function ProjectIssuesList({
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
         <GitPullRequest className="size-8 opacity-40" />
-        <div className="text-sm font-semibold">No GitHub repository linked to {project.name}</div>
+        <div className="text-sm font-semibold">{t("prjx.list.issues.noRepoTitle", { project: project.name })}</div>
         <p className="text-xs opacity-70 max-w-md">
-          Link a GitHub repository in Project Settings (or auto-detect from your local Git checkout) to pull open public or private issues here.
+          {t("prjx.list.issues.noRepoDesc")}
         </p>
         <button type="button" className="sf-btn-primary" onClick={onOpenProjectSettings}>
-          <Settings2 className="size-3.5" /> Link GitHub Repository
+          <Settings2 className="size-3.5" /> {t("prjx.list.issues.linkRepo")}
         </button>
       </div>
     )
@@ -111,10 +113,10 @@ export function ProjectIssuesList({
       <div className="flex items-center justify-between px-5 py-3 border-b border-[rgb(var(--border)/0.75)]">
         <div className="text-xs">
           <span className="font-semibold">{project.githubUrl.replace(/^https:\/\/github\.com\//i, "")}</span>
-          <span className="opacity-65"> · {issues.length} open issues</span>
+          <span className="opacity-65">{t("prjx.list.issues.openCount", { count: issues.length })}</span>
         </div>
         <button type="button" className="sf-btn-secondary" onClick={() => void load()} disabled={loading}>
-          <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh Issues
+          <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} /> {t("prjx.list.issues.refresh")}
         </button>
       </div>
 
@@ -122,9 +124,9 @@ export function ProjectIssuesList({
 
       <div className="flex-1 overflow-y-auto divide-y divide-[rgb(var(--border)/0.65)]">
         {loading && issues.length === 0 ? (
-          <div className="p-8 text-center text-xs opacity-65">Loading open issues via GitHub CLI…</div>
+          <div className="p-8 text-center text-xs opacity-65">{t("prjx.list.issues.loading")}</div>
         ) : issues.length === 0 ? (
-          <div className="p-8 text-center text-xs opacity-65">No open issues found in this repository.</div>
+          <div className="p-8 text-center text-xs opacity-65">{t("prjx.list.issues.empty")}</div>
         ) : (
           issues.map(issue => (
             <div
@@ -141,7 +143,7 @@ export function ProjectIssuesList({
                       target="_blank"
                       rel="noreferrer"
                       className="opacity-50 hover:opacity-100"
-                      title="Open on GitHub"
+                      title={t("prjx.list.issues.openOnGithub")}
                     >
                       <ExternalLink className="size-3" />
                     </a>
@@ -168,14 +170,14 @@ export function ProjectIssuesList({
                       try {
                         await onStartSessionFromIssue(issue)
                       } catch (err) {
-                        setError(err instanceof Error ? err.message : "Could not start a session for this issue.")
+                        setError(err instanceof Error ? err.message : t("prjx.list.issues.startError"))
                       } finally {
                         setStartingNumber(null)
                       }
                     }}
                   >
                     <Play className="size-3.5" />
-                    {startingNumber === issue.number ? "Starting…" : "Start session"}
+                    {startingNumber === issue.number ? t("prjx.list.sessions.starting") : t("prjx.list.sessions.startSession")}
                   </button>
                 ) : null}
               </div>

@@ -3,6 +3,7 @@ import { KeyRound, X } from "lucide-react"
 import { request, requestJson } from "../../api"
 import { Banner, Button, IconButton, Input } from "@/components/ui"
 import { ConfirmContext } from "@/components/ui/confirm-context"
+import { useI18n } from "../i18n/I18nContext"
 import { relativeTime } from "../session-state"
 
 type Secret = { name: string; updatedAt: number }
@@ -12,6 +13,7 @@ type Secret = { name: string; updatedAt: number }
  * (agents, setup/run scripts and terminals). Values are write-only here.
  */
 export function ProjectSecretsSettings({ projectId }: { projectId: string }) {
+  const { t } = useI18n()
   const confirmCtx = useContext(ConfirmContext)
   const [secrets, setSecrets] = useState<Secret[] | null>(null)
   const [name, setName] = useState("")
@@ -26,11 +28,11 @@ export function ProjectSecretsSettings({ projectId }: { projectId: string }) {
       .catch(err => {
         if (!cancelled) {
           setSecrets([])
-          setMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not read the secrets." })
+          setMessage({ tone: "error", text: err instanceof Error ? err.message : t("prjx.cfg.secrets.readError") })
         }
       })
     return () => { cancelled = true }
-  }, [projectId])
+  }, [projectId, t])
 
   const save = async (event: FormEvent) => {
     event.preventDefault()
@@ -41,23 +43,23 @@ export function ProjectSecretsSettings({ projectId }: { projectId: string }) {
       const replacing = secrets?.some(secret => secret.name === trimmed)
       const result = await requestJson<{ secrets: Secret[] }>(`/api/projects/${encodeURIComponent(projectId)}/secrets`, "PUT", { name: trimmed, value })
       setSecrets(result.secrets)
-      setMessage({ tone: "info", text: `${replacing ? "Replaced" : "Saved"} ${trimmed}. New commands and sessions get it.` })
+      setMessage({ tone: "info", text: t(replacing ? "prjx.cfg.secrets.replacedMsg" : "prjx.cfg.secrets.savedMsg", { name: trimmed }) })
       setName("")
       setValue("")
     } catch (err) {
-      setMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not save the secret." })
+      setMessage({ tone: "error", text: err instanceof Error ? err.message : t("prjx.cfg.secrets.saveError") })
     } finally {
       setBusy(false)
     }
   }
 
   const remove = async (secretName: string) => {
-    const promptText = `Remove ${secretName}? Sessions won't get it anymore.`
+    const promptText = t("prjx.cfg.secrets.removeConfirmPrompt", { name: secretName })
     const ok = confirmCtx
       ? await confirmCtx.confirm({
-          title: `Remove ${secretName}?`,
-          description: "Sessions won't get it anymore.",
-          confirmLabel: "Remove",
+          title: t("prjx.cfg.secrets.removeConfirmTitle", { name: secretName }),
+          description: t("prjx.cfg.secrets.removeConfirmDesc"),
+          confirmLabel: t("prjx.cfg.secrets.remove"),
           destructive: true,
         })
       : (typeof window === "undefined" || typeof window.confirm !== "function" ? true : window.confirm(promptText))
@@ -69,33 +71,33 @@ export function ProjectSecretsSettings({ projectId }: { projectId: string }) {
       )
       setSecrets(result.secrets)
     } catch (err) {
-      setMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not remove the secret." })
+      setMessage({ tone: "error", text: err instanceof Error ? err.message : t("prjx.cfg.secrets.removeError") })
     }
   }
 
   return (
     <section className="project-scripts" aria-labelledby="project-secrets-title">
-      <h3 id="project-secrets-title">Secrets</h3>
-      <p className="hint">Environment variables for agents, scripts and terminals in this project, like API keys. Stored on this computer only, never shown again, and masked in agent output.</p>
+      <h3 id="project-secrets-title">{t("prjx.cfg.secrets.title")}</h3>
+      <p className="hint">{t("prjx.cfg.secrets.intro")}</p>
       {secrets && secrets.length ? (
         <ul className="ade-secret-list">
           {secrets.map(secret => (
             <li key={secret.name}>
               <KeyRound className="size-3.5" />
               <code>{secret.name}</code>
-              <span className="hint">set {relativeTime(secret.updatedAt)}</span>
-              <IconButton aria-label={`Remove ${secret.name}`} title="Remove" onClick={() => void remove(secret.name)}>
+              <span className="hint">{t("prjx.cfg.secrets.setTime", { time: relativeTime(secret.updatedAt) })}</span>
+              <IconButton aria-label={t("prjx.cfg.secrets.removeAria", { name: secret.name })} title={t("prjx.cfg.secrets.remove")} onClick={() => void remove(secret.name)}>
                 <X className="size-3" />
               </IconButton>
             </li>
           ))}
         </ul>
-      ) : secrets ? <p className="hint">No secrets yet.</p> : null}
+      ) : secrets ? <p className="hint">{t("prjx.cfg.secrets.empty")}</p> : null}
       <form className="ade-secret-form" onSubmit={event => void save(event)}>
         <Input
           inputSize="sm"
-          aria-label="Secret name"
-          placeholder="NAME"
+          aria-label={t("prjx.cfg.secrets.nameAria")}
+          placeholder={t("prjx.cfg.secrets.namePlaceholder")}
           value={name}
           onChange={event => setName(event.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "_"))}
           spellCheck={false}
@@ -103,15 +105,15 @@ export function ProjectSecretsSettings({ projectId }: { projectId: string }) {
         />
         <Input
           inputSize="sm"
-          aria-label="Secret value"
-          placeholder="Value"
+          aria-label={t("prjx.cfg.secrets.valueAria")}
+          placeholder={t("prjx.cfg.secrets.valuePlaceholder")}
           type="password"
           value={value}
           onChange={event => setValue(event.target.value)}
           autoComplete="new-password"
         />
         <Button type="submit" variant="primary" size="sm" loading={busy} disabled={!name.trim() || !value}>
-          {busy ? "Saving…" : "Add"}
+          {busy ? t("prjx.cfg.saving") : t("prjx.cfg.secrets.add")}
         </Button>
       </form>
       {message ? <Banner tone={message.tone}>{message.text}</Banner> : null}

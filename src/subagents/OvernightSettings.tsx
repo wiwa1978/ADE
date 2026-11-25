@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { request, requestJson } from "../../api"
 import type { ProviderCatalogEntry } from "../../app-types"
+import { useI18n } from "../i18n/I18nContext"
 
 type Limits = { taskMinutes: number; taskCost: number; dayCost: number; fallbackProvider: string; fallbackModel: string; maxSubagents: number }
 type Draft = Record<"taskMinutes" | "taskCost" | "dayCost" | "maxSubagents", string> & { fallback: string }
@@ -18,6 +19,7 @@ const toDraft = (limits: Limits): Draft => ({
  * provider's usage limit, and how many Claude Code / Codex subagents run at once on this machine.
  */
 export function OvernightSettings({ modelCatalog }: { modelCatalog: ProviderCatalogEntry[] }) {
+  const { t } = useI18n()
   const [limits, setLimits] = useState<Limits | null>(null)
   const [todayCost, setTodayCost] = useState(0)
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -31,9 +33,9 @@ export function OvernightSettings({ modelCatalog }: { modelCatalog: ProviderCata
       setLimits(result.limits)
       setDraft(toDraft(result.limits))
       setTodayCost(result.todayCost)
-    }).catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : "Could not load the limits.") })
+    }).catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : t("stx.overnight.loadError")) })
     return () => { cancelled = true }
-  }, [])
+  }, [t])
 
   if (!limits || !draft) return error ? <p className="st-error">{error}</p> : null
   const changed = JSON.stringify(draft) !== JSON.stringify(toDraft(limits))
@@ -55,9 +57,9 @@ export function OvernightSettings({ modelCatalog }: { modelCatalog: ProviderCata
         })
       setLimits(result.limits)
       setDraft(toDraft(result.limits))
-      setSaved("Saved.")
+      setSaved(t("stx.overnight.saved"))
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save the limits.")
+      setError(err instanceof Error ? err.message : t("stx.overnight.saveError"))
     }
   }
 
@@ -69,7 +71,7 @@ export function OvernightSettings({ modelCatalog }: { modelCatalog: ProviderCata
       </div>
       <div className="st-row-control">
         <span className="st-number">
-          <input id={`limit-${key}`} inputMode="decimal" value={draft[key]} placeholder="No limit" onChange={set(key)}
+          <input id={`limit-${key}`} inputMode="decimal" value={draft[key]} placeholder={t("stx.overnight.noLimit")} onChange={set(key)}
             onKeyDown={event => { if (event.key === "Enter" && changed) void apply() }} />
           <small>{unit}</small>
         </span>
@@ -80,28 +82,28 @@ export function OvernightSettings({ modelCatalog }: { modelCatalog: ProviderCata
   return (
     <>
       <section className="st-section">
-        <h2>Unattended work</h2>
-        <p className="st-section-desc">For work you leave running, such as overnight. When a limit is reached, ADE stops that agent and its subagents and tells you (Inbox and Slack). Nothing is undone; you can continue the session yourself. Leave a field empty for no limit.</p>
+        <h2>{t("stx.overnight.title")}</h2>
+        <p className="st-section-desc">{t("stx.overnight.desc")}</p>
         <div className="st-card">
-          {field("taskMinutes", "Time per task", "How long one request to an agent may run.", "min")}
-          {field("taskCost", "Cost per task", "What one request may spend, its subagents included.", "$")}
-          {field("dayCost", "Cost per day", `What all agents together may spend today. Spent so far: $${todayCost.toFixed(2)}.`, "$")}
+          {field("taskMinutes", t("stx.overnight.timePerTask"), t("stx.overnight.timePerTaskDesc"), t("stx.overnight.unitMin"))}
+          {field("taskCost", t("stx.overnight.costPerTask"), t("stx.overnight.costPerTaskDesc"), "$")}
+          {field("dayCost", t("stx.overnight.costPerDay"), t("stx.overnight.costPerDayDesc", { amount: todayCost.toFixed(2) }), "$")}
         </div>
       </section>
 
       <section className="st-section">
-        <h2>Usage limits</h2>
+        <h2>{t("stx.overnight.usageLimits")}</h2>
         <div className="st-card">
           <div className="st-row">
             <div className="st-row-text">
-              <label htmlFor="limit-fallback">When a model hits its usage limit</label>
-              <p>{draft.fallback ? "The main agent continues on this model straight away." : "ADE waits until the limit resets, then tells the agent to continue."} Claude Code and Codex subagents always wait for their reset.</p>
+              <label htmlFor="limit-fallback">{t("stx.overnight.whenLimitHit")}</label>
+              <p>{draft.fallback ? t("stx.overnight.fallbackContinue") : t("stx.overnight.fallbackWait")} {t("stx.overnight.subagentsAlwaysWait")}</p>
             </div>
             <div className="st-row-control">
               <select id="limit-fallback" className="st-select" value={draft.fallback} onChange={set("fallback")}>
-                <option value="">Wait for the reset</option>
-                {models.map(model => <option key={model.value} value={model.value}>Switch to {model.label}</option>)}
-                {draft.fallback && !models.some(model => model.value === draft.fallback) ? <option value={draft.fallback}>Switch to {draft.fallback}</option> : null}
+                <option value="">{t("stx.overnight.waitForReset")}</option>
+                {models.map(model => <option key={model.value} value={model.value}>{t("stx.overnight.switchTo", { model: model.label })}</option>)}
+                {draft.fallback && !models.some(model => model.value === draft.fallback) ? <option value={draft.fallback}>{t("stx.overnight.switchTo", { model: draft.fallback })}</option> : null}
               </select>
             </div>
           </div>
@@ -109,16 +111,16 @@ export function OvernightSettings({ modelCatalog }: { modelCatalog: ProviderCata
       </section>
 
       <section className="st-section">
-        <h2>Subagents at once</h2>
+        <h2>{t("stx.overnight.subagentsAtOnce")}</h2>
         <div className="st-card">
-          {field("maxSubagents", "Claude Code and Codex subagents", "The main agent can hand out any number of tasks; ADE starts them as this machine has room (about 1 GB of memory each) and queues the rest. Set a number to cap it. Subagents on SSH hosts or Boat.dev don't count.", "max")}
+          {field("maxSubagents", t("stx.overnight.maxSubagents"), t("stx.overnight.maxSubagentsDesc"), t("stx.overnight.unitMax"))}
         </div>
         {error ? <p className="st-error" role="alert">{error}</p> : saved ? <p className="st-section-desc" role="status">{saved}</p> : null}
         {changed ? (
-          <div className="st-apply-bar" role="region" aria-label="Unsaved limits">
-            <span>Limits changed. Apply them to use them from the next check.</span>
-            <button type="button" className="st-button is-quiet" onClick={() => setDraft(toDraft(limits))}>Revert</button>
-            <button type="button" className="st-button is-primary" onClick={() => void apply()}>Apply</button>
+          <div className="st-apply-bar" role="region" aria-label={t("stx.overnight.unsavedLimits")}>
+            <span>{t("stx.overnight.limitsChanged")}</span>
+            <button type="button" className="st-button is-quiet" onClick={() => setDraft(toDraft(limits))}>{t("stx.overnight.revert")}</button>
+            <button type="button" className="st-button is-primary" onClick={() => void apply()}>{t("stx.overnight.apply")}</button>
           </div>
         ) : null}
       </section>

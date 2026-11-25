@@ -1,5 +1,6 @@
 import { AlertTriangle, GitBranch, RefreshCw } from "lucide-react"
 import { Badge, Banner, ConfirmProvider, EmptyState, IconButton, Spinner } from "../../components/ui/index.ts"
+import { useI18n } from "../i18n/I18nContext"
 import { CreatePullRequestForm } from "./pr/CreatePullRequestForm"
 import { PrBranchSyncBanner } from "./pr/PrBranchSyncBanner"
 import { PrChecksSection } from "./pr/PrChecksSection"
@@ -34,6 +35,7 @@ function PullRequestPanelContent({
   agentBusy = false,
   onAskAgent,
 }: PullRequestPanelProps) {
+  const { t } = useI18n()
   const state = usePullRequestState({ sessionId, refreshKey, onPullRequestChange, onAskAgent })
 
   if (!state.status || state.pr === undefined) {
@@ -41,24 +43,24 @@ function PullRequestPanelContent({
       <EmptyState
         compact
         icon={<Spinner size="md" />}
-        title="Checking the branch and pull request…"
+        title={t("pnlx.pr.checking")}
       />
     )
   }
 
   const { status, pr } = state
   const onBaseBranch = Boolean(status.branch && status.baseBranch && status.branch === status.baseBranch)
-  const baseName = status.baseRef ?? status.baseBranch ?? "the base branch"
+  const baseName = status.baseRef ?? status.baseBranch ?? t("pnlx.pr.baseBranchFallback")
   const canAskAgent = Boolean(onAskAgent)
 
   return (
     <div className="ade-pane-body ade-pr-panel">
       <div className="ade-pane-toolbar">
         <div className="ade-diff-header-meta">
-          <Badge className="font-mono"><GitBranch className="size-3" /> {status.branch ?? "detached HEAD"}</Badge>
-          {status.baseBranch ? <span className="ade-muted ade-xs">into {status.baseBranch}</span> : null}
+          <Badge className="font-mono"><GitBranch className="size-3" /> {status.branch ?? t("pnlx.pr.detachedHead")}</Badge>
+          {status.baseBranch ? <span className="ade-muted ade-xs">{t("pnlx.pr.intoBranch", { branch: status.baseBranch })}</span> : null}
         </div>
-        <IconButton aria-label="Refresh pull request status" title="Refresh" onClick={() => void state.load()}>
+        <IconButton aria-label={t("pnlx.pr.refreshAria")} title={t("pnlx.pr.refreshTitle")} onClick={() => void state.load()}>
           <RefreshCw className="size-3.5" />
         </IconButton>
       </div>
@@ -67,19 +69,19 @@ function PullRequestPanelContent({
       {state.sent ? <Banner tone="ok" className="mx-3 mt-2">{state.sent}</Banner> : null}
 
       <div className="ade-pr-body">
-        <section className="ade-pr-facts" aria-label="Branch status">
-          <div><strong>{status.commitsAhead}</strong><span>commit{status.commitsAhead === 1 ? "" : "s"} on this branch</span></div>
-          <div><strong>{status.unpushed}</strong><span>not pushed</span></div>
-          <div className={status.uncommitted ? "is-warn" : ""}><strong>{status.uncommitted}</strong><span>uncommitted</span></div>
+        <section className="ade-pr-facts" aria-label={t("pnlx.pr.branchStatusAria")}>
+          <div><strong>{status.commitsAhead}</strong><span>{t(status.commitsAhead === 1 ? "pnlx.pr.commitOnBranchOne" : "pnlx.pr.commitOnBranchMany")}</span></div>
+          <div><strong>{status.unpushed}</strong><span>{t("pnlx.pr.notPushed")}</span></div>
+          <div className={status.uncommitted ? "is-warn" : ""}><strong>{status.uncommitted}</strong><span>{t("pnlx.pr.uncommitted")}</span></div>
         </section>
 
         {!status.hasRemote ? (
           <Banner tone="warn">
-            This repository has no <code>origin</code> remote, so it can’t be pushed or opened as a pull request.
+            {t("pnlx.pr.noOriginBefore")}<code>origin</code>{t("pnlx.pr.noOriginAfter")}
           </Banner>
         ) : onBaseBranch ? (
           <Banner tone="warn">
-            This session works directly on <code>{status.branch}</code>. Start a worktree session to get its own branch and pull request.
+            {t("pnlx.pr.onBaseBefore")}<code>{status.branch}</code>{t("pnlx.pr.onBaseAfter")}
           </Banner>
         ) : null}
 
@@ -98,8 +100,8 @@ function PullRequestPanelContent({
 
         {status.uncommitted > 0 ? (
           <p className="ade-pr-note">
-            <AlertTriangle className="size-3.5" /> {status.uncommitted} uncommitted change{status.uncommitted === 1 ? "" : "s"} won’t be included until committed.
-            <button type="button" className="ade-link-btn" onClick={onOpenChanges}>Review in Changes</button>
+            <AlertTriangle className="size-3.5" /> {t(status.uncommitted === 1 ? "pnlx.pr.uncommittedNoteOne" : "pnlx.pr.uncommittedNoteMany", { count: status.uncommitted })}
+            <button type="button" className="ade-link-btn" onClick={onOpenChanges}>{t("pnlx.pr.reviewInChanges")}</button>
           </p>
         ) : null}
 

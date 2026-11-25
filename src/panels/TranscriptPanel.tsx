@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Copy, Download, MessageSquare, RotateCcw, Sp
 import { getCaptainEndpoint, resolveCaptainUrl } from "../../api"
 import type { TimelineItem } from "../../app-types"
 import { describeToolCall, replaySteps, type ReplayStep, type TranscriptItem } from "../../packages/protocol/transcript.ts"
+import { useI18n } from "../i18n/I18nContext"
 
 /**
  * Transcript: step through what the agent did — each message, reply and tool call in order, with
@@ -21,6 +22,7 @@ export function TranscriptPanel({
   /** Shown as relative paths in step titles. */
   workspacePath?: string
 }) {
+  const { formatTime } = useI18n()
   const relative = (text: string) => (workspacePath ? text.split(`${workspacePath}/`).join("") : text)
   const steps = replaySteps(items as TranscriptItem[])
   const [selected, setSelected] = useState<number | null>(null)
@@ -131,7 +133,7 @@ export function TranscriptPanel({
               <header>
                 <StepIcon step={step} />
                 <strong>{step.kind === "tool" ? step.call.name : step.kind === "user" ? "You" : step.kind === "reply" ? "Agent" : "Note"}</strong>
-                <span className="ade-muted ade-xs">{new Date(step.at).toLocaleTimeString()}</span>
+                <span className="ade-muted ade-xs">{formatTime(step.at, { seconds: true })}</span>
                 {step.kind === "tool" ? <span className={`ade-row-tag is-${step.call.isError || step.call.status === "error" ? "failed" : step.call.status === "done" ? "ok" : "running"}`}>{step.call.isError || step.call.status === "error" ? "Failed" : step.call.status === "done" ? "Done" : step.call.status}</span> : null}
               </header>
               {step.kind === "user" ? (

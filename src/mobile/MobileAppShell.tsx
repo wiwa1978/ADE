@@ -47,6 +47,7 @@ import { RichFilePreview } from "../panels/RichFilePreview"
 import { DiffPanel } from "../panels/DiffPanel"
 import type { MobileSessionState } from "./MobileAuthGate"
 import { MobileNewSessionSheet } from "./MobileNewSessionSheet"
+import { useI18n } from "../i18n/I18nContext"
 
 export type MobileTab = "inbox" | "sessions" | "chat" | "artefacts"
 
@@ -157,6 +158,7 @@ export function MobileAppShell({
   }) => Promise<void>
   onOpenExternalBrowser: (url: string) => void
 }) {
+  const { t, formatDay } = useI18n()
   const [tab, setTab] = useState<MobileTab>("inbox")
   const [searchQuery, setSearchQuery] = useState("")
   const [artefactScope, setArtefactScope] = useState<"session" | "project">("session")
@@ -246,15 +248,15 @@ export function MobileAppShell({
       <header className="ade-mob-topbar">
         <div className="ade-mob-topbar-left">
           {openFilePath ? (
-            <button type="button" className="ade-mob-icon-btn" onClick={() => setOpenFilePath(null)} aria-label="Back">
+            <button type="button" className="ade-mob-icon-btn" onClick={() => setOpenFilePath(null)} aria-label={t("wsx.mob.back")}>
               <ArrowLeft className="size-4" />
             </button>
           ) : diffOpen ? (
-            <button type="button" className="ade-mob-icon-btn" onClick={() => setDiffOpen(false)} aria-label="Back to chat">
+            <button type="button" className="ade-mob-icon-btn" onClick={() => setDiffOpen(false)} aria-label={t("wsx.mob.backToChat")}>
               <ArrowLeft className="size-4" />
             </button>
           ) : tab === "chat" ? (
-            <button type="button" className="ade-mob-icon-btn" onClick={() => setTab("sessions")} aria-label="All sessions">
+            <button type="button" className="ade-mob-icon-btn" onClick={() => setTab("sessions")} aria-label={t("wsx.mob.allSessions")}>
               <ArrowLeft className="size-4" />
             </button>
           ) : (
@@ -262,7 +264,7 @@ export function MobileAppShell({
               type="button"
               className="ade-mob-host-pill"
               onClick={() => setDeviceSheetOpen(true)}
-              aria-label="Connection status"
+              aria-label={t("wsx.mob.connectionStatus")}
             >
               <span className={`ade-mob-status-dot ${runtimeOnline && sseConnected ? "is-live" : runtimeOnline ? "is-warn" : "is-off"}`} />
               <span className="ade-truncate">{hostName || "ADE"}</span>
@@ -274,18 +276,18 @@ export function MobileAppShell({
           {openFilePath ? (
             <span className="ade-mob-title ade-mono ade-truncate">{openFilePath.split("/").pop()}</span>
           ) : diffOpen ? (
-            <span className="ade-mob-title">Changes</span>
+            <span className="ade-mob-title">{t("wsx.mob.changes")}</span>
           ) : tab === "chat" ? (
             <div className="ade-mob-chat-title">
               <span className="ade-mob-title ade-truncate">{activeSession.label}</span>
               {activeProject ? <span className="ade-mob-subtitle ade-truncate">{activeProject.name}</span> : null}
             </div>
           ) : tab === "inbox" ? (
-            <span className="ade-mob-title">Inbox</span>
+            <span className="ade-mob-title">{t("wsx.mob.inbox")}</span>
           ) : tab === "sessions" ? (
-            <span className="ade-mob-title">Sessions</span>
+            <span className="ade-mob-title">{t("wsx.mob.sessions")}</span>
           ) : (
-            <span className="ade-mob-title">Artefacts</span>
+            <span className="ade-mob-title">{t("wsx.mob.artefacts")}</span>
           )}
         </div>
 
@@ -293,12 +295,12 @@ export function MobileAppShell({
           {tab === "chat" && !openFilePath && !diffOpen ? (
             <>
               {isBusy ? (
-                <button type="button" className="ade-mob-icon-btn is-danger" onClick={onAbortSession} aria-label="Stop agent" title="Stop agent">
+                <button type="button" className="ade-mob-icon-btn is-danger" onClick={onAbortSession} aria-label={t("wsx.mob.stopAgent")} title={t("wsx.mob.stopAgent")}>
                   <Square className="size-3.5" />
                 </button>
               ) : null}
               {hasWorkspace ? (
-                <button type="button" className="ade-mob-icon-btn" onClick={() => setDiffOpen(true)} aria-label="View changes" title="Changes">
+                <button type="button" className="ade-mob-icon-btn" onClick={() => setDiffOpen(true)} aria-label={t("wsx.mob.viewChanges")} title={t("wsx.mob.changes")}>
                   <FileDiff className="size-4" />
                 </button>
               ) : null}
@@ -306,8 +308,8 @@ export function MobileAppShell({
                 type="button"
                 className="ade-mob-icon-btn"
                 onClick={() => { setArtefactScope("session"); setTab("artefacts") }}
-                aria-label="Session artefacts"
-                title="Artefacts"
+                aria-label={t("wsx.mob.sessionArtefacts")}
+                title={t("wsx.mob.artefacts")}
               >
                 <Layers className="size-4" />
               </button>
@@ -318,14 +320,14 @@ export function MobileAppShell({
               className="ade-mob-action-pill"
               onClick={() => { setNewSheetProjectId(activeProject?.id ?? null); setNewSheetOpen(true) }}
             >
-              <Plus className="size-3.5" /> New
+              <Plus className="size-3.5" /> {t("wsx.mob.new")}
             </button>
           ) : tab === "inbox" ? (
-            <button type="button" className="ade-mob-icon-btn" onClick={() => void onRefreshSessions()} aria-label="Refresh">
+            <button type="button" className="ade-mob-icon-btn" onClick={() => void onRefreshSessions()} aria-label={t("wsx.mob.refresh")}>
               <RefreshCw className="size-4" />
             </button>
           ) : (
-            <button type="button" className="ade-mob-icon-btn" onClick={() => setDeviceSheetOpen(true)} aria-label="Device settings">
+            <button type="button" className="ade-mob-icon-btn" onClick={() => setDeviceSheetOpen(true)} aria-label={t("wsx.mob.deviceSettings")}>
               <Smartphone className="size-4" />
             </button>
           )}
@@ -340,7 +342,7 @@ export function MobileAppShell({
             sessionId={activeSession.id}
             filePath={openFilePath}
             onBack={() => setOpenFilePath(null)}
-            backLabel="Chat"
+            backLabel={t("wsx.mob.chat")}
             onMentionInChat={p => {
               onDraftChange(`${draft ? `${draft} ` : ""}\`${p}\` `)
               setOpenFilePath(null)
@@ -364,10 +366,10 @@ export function MobileAppShell({
               <div className="ade-mob-offline-card">
                 <WifiOff className="size-5 text-amber-400 shrink-0" />
                 <div className="flex-1">
-                  <strong>{hostName || "Host computer"} is offline or asleep</strong>
-                  <p>Wake your computer to resume live sessions and approvals.</p>
+                  <strong>{t("wsx.mob.hostOfflineTitle", { host: hostName || t("wsx.mob.hostComputer") })}</strong>
+                  <p>{t("wsx.mob.hostOfflineHint")}</p>
                 </div>
-                <button type="button" className="ade-btn ade-btn-xs" onClick={() => window.location.reload()}>Retry</button>
+                <button type="button" className="ade-btn ade-btn-xs" onClick={() => window.location.reload()}>{t("wsx.mob.retry")}</button>
               </div>
             ) : null}
 
@@ -376,26 +378,26 @@ export function MobileAppShell({
               <section className="ade-mob-section">
                 <div className="ade-mob-section-title">
                   <ShieldAlert className="size-3.5 text-[var(--accent)]" />
-                  <span>Approvals waiting ({approvals.length})</span>
+                  <span>{t("wsx.mob.approvalsWaitingCount", { count: approvals.length })}</span>
                 </div>
                 {approvals.map(a => (
                   <div key={a.id} className="ade-mob-approval-card">
                     <div className="ade-mob-approval-head">
                       <strong>{a.toolName}</strong>
-                      <span className="ade-pill ade-pill-warn">Action required</span>
+                      <span className="ade-pill ade-pill-warn">{t("wsx.mob.actionRequired")}</span>
                     </div>
                     <code className="ade-mob-approval-cmd">{a.command || a.summary}</code>
                     <div className="ade-mob-approval-btns">
                       <button type="button" className="ade-btn ade-btn-primary flex-1 justify-center" onClick={() => void onResolveApproval(a.id, { allow: true })}>
-                        <Check className="size-4" /> Allow
+                        <Check className="size-4" /> {t("wsx.mob.allow")}
                       </button>
                       {a.suggestedPrefix ? (
                         <button type="button" className="ade-btn flex-1 justify-center" onClick={() => void onResolveApproval(a.id, { allow: true, alwaysAllow: true, prefix: a.suggestedPrefix })}>
-                          Always
+                          {t("wsx.mob.always")}
                         </button>
                       ) : null}
-                      <button type="button" className="ade-btn ade-btn-danger" onClick={() => void onResolveApproval(a.id, { allow: false, reason: "Denied from phone" })}>
-                        <X className="size-4" /> Deny
+                      <button type="button" className="ade-btn ade-btn-danger" onClick={() => void onResolveApproval(a.id, { allow: false, reason: t("wsx.mob.deniedFromPhone") })}>
+                        <X className="size-4" /> {t("wsx.mob.deny")}
                       </button>
                     </div>
                   </div>
@@ -408,20 +410,20 @@ export function MobileAppShell({
               <section className="ade-mob-section">
                 <div className="ade-mob-section-title">
                   <Sparkles className="size-3.5 text-[var(--accent)]" />
-                  <span>Plans ready for review ({pendingArtifacts.length})</span>
+                  <span>{t("wsx.mob.plansReadyCount", { count: pendingArtifacts.length })}</span>
                 </div>
                 {pendingArtifacts.map(art => (
                   <div key={art.id} className="ade-mob-approval-card">
                     <div className="ade-mob-approval-head">
                       <strong>{art.title}</strong>
-                      <span className="ade-pill ade-pill-warn">Awaiting approval</span>
+                      <span className="ade-pill ade-pill-warn">{t("wsx.mob.awaitingApproval")}</span>
                     </div>
                     <div className="ade-mob-approval-btns">
                       <button type="button" className="ade-btn ade-btn-primary flex-1 justify-center" onClick={() => void onReviewArtifact(art, "approved")}>
-                        <Check className="size-4" /> Approve &amp; Proceed
+                        <Check className="size-4" /> {t("wsx.mob.approveProceed")}
                       </button>
                       <button type="button" className="ade-btn" onClick={() => { setArtefactScope("session"); setTab("artefacts") }}>
-                        Inspect
+                        {t("wsx.mob.inspect")}
                       </button>
                     </div>
                   </div>
@@ -432,12 +434,12 @@ export function MobileAppShell({
             {/* Active & Attention Sessions */}
             <section className="ade-mob-section">
               <div className="ade-mob-section-title">
-                <span>Sessions ({inboxSorted.length})</span>
+                <span>{t("wsx.mob.sessionsCount", { count: inboxSorted.length })}</span>
               </div>
               {inboxSorted.length === 0 ? (
                 <div className="ade-mob-empty">
                   <Inbox className="size-7 opacity-40" />
-                  <p>All clear. Start a session from the Sessions tab.</p>
+                  <p>{t("wsx.mob.inboxAllClear")}</p>
                 </div>
               ) : (
                 <div className="ade-mob-card-list">
@@ -457,11 +459,11 @@ export function MobileAppShell({
                         <div className="ade-mob-session-body">
                           <div className="ade-mob-session-top">
                             <strong className="ade-truncate">{sess.label}</strong>
-                            {isWorking ? <ActiveThreadSpinner size={14} title="Working" />
+                            {isWorking ? <ActiveThreadSpinner size={14} title={t("wsx.mob.working")} />
                               : stateMeta ? <span className={`ade-pill ${entry?.needsYou ? "ade-pill-warn" : ""}`}>{stateMeta.label}</span> : null}
                           </div>
                           <div className="ade-mob-session-sub ade-truncate">
-                            {proj ? proj.name : "Chat"}
+                            {proj ? proj.name : t("wsx.mob.chat")}
                             {sess.workspace?.branch ? ` · ${sess.workspace.branch}` : ""}
                           </div>
                         </div>
@@ -479,19 +481,19 @@ export function MobileAppShell({
               <Search className="size-4 opacity-60" />
               <input
                 type="search"
-                placeholder="Search projects & sessions…"
+                placeholder={t("wsx.mob.searchPlaceholder")}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                aria-label="Search projects and sessions"
+                aria-label={t("wsx.mob.searchAria")}
               />
             </div>
 
             <section className="ade-mob-section">
               <div className="ade-mob-section-head">
-                <span className="ade-mob-section-title">Projects ({projectList.length})</span>
+                <span className="ade-mob-section-title">{t("wsx.mob.projectsCount", { count: projectList.length })}</span>
               </div>
               {projectList.length === 0 ? (
-                <div className="ade-mob-empty-inline">No projects found.</div>
+                <div className="ade-mob-empty-inline">{t("wsx.mob.noProjectsFound")}</div>
               ) : (
                 <div className="ade-mob-project-stack">
                   {projectList.map(project => {
@@ -510,15 +512,15 @@ export function MobileAppShell({
                               type="button"
                               className="ade-chip-btn"
                               onClick={() => openProjectArtefacts(project.id)}
-                              title="Show all project artefacts"
+                              title={t("wsx.mob.showAllProjectArtefacts")}
                             >
-                              <Layers className="size-3" /> Artefacts
+                              <Layers className="size-3" /> {t("wsx.mob.artefacts")}
                             </button>
                             <button
                               type="button"
                               className="ade-chip-btn"
                               onClick={() => { setNewSheetProjectId(project.id); setNewSheetOpen(true) }}
-                              aria-label={`New session in ${project.name}`}
+                              aria-label={t("wsx.mob.newSessionIn", { name: project.name })}
                             >
                               <Plus className="size-3.5" />
                             </button>
@@ -530,7 +532,7 @@ export function MobileAppShell({
                             className="ade-mob-project-empty-btn"
                             onClick={() => { setNewSheetProjectId(project.id); setNewSheetOpen(true) }}
                           >
-                            + Start first session in {project.name}
+                            {t("wsx.mob.startFirstSessionIn", { name: project.name })}
                           </button>
                         ) : (
                           <div className="ade-mob-project-sessions">
@@ -545,7 +547,7 @@ export function MobileAppShell({
                                 >
                                   <span className={`ade-mob-session-dot ${working ? "is-working" : inboxEntries[sess.id]?.needsYou ? "is-attention" : "is-idle"}`} />
                                   <span className="ade-truncate flex-1">{sess.label}</span>
-                                  {working ? <ActiveThreadSpinner size={14} title="Working" /> : null}
+                                  {working ? <ActiveThreadSpinner size={14} title={t("wsx.mob.working")} /> : null}
                                   <ChevronRight className="size-3.5 opacity-40 shrink-0" />
                                 </button>
                               )
@@ -561,9 +563,9 @@ export function MobileAppShell({
 
             <section className="ade-mob-section">
               <div className="ade-mob-section-head">
-                <span className="ade-mob-section-title">Chats</span>
+                <span className="ade-mob-section-title">{t("wsx.mob.chats")}</span>
                 <button type="button" className="ade-chip-btn" onClick={() => onCreateChatThread("coding")}>
-                  <Plus className="size-3" /> New chat
+                  <Plus className="size-3" /> {t("wsx.mob.newChat")}
                 </button>
               </div>
               <div className="ade-mob-card-list">
@@ -580,7 +582,7 @@ export function MobileAppShell({
                       <div className="ade-mob-session-body">
                         <strong className="ade-truncate">{chat.label}</strong>
                       </div>
-                      {working ? <ActiveThreadSpinner size={14} title="Working" /> : null}
+                      {working ? <ActiveThreadSpinner size={14} title={t("wsx.mob.working")} /> : null}
                       <ChevronRight className="size-4 opacity-40 shrink-0" />
                     </button>
                   )
@@ -600,8 +602,8 @@ export function MobileAppShell({
                 workspacePath={workspacePath}
                 emptyTitle={activeSession.label}
                 emptySubtitle={hasWorkspace
-                  ? "Describe a task below. Tap any created file link to preview it full-screen."
-                  : "Ask anything or steer your agent remotely from your phone."}
+                  ? t("wsx.mob.emptyWithWorkspace")
+                  : t("wsx.mob.emptyNoWorkspace")}
                 onResolveApproval={onResolveApproval}
                 onOpenFile={hasWorkspace ? fp => setOpenFilePath(fp) : undefined}
                 onOpenExternalBrowser={onOpenExternalBrowser}
@@ -638,7 +640,7 @@ export function MobileAppShell({
         ) : (
           <div className="ade-mob-artefacts-wrap">
             {effectiveProjectForArtefacts ? (
-              <div className="ade-mob-scope-switch" role="tablist" aria-label="Artefact scope">
+              <div className="ade-mob-scope-switch" role="tablist" aria-label={t("wsx.mob.artefactScope")}>
                 <button
                   type="button"
                   role="tab"
@@ -646,7 +648,7 @@ export function MobileAppShell({
                   className={`ade-mob-scope-btn ${artefactScope === "session" ? "is-active" : ""}`}
                   onClick={() => setArtefactScope("session")}
                 >
-                  Session ({activeSession.label})
+                  {t("wsx.mob.scopeSession", { label: activeSession.label })}
                 </button>
                 <button
                   type="button"
@@ -655,7 +657,7 @@ export function MobileAppShell({
                   className={`ade-mob-scope-btn ${artefactScope === "project" ? "is-active" : ""}`}
                   onClick={() => setArtefactScope("project")}
                 >
-                  Project ({effectiveProjectForArtefacts.name})
+                  {t("wsx.mob.scopeProject", { name: effectiveProjectForArtefacts.name })}
                 </button>
               </div>
             ) : null}
@@ -692,7 +694,7 @@ export function MobileAppShell({
       </main>
 
       {/* Bottom Tab Navigation */}
-      <nav className="ade-mob-tabbar" aria-label="Mobile navigation">
+      <nav className="ade-mob-tabbar" aria-label={t("wsx.mob.mobileNavigation")}>
         <button
           type="button"
           className={`ade-mob-tab ${tab === "inbox" && !openFilePath && !diffOpen ? "is-active" : ""}`}
@@ -702,7 +704,7 @@ export function MobileAppShell({
             <Inbox className="size-5" />
             {badgeInbox > 0 ? <span className="ade-mob-tab-badge">{badgeInbox > 99 ? "99+" : badgeInbox}</span> : null}
           </span>
-          <span>Inbox</span>
+          <span>{t("wsx.mob.inbox")}</span>
         </button>
         <button
           type="button"
@@ -712,7 +714,7 @@ export function MobileAppShell({
           <span className="ade-mob-tab-icon">
             <Folder className="size-5" />
           </span>
-          <span>Sessions</span>
+          <span>{t("wsx.mob.sessions")}</span>
         </button>
         <button
           type="button"
@@ -721,9 +723,9 @@ export function MobileAppShell({
         >
           <span className="ade-mob-tab-icon">
             <MessageSquare className="size-5" />
-            {isBusy ? <span className="ade-mob-tab-live" aria-label="Agent working" /> : null}
+            {isBusy ? <span className="ade-mob-tab-live" aria-label={t("wsx.mob.agentWorking")} /> : null}
           </span>
-          <span>Chat</span>
+          <span>{t("wsx.mob.chat")}</span>
         </button>
         <button
           type="button"
@@ -734,7 +736,7 @@ export function MobileAppShell({
             <Layers className="size-5" />
             {badgeArtefacts > 0 ? <span className="ade-mob-tab-badge">{badgeArtefacts}</span> : null}
           </span>
-          <span>Artefacts</span>
+          <span>{t("wsx.mob.artefacts")}</span>
         </button>
       </nav>
 
@@ -755,11 +757,11 @@ export function MobileAppShell({
       {/* Device / Host Connection Sheet */}
       {deviceSheetOpen ? (
         <div className="ade-mob-sheet-backdrop" onClick={() => setDeviceSheetOpen(false)}>
-          <div className="ade-mob-sheet" role="dialog" aria-modal="true" aria-label="Device connection" onClick={e => e.stopPropagation()}>
+          <div className="ade-mob-sheet" role="dialog" aria-modal="true" aria-label={t("wsx.mob.deviceConnection")} onClick={e => e.stopPropagation()}>
             <div className="ade-mob-sheet-handle" aria-hidden="true" />
             <div className="ade-mob-sheet-head">
-              <strong>Connected host</strong>
-              <button type="button" className="ade-icon-btn" aria-label="Close" onClick={() => setDeviceSheetOpen(false)}>
+              <strong>{t("wsx.mob.connectedHost")}</strong>
+              <button type="button" className="ade-icon-btn" aria-label={t("wsx.mob.close")} onClick={() => setDeviceSheetOpen(false)}>
                 <X className="size-4" />
               </button>
             </div>
@@ -767,9 +769,9 @@ export function MobileAppShell({
               <div className="ade-mob-device-row">
                 <Wifi className="size-4 text-[var(--ok)]" />
                 <div>
-                  <strong>{hostName || "ADE Host"}</strong>
+                  <strong>{hostName || t("wsx.mob.adeHost")}</strong>
                   <div className="ade-muted ade-xs">
-                    {runtimeOnline ? (sseConnected ? "Live sync active" : "Connected") : "Host offline or asleep"}
+                    {runtimeOnline ? (sseConnected ? t("wsx.mob.liveSyncActive") : t("wsx.mob.connected")) : t("wsx.mob.hostOffline")}
                   </div>
                 </div>
               </div>
@@ -778,19 +780,19 @@ export function MobileAppShell({
                   <Smartphone className="size-4 opacity-75" />
                   <div>
                     <strong>{mobileSession.device.name}</strong>
-                    <div className="ade-muted ade-xs">Paired {new Date(mobileSession.device.pairedAt).toLocaleDateString()}</div>
+                    <div className="ade-muted ade-xs">{t("wsx.mob.pairedDate", { date: formatDay(mobileSession.device.pairedAt) })}</div>
                   </div>
                 </div>
               ) : null}
             </div>
             <div className="ade-mob-device-actions">
               <button type="button" className="ade-btn flex-1 justify-center" onClick={onToggleTheme}>
-                {resolvedTheme === "dark" ? <><Sun className="size-4" /> Light mode</> : <><Moon className="size-4" /> Dark mode</>}
+                {resolvedTheme === "dark" ? <><Sun className="size-4" /> {t("wsx.mob.lightMode")}</> : <><Moon className="size-4" /> {t("wsx.mob.darkMode")}</>}
               </button>
               {mobileSession?.mobileBridge ? (
                 <button type="button" className="ade-btn ade-btn-danger flex-1 justify-center" disabled={disconnecting} onClick={() => void handleDisconnect()}>
                   {disconnecting ? <Loader2 className="size-4 animate-spin" /> : <LogOut className="size-4" />}
-                  Unpair phone
+                  {t("wsx.mob.unpairPhone")}
                 </button>
               ) : null}
             </div>

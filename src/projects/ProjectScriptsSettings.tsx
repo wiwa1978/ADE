@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react"
 import { request, requestJson } from "../../api"
+import { useI18n } from "../i18n/I18nContext"
 
 type Scripts = { setup: string; run: string; copy: string[]; check: string; checkAutoFix: boolean }
 type ScriptsResponse = { saved: Scripts; repository: Scripts | null; effective: Scripts & { source: Record<string, string> } }
 
 /** Project settings section for the setup and run scripts used by every session in the project. */
 export function ProjectScriptsSettings({ projectId }: { projectId: string }) {
+  const { t } = useI18n()
   const [data, setData] = useState<ScriptsResponse | null>(null)
   const [setup, setSetup] = useState("")
   const [run, setRun] = useState("")
@@ -25,9 +27,9 @@ export function ProjectScriptsSettings({ projectId }: { projectId: string }) {
       setCopy(result.saved.copy.join("\n"))
       setCheck(result.saved.check ?? "")
       setCheckAutoFix(Boolean(result.saved.checkAutoFix))
-    }).catch(() => setMessage("Could not load the project's scripts."))
+    }).catch(() => setMessage(t("prjx.cfg.scripts.loadError")))
     return () => { active = false }
-  }, [projectId])
+  }, [projectId, t])
 
   const dirty = data ? setup !== data.saved.setup || run !== data.saved.run || copy.trim() !== data.saved.copy.join("\n") || check !== (data.saved.check ?? "") || checkAutoFix !== Boolean(data.saved.checkAutoFix) : false
 
@@ -37,9 +39,9 @@ export function ProjectScriptsSettings({ projectId }: { projectId: string }) {
     try {
       const result = await requestJson<ScriptsResponse>(`/api/projects/${encodeURIComponent(projectId)}/scripts`, "PUT", { setup, run, copy: copy.split("\n").map(line => line.trim()).filter(Boolean), check, checkAutoFix })
       setData(result)
-      setMessage("Saved. New sessions use these scripts.")
+      setMessage(t("prjx.cfg.scripts.savedMsg"))
     } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "Could not save the scripts.")
+      setMessage(cause instanceof Error ? cause.message : t("prjx.cfg.scripts.saveError"))
     } finally {
       setSaving(false)
     }
@@ -48,31 +50,31 @@ export function ProjectScriptsSettings({ projectId }: { projectId: string }) {
   const repo = data?.repository
   return (
     <section className="project-scripts" aria-labelledby="project-scripts-title">
-      <h3 id="project-scripts-title">Scripts</h3>
-      <p className="hint">Run automatically for every new session, so each agent starts with a working copy of the project.</p>
-      <label>Setup — runs when a session’s worktree is created
+      <h3 id="project-scripts-title">{t("prjx.cfg.scripts.title")}</h3>
+      <p className="hint">{t("prjx.cfg.scripts.intro")}</p>
+      <label>{t("prjx.cfg.scripts.setupLabel")}
         <textarea rows={2} value={setup} onChange={event => setSetup(event.target.value)} placeholder={repo?.setup || "npm install"} spellCheck={false} disabled={!data || saving} />
       </label>
-      <label>Copy into new worktrees — one path per line
+      <label>{t("prjx.cfg.scripts.copyLabel")}
         <textarea rows={2} value={copy} onChange={event => setCopy(event.target.value)} placeholder={repo?.copy.join("\n") || ".env\n.env.local"} spellCheck={false} disabled={!data || saving} />
-        <small className="hint">Files that aren’t in Git, such as .env, copied from the project folder.</small>
+        <small className="hint">{t("prjx.cfg.scripts.copyHint")}</small>
       </label>
-      <label>Run — starts the app from a session’s Run button
+      <label>{t("prjx.cfg.scripts.runLabel")}
         <textarea rows={2} value={run} onChange={event => setRun(event.target.value)} placeholder={repo?.run || "npm run dev -- --port $PORT"} spellCheck={false} disabled={!data || saving} />
-        <small className="hint">Each session gets its own free port in <code>$PORT</code>; the first URL the script prints opens in the session’s browser.</small>
+        <small className="hint">{t("prjx.cfg.scripts.runHintBefore")} <code>$PORT</code>{t("prjx.cfg.scripts.runHintAfter")}</small>
       </label>
-      <label>Check — runs after every agent turn
+      <label>{t("prjx.cfg.scripts.checkLabel")}
         <textarea rows={2} value={check} onChange={event => setCheck(event.target.value)} placeholder={repo?.check || "npm run lint && npm test"} spellCheck={false} disabled={!data || saving} />
-        <small className="hint">A hook for lint, typecheck or tests. The result shows in the session header and its Run panel.</small>
+        <small className="hint">{t("prjx.cfg.scripts.checkHint")}</small>
       </label>
       <label className="project-scripts-check">
         <input type="checkbox" checked={checkAutoFix} onChange={event => setCheckAutoFix(event.target.checked)} disabled={!data || saving} />
-        Send failures back to the agent automatically (at most twice in a row)
+        {t("prjx.cfg.scripts.checkAutoFix")}
       </label>
-      {repo ? <p className="hint">This repository has an <code>.ade/project.json</code>; empty fields here use its values (shown as placeholders).</p>
-        : <p className="hint">Tip: commit these as <code>.ade/project.json</code> to share them with your team.</p>}
+      {repo ? <p className="hint">{t("prjx.cfg.scripts.repoConfigBefore")} <code>.ade/project.json</code>{t("prjx.cfg.scripts.repoConfigAfter")}</p>
+        : <p className="hint">{t("prjx.cfg.scripts.tipBefore")} <code>.ade/project.json</code> {t("prjx.cfg.scripts.tipAfter")}</p>}
       <div className="form-actions">
-        <button type="button" className="action-button" disabled={!dirty || saving} onClick={() => void save()}>{saving ? "Saving…" : "Save scripts"}</button>
+        <button type="button" className="action-button" disabled={!dirty || saving} onClick={() => void save()}>{saving ? t("prjx.cfg.saving") : t("prjx.cfg.scripts.saveButton")}</button>
         {message ? <span className="hint" role="status">{message}</span> : null}
       </div>
     </section>

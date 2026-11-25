@@ -395,4 +395,10 @@ export const nlProjectsExt: Record<keyof typeof enProjectsExt, string> = {
   "prjx.auto.runNowTitle": "Nu een run starten",
   "prjx.auto.runNow": "Nu uitvoeren",
   "prjx.auto.deleteAria": "{name} verwijderen",
+
+  // --- Additional drawer & PR keys ---
+  "prjx.drawer.checkoutHint": "Geldt voor nieuwe sessies.",
+  "prjx.pr.minutesAgo": "{count}m geleden",
+  "prjx.pr.hoursAgo": "{count}u geleden",
+  "prjx.pr.daysAgo": "{count}d geleden",
 }

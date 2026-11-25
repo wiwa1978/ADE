@@ -5,6 +5,7 @@ import { Banner, Button, FolderPathInput, IconButton, Input, ModelProfileSelect 
 import { BUILTIN_BLUEPRINTS } from "../../packages/blueprints/index.ts"
 import type { GitHubConnection, Project, ProjectInput } from "../../packages/protocol/index.ts"
 import { useBlueprintOptions } from "../blueprints/blueprint-options"
+import { useI18n } from "../i18n/I18nContext"
 import { GitHubRepositoryPicker, type SearchGitHubRepositories } from "./GitHubRepositoryPicker"
 import { ProjectInstructionsSettings } from "./ProjectInstructionsSettings"
 import { ProjectRunOnSettings } from "./ProjectRunOnSettings"
@@ -43,6 +44,7 @@ export function ProjectSettings({
   width,
   paneRef,
 }: ProjectSettingsProps) {
+  const { t } = useI18n()
   const [name, setName] = useState(initialDraft?.name ?? project.name)
   const [githubUrl, setGithubUrl] = useState(repositoryName(initialDraft?.githubUrl ?? project.githubUrl ?? ""))
   const [repository, setRepository] = useState(initialDraft?.repository ?? project.repository ?? "")
@@ -90,7 +92,7 @@ export function ProjectSettings({
       setModelProfile(updated.modelProfile ?? "balanced")
       setSaved(true)
     } catch (cause) {
-      setSaveError(cause instanceof Error ? cause.message : "Could not save this project.")
+      setSaveError(cause instanceof Error ? cause.message : t("prjx.cfg.saveError"))
     } finally {
       setSaving(false)
     }
@@ -120,8 +122,8 @@ export function ProjectSettings({
       style={width ? { width } : undefined}
     >
       <div className="panel-title">
-        <h2 id="project-settings-title">Project settings</h2>
-        <IconButton aria-label="Close project settings" onClick={onClose}>
+        <h2 id="project-settings-title">{t("prjx.cfg.title")}</h2>
+        <IconButton aria-label={t("prjx.cfg.closeAria")} onClick={onClose}>
           <PanelRight size={16} />
         </IconButton>
       </div>
@@ -129,23 +131,23 @@ export function ProjectSettings({
       <form className="project-form" onSubmit={save}>
         {!project.repository && !project.githubUrl ? (
           <Banner tone="info">
-            Empty project — pick a local folder or link a GitHub repository below to finish setup.
+            {t("prjx.cfg.emptyBanner")}
           </Banner>
         ) : null}
 
         <div className="project-environment-label">
-          <span>Environment</span>
-          <strong>{environmentName ?? "This computer"}</strong>
-          <small>New sessions inherit this project’s environment.</small>
+          <span>{t("prjx.cfg.environment")}</span>
+          <strong>{environmentName ?? t("prjx.cfg.thisComputer")}</strong>
+          <small>{t("prjx.cfg.environmentHint")}</small>
         </div>
 
         <label>
-          Project name
+          {t("prjx.cfg.projectName")}
           <Input value={name} onChange={event => setName(event.target.value)} maxLength={100} required disabled={saving} />
         </label>
 
         <div className="project-field">
-          <label htmlFor="project-github-repo">GitHub repository <small>Optional</small></label>
+          <label htmlFor="project-github-repo">{t("prjx.cfg.githubRepo")} <small>{t("prjx.cfg.optional")}</small></label>
           <GitHubRepositoryPicker
             key={`${searchableAccount ?? "none"}:${open}`}
             login={searchableAccount}
@@ -155,26 +157,26 @@ export function ProjectSettings({
             onOpenSettings={openConnectionSettings}
             onSearch={onSearchRepositories}
           />
-          <p id="project-github-hint" className="hint">Search existing repositories, enter a URL, or create a new repository on GitHub.</p>
+          <p id="project-github-hint" className="hint">{t("prjx.cfg.githubHint")}</p>
           {!githubConnection && !githubStatusError ? (
-            <p className="hint" role="status">Checking GitHub connection…</p>
+            <p className="hint" role="status">{t("prjx.cfg.checkingGithub")}</p>
           ) : !githubAccount || githubStatusError ? (
             <>
-              <p className="hint">{githubStatusError ? "GitHub connection is unavailable." : "Connect GitHub in Settings to search repositories."}</p>
+              <p className="hint">{githubStatusError ? t("prjx.cfg.githubUnavailable") : t("prjx.cfg.connectGithubHint")}</p>
               <button type="button" className="text-button project-link" disabled={saving} onClick={openConnectionSettings}>
-                Open connection settings
+                {t("prjx.cfg.openConnectionSettings")}
               </button>
             </>
           ) : null}
           {project.githubUrl ? (
             <a className="text-button project-link" href={project.githubUrl} target="_blank" rel="noreferrer">
-              Open on GitHub <ArrowUpRight size={13} />
+              {t("prjx.cfg.openOnGithub")} <ArrowUpRight size={13} />
             </a>
           ) : null}
         </div>
 
         <div className="project-field">
-          <label htmlFor="project-local-checkout">Default local checkout <small>Optional</small></label>
+          <label htmlFor="project-local-checkout">{t("prjx.cfg.defaultLocalCheckout")} <small>{t("prjx.cfg.optional")}</small></label>
           <FolderPathInput
             id="project-local-checkout"
             value={repository}
@@ -184,34 +186,34 @@ export function ProjectSettings({
             disabled={saving}
             className="mt-1.5"
           />
-          <p id="project-checkout-hint" className="hint">Applies to new sessions.</p>
+          <p id="project-checkout-hint" className="hint">{t("prjx.drawer.checkoutHint")}</p>
         </div>
 
         <div className="project-field">
           <label>
-            Way of working
+            {t("prjx.cfg.wayOfWorking")}
             <select
               className="sf-field mt-1.5"
               value={blueprintId}
               onChange={e => setBlueprintId(e.target.value)}
               disabled={saving}
             >
-              {(blueprintOptions.length ? blueprintOptions : [{ id: "vibe", name: "Vibe coding" }, ...BUILTIN_BLUEPRINTS]).map(bp => (
+              {(blueprintOptions.length ? blueprintOptions : [{ id: "vibe", name: t("prjx.wiz.cfg.vibeCoding") }, ...BUILTIN_BLUEPRINTS]).map(bp => (
                 <option key={bp.id} value={bp.id}>{bp.name}</option>
               ))}
             </select>
           </label>
-          <p className="hint">The default for new sessions in this project. Vibe coding has no stages; a blueprint takes each session through its stages, and you approve the gated ones.</p>
+          <p className="hint">{t("prjx.cfg.wayOfWorkingHint")}</p>
           <label className="project-check">
             <input type="checkbox" checked={blueprintLocked} onChange={e => setBlueprintLocked(e.target.checked)} disabled={saving} />
-            Every session uses this way of working
+            {t("prjx.cfg.lockWayOfWorking")}
           </label>
-          <p className="hint">For team or regulated repositories: sessions can't pick another one (Vibe included).</p>
+          <p className="hint">{t("prjx.cfg.lockWayOfWorkingHint")}</p>
         </div>
 
         <div className="project-field">
           <label>
-            Model Profile
+            {t("prjx.cfg.modelProfile")}
             <ModelProfileSelect
               value={modelProfile}
               onChange={setModelProfile}
@@ -225,9 +227,9 @@ export function ProjectSettings({
 
         <div className="form-actions">
           <Button type="submit" variant="primary" loading={saving} disabled={!dirty || !name.trim()}>
-            {saving ? "Saving…" : "Save changes"}
+            {saving ? t("prjx.cfg.saving") : t("prjx.cfg.saveChanges")}
           </Button>
-          {saved && !dirty ? <span className="hint" role="status">Saved</span> : null}
+          {saved && !dirty ? <span className="hint" role="status">{t("prjx.cfg.saved")}</span> : null}
         </div>
       </form>
 

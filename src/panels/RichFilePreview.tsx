@@ -15,6 +15,7 @@ import {
 } from "lucide-react"
 import { request, resolveCaptainUrl, requestJson } from "../../api"
 import { MessageContent } from "../../MessageContent"
+import { useI18n } from "../i18n/I18nContext"
 import {
   formatFileSize,
   getFilePreviewKind,
@@ -35,7 +36,7 @@ export function RichFilePreview({
   projectId,
   filePath,
   onBack,
-  backLabel = "Back",
+  backLabel,
   onMentionInChat,
   onSaved,
   canEdit,
@@ -51,6 +52,8 @@ export function RichFilePreview({
   canEdit?: boolean
   toolbarExtra?: ReactNode
 }) {
+  const { t } = useI18n()
+  const resolvedBackLabel = backLabel ?? t("pnlx.files.back")
   const scopeQuery = projectId
     ? `projectId=${encodeURIComponent(projectId)}`
     : `sessionId=${encodeURIComponent(sessionId ?? "")}`
@@ -99,11 +102,11 @@ export function RichFilePreview({
       setSize(res.size)
       setBinary(res.binary)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not open file.")
+      setError(err instanceof Error ? err.message : t("pnlx.files.errOpenFile"))
     } finally {
       setLoading(false)
     }
-  }, [scopeQuery, filePath])
+  }, [scopeQuery, filePath, t])
 
   useEffect(() => {
     let cancelled = false
@@ -123,11 +126,11 @@ export function RichFilePreview({
       })
       .catch(err => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : "Could not open file.")
+        setError(err instanceof Error ? err.message : t("pnlx.files.errOpenFile"))
         setLoading(false)
       })
     return () => { cancelled = true }
-  }, [scopeQuery, filePath])
+  }, [scopeQuery, filePath, t])
 
   const dirty = content !== original
   const previewKind = getFilePreviewKind(filePath, mimeType, binary)
@@ -149,11 +152,11 @@ export function RichFilePreview({
       setTimeout(() => setSavedToast(false), 1800)
       onSaved?.()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save file.")
+      setError(err instanceof Error ? err.message : t("pnlx.files.errSaveFile"))
     } finally {
       setSaving(false)
     }
-  }, [sessionId, filePath, content, onSaved])
+  }, [sessionId, filePath, content, onSaved, t])
 
   const copyText = useCallback(async () => {
     try {
@@ -173,13 +176,13 @@ export function RichFilePreview({
         <div className="ade-file-header-meta ade-truncate">
           {onBack ? (
             <button type="button" className="ade-chip-btn" onClick={onBack}>
-              <ArrowLeft className="size-3" /> {backLabel}
+              <ArrowLeft className="size-3" /> {resolvedBackLabel}
             </button>
           ) : null}
           <code className="ade-mono ade-truncate" title={filePath}>{filePath}</code>
-          <span className="ade-pill">{previewKind === "image" ? (language || "image") : language}</span>
+          <span className="ade-pill">{previewKind === "image" ? (language || t("pnlx.files.imageFallback")) : language}</span>
           {size !== undefined ? <span className="ade-muted ade-xs shrink-0">{formatFileSize(size)}</span> : null}
-          {dirty ? <span className="ade-pill ade-pill-warn">Unsaved</span> : null}
+          {dirty ? <span className="ade-pill ade-pill-warn">{t("pnlx.files.unsaved")}</span> : null}
         </div>
         <div className="ade-toolbar-actions">
           {hasRichPreview && !editing ? (
@@ -187,9 +190,9 @@ export function RichFilePreview({
               type="button"
               className="ade-chip-btn"
               onClick={() => setViewMode(m => (m === "preview" ? "source" : "preview"))}
-              title={viewMode === "preview" ? "View source" : "View rendered preview"}
+              title={viewMode === "preview" ? t("pnlx.files.viewSourceTitle") : t("pnlx.files.viewPreviewTitle")}
             >
-              {viewMode === "preview" ? <><Code2 className="size-3.5" /> Source</> : <><Eye className="size-3.5" /> Preview</>}
+              {viewMode === "preview" ? <><Code2 className="size-3.5" /> {t("pnlx.files.source")}</> : <><Eye className="size-3.5" /> {t("pnlx.files.preview")}</>}
             </button>
           ) : null}
           {previewKind === "image" || (previewKind === "svg" && viewMode === "preview") ? (
@@ -197,9 +200,9 @@ export function RichFilePreview({
               type="button"
               className="ade-chip-btn"
               onClick={() => setImageFit(f => !f)}
-              title={imageFit ? "View at actual size (1:1)" : "Fit image to sidebar"}
+              title={imageFit ? t("pnlx.files.actualSizeTitle") : t("pnlx.files.fitSidebarTitle")}
             >
-              {imageFit ? <><Maximize2 className="size-3" /> 1:1</> : <><Minimize2 className="size-3" /> Fit</>}
+              {imageFit ? <><Maximize2 className="size-3" /> 1:1</> : <><Minimize2 className="size-3" /> {t("pnlx.files.fit")}</>}
             </button>
           ) : null}
           {previewKind === "image" || previewKind === "pdf" || previewKind === "svg" ? (
@@ -208,33 +211,33 @@ export function RichFilePreview({
               target="_blank"
               rel="noopener noreferrer"
               className="ade-chip-btn"
-              title="Open raw file in new tab"
+              title={t("pnlx.files.openRawTitle")}
             >
-              <ExternalLink className="size-3" /> Raw
+              <ExternalLink className="size-3" /> {t("pnlx.files.raw")}
             </a>
           ) : null}
           {!binary && !editing ? (
-            <button type="button" className="ade-chip-btn" onClick={() => void copyText()} title="Copy file contents">
-              {copiedToast ? <><Check className="size-3.5" /> Copied</> : <><Copy className="size-3.5" /> Copy</>}
+            <button type="button" className="ade-chip-btn" onClick={() => void copyText()} title={t("pnlx.files.copyContentsTitle")}>
+              {copiedToast ? <><Check className="size-3.5" /> {t("pnlx.files.copied")}</> : <><Copy className="size-3.5" /> {t("pnlx.files.copy")}</>}
             </button>
           ) : null}
           {onMentionInChat ? (
-            <button type="button" className="ade-chip-btn" onClick={() => onMentionInChat(filePath)} title="Reference this file in composer">
-              <MessageSquarePlus className="size-3.5" /> Ask
+            <button type="button" className="ade-chip-btn" onClick={() => onMentionInChat(filePath)} title={t("pnlx.files.mentionTitle")}>
+              <MessageSquarePlus className="size-3.5" /> {t("pnlx.files.ask")}
             </button>
           ) : null}
           {editable && !binary ? (
             <button type="button" className="ade-chip-btn" onClick={() => setEditing(e => !e)}>
-              {editing ? <><Eye className="size-3.5" /> View</> : <><Edit3 className="size-3.5" /> Edit</>}
+              {editing ? <><Eye className="size-3.5" /> {t("pnlx.files.view")}</> : <><Edit3 className="size-3.5" /> {t("pnlx.files.edit")}</>}
             </button>
           ) : null}
           {editing ? (
             <button type="button" className="ade-btn ade-btn-primary ade-btn-xs" disabled={saving || !dirty} onClick={() => void save()}>
-              {savedToast ? <><Check className="size-3.5" /> Saved</> : <><Save className="size-3.5" /> Save</>}
+              {savedToast ? <><Check className="size-3.5" /> {t("pnlx.files.saved")}</> : <><Save className="size-3.5" /> {t("pnlx.files.save")}</>}
             </button>
           ) : null}
           {toolbarExtra}
-          <button type="button" className="ade-icon-btn" onClick={() => void load()} title="Reload file" aria-label="Reload file">
+          <button type="button" className="ade-icon-btn" onClick={() => void load()} title={t("pnlx.files.reloadFile")} aria-label={t("pnlx.files.reloadFile")}>
             <RefreshCw className="size-3.5" />
           </button>
         </div>
@@ -244,7 +247,7 @@ export function RichFilePreview({
 
       <div className={`ade-pane-scroll ${previewKind === "image" || (previewKind === "svg" && viewMode === "preview") ? "ade-image-surface" : previewKind === "markdown" && viewMode === "preview" && !editing ? "ade-artifact-body" : "ade-code-surface"}`}>
         {loading ? (
-          <div className="ade-pane-note">Loading {filePath}…</div>
+          <div className="ade-pane-note">{t("pnlx.files.loadingFile", { path: filePath })}</div>
         ) : editing ? (
           <textarea
             className="ade-code-editor"
@@ -299,9 +302,9 @@ export function RichFilePreview({
           </div>
         ) : binary ? (
           <div className="ade-pane-note">
-            Binary file ({mimeType || "unknown type"}) cannot be displayed as text.
+            {t("pnlx.files.binaryFile", { mimeType: mimeType || t("pnlx.files.unknownType") })}
             {" "}
-            <a href={rawUrl} target="_blank" rel="noopener noreferrer" className="underline">Download / open raw</a>
+            <a href={rawUrl} target="_blank" rel="noopener noreferrer" className="underline">{t("pnlx.files.downloadOpenRaw")}</a>
           </div>
         ) : previewKind === "code" && highlightLang && content.length <= 200_000 ? (
           <div className="ade-highlighted-code-wrap">

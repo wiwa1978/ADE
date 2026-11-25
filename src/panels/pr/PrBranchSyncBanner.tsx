@@ -1,5 +1,6 @@
 import { AlertTriangle, GitBranch, GitMerge, Wrench } from "lucide-react"
 import { Button, useConfirm } from "../../../components/ui/index.ts"
+import { useI18n } from "../../i18n/I18nContext"
 import type { BranchStatus } from "./usePullRequestState"
 
 interface PrBranchSyncBannerProps {
@@ -27,29 +28,30 @@ export function PrBranchSyncBanner({
   onUpdateBranch,
   onOpenChanges,
 }: PrBranchSyncBannerProps) {
+  const { t } = useI18n()
   const { confirm } = useConfirm()
   const askDisabled = Boolean(busy) || agentBusy
-  const askTitle = agentBusy ? "The agent is working. Try again when it is done." : undefined
+  const askTitle = agentBusy ? t("pnlx.pr.agentWorkingTryAgain") : undefined
 
   if (status.mergeInProgress) {
     return (
-      <section className="ade-review-section is-error" aria-label="Update stopped on conflicts">
+      <section className="ade-review-section is-error" aria-label={t("pnlx.pr.conflictsAria")}>
         <header>
           <AlertTriangle className="size-3.5" />
-          <span>Update from {baseName} stopped on conflicts</span>
+          <span>{t("pnlx.pr.conflictsHeader", { baseName })}</span>
         </header>
         {status.conflicts.length ? (
           <ul className="ade-conflict-list">
             {status.conflicts.map(file => <li key={file}>{file}</li>)}
           </ul>
         ) : (
-          <p>All conflicts are resolved.</p>
+          <p>{t("pnlx.pr.allConflictsResolved")}</p>
         )}
-        <p>Resolve the files (or ask the agent), then finish the update. ADE stages the resolved files and commits the merge.</p>
+        <p>{t("pnlx.pr.resolveInstructions")}</p>
         <div className="ade-review-actions">
           {canAskAgent && status.conflicts.length ? (
             <Button variant="primary" size="xs" disabled={askDisabled} loading={busy === "conflicts"} title={askTitle} onClick={onResolveConflicts}>
-              <Wrench className="size-3.5" /> {busy === "conflicts" ? "Sending…" : "Ask the agent to resolve"}
+              <Wrench className="size-3.5" /> {busy === "conflicts" ? t("pnlx.pr.sending") : t("pnlx.pr.askResolve")}
             </Button>
           ) : null}
           <Button
@@ -57,10 +59,10 @@ export function PrBranchSyncBanner({
             size="xs"
             disabled={Boolean(busy) || agentBusy}
             loading={busy === "finish"}
-            title={agentBusy ? "Wait for the agent to finish" : "Stage the resolved files and commit the merge"}
+            title={agentBusy ? t("pnlx.pr.waitForAgent") : t("pnlx.pr.finishUpdateTitle")}
             onClick={onFinishUpdate}
           >
-            <GitMerge className="size-3" /> {busy === "finish" ? "Finishing…" : "Finish update"}
+            <GitMerge className="size-3" /> {busy === "finish" ? t("pnlx.pr.finishing") : t("pnlx.pr.finishUpdate")}
           </Button>
           <Button
             variant="chip"
@@ -69,19 +71,19 @@ export function PrBranchSyncBanner({
             loading={busy === "abort"}
             onClick={() => {
               void confirm({
-                title: "Abort branch update?",
-                description: "Abort the update and go back to the branch as it was?",
-                confirmLabel: "Abort update",
+                title: t("pnlx.pr.abortTitle"),
+                description: t("pnlx.pr.abortDesc"),
+                confirmLabel: t("pnlx.pr.abortConfirm"),
                 destructive: true,
               }).then(ok => {
                 if (ok) onAbortUpdate()
               })
             }}
           >
-            {busy === "abort" ? "Aborting…" : "Abort update"}
+            {busy === "abort" ? t("pnlx.pr.aborting") : t("pnlx.pr.abortConfirm")}
           </Button>
           <Button variant="chip" size="xs" onClick={onOpenChanges}>
-            Open Changes
+            {t("pnlx.pr.openChanges")}
           </Button>
         </div>
       </section>
@@ -90,22 +92,22 @@ export function PrBranchSyncBanner({
 
   if (status.behindBase > 0) {
     return (
-      <section className="ade-review-section is-warn" aria-label="Branch is behind">
+      <section className="ade-review-section is-warn" aria-label={t("pnlx.pr.behindAria")}>
         <header>
           <GitBranch className="size-3.5" />
-          <span>{status.behindBase} new commit{status.behindBase === 1 ? "" : "s"} on {baseName}</span>
+          <span>{t(status.behindBase === 1 ? "pnlx.pr.newCommitOne" : "pnlx.pr.newCommitMany", { count: status.behindBase, baseName })}</span>
           <Button
             variant="chip"
             size="xs"
             disabled={Boolean(busy) || agentBusy}
             loading={busy === "update"}
-            title={agentBusy ? "Wait for the agent to finish" : `Merge ${baseName} into this branch`}
+            title={agentBusy ? t("pnlx.pr.waitForAgent") : t("pnlx.pr.mergeIntoTitle", { baseName })}
             onClick={onUpdateBranch}
           >
-            {busy === "update" ? "Updating…" : "Update branch"}
+            {busy === "update" ? t("pnlx.pr.updating") : t("pnlx.pr.updateBranch")}
           </Button>
         </header>
-        <p>Bring them in now to catch conflicts early. ADE merges {baseName} into the session’s branch; nothing is rewritten.</p>
+        <p>{t("pnlx.pr.behindDesc", { baseName })}</p>
       </section>
     )
   }

@@ -15,6 +15,7 @@ import {
 } from "./worktree-modal/useWorktreeSourceData"
 import { WorktreeAdvancedSection } from "./worktree-modal/WorktreeAdvancedSection"
 import { WorktreeSourceTabs } from "./worktree-modal/WorktreeSourceTabs"
+import { useI18n } from "../i18n/I18nContext"
 
 export interface CreateWorktreeModalProps {
   open: boolean
@@ -38,6 +39,7 @@ function CreateWorktreeModalDialog({
   projects, initialProjectId, environmentName, starting, error,
   onClose, onAddProject, onOpenProviderSettings, onCreate,
 }: CreateWorktreeModalProps) {
+  const { t } = useI18n()
   const unarchived = useMemo(() => projects.filter(p => !p.archivedAt), [projects])
   const initialProject = unarchived.find(p => p.id === initialProjectId) ?? unarchived[0] ?? null
 
@@ -80,7 +82,7 @@ function CreateWorktreeModalDialog({
   const submitCreate = useCallback(async () => {
     if (!canCreate) {
       if (kind !== "none" && !effectiveRepo) {
-        setLocalError("Attach a local folder (under Advanced) or pick a project with a repository.")
+        setLocalError(t("wsx.ws.attachRepoError"))
         setAdvancedOpen(true)
       }
       return
@@ -98,11 +100,11 @@ function CreateWorktreeModalDialog({
         onClose()
       }
     } catch (err) {
-      setLocalError(err instanceof Error ? err.message : "Could not create worktree.")
+      setLocalError(err instanceof Error ? err.message : t("wsx.ws.couldNotCreateWorktree"))
     }
   }, [
     activeProjectId, attempts, canCreate, createMore, effectiveRepo, engine,
-    fromTab, kind, onClose, onCreate, queryText, runOn, selectedBranch, selectedIssue, selectedPr,
+    fromTab, kind, onClose, onCreate, queryText, runOn, selectedBranch, selectedIssue, selectedPr, t,
   ])
 
   useEscapeKey(() => { if (!starting) onClose() }, true)
@@ -119,10 +121,10 @@ function CreateWorktreeModalDialog({
 
   return (
     <div className="ade-cmd-backdrop" onClick={e => { if (e.target === e.currentTarget && !starting) onClose() }}>
-      <div className="ade-wt-modal" role="dialog" aria-modal="true" aria-label="Create worktree">
+      <div className="ade-wt-modal" role="dialog" aria-modal="true" aria-label={t("wsx.ws.createWorktree")}>
         <div className="ade-wt-head">
-          <h2>Create worktree</h2>
-          <IconButton onClick={onClose} disabled={starting} aria-label="Close"><X className="size-4" /></IconButton>
+          <h2>{t("wsx.ws.createWorktree")}</h2>
+          <IconButton onClick={onClose} disabled={starting} aria-label={t("wsx.ws.close")}><X className="size-4" /></IconButton>
         </div>
 
         {(error || localError) ? <div className="px-5"><Banner tone="error">{localError || error}</Banner></div> : null}
@@ -131,8 +133,8 @@ function CreateWorktreeModalDialog({
           <div className="ade-wt-grid-2">
             <div className="ade-wt-field">
               <div className="ade-wt-label-row">
-                <label htmlFor="wt-project">Project</label>
-                <IconButton title="Add new project" aria-label="Add new project" onClick={() => { onClose(); onAddProject() }}>
+                <label htmlFor="wt-project">{t("wsx.ws.project")}</label>
+                <IconButton title={t("wsx.ws.addNewProject")} aria-label={t("wsx.ws.addNewProject")} onClick={() => { onClose(); onAddProject() }}>
                   <FolderPlus className="size-3.5" />
                 </IconButton>
               </div>
@@ -146,13 +148,13 @@ function CreateWorktreeModalDialog({
                   setSelectedBranch(""); setSelectedPr(null); setSelectedIssue(null)
                 }}
               >
-                {unarchived.length === 0 ? <option value="">No projects yet</option> : null}
+                {unarchived.length === 0 ? <option value="">{t("wsx.ws.noProjectsYet")}</option> : null}
                 {unarchived.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
 
             <div className="ade-wt-field">
-              <div className="ade-wt-label-row"><label htmlFor="wt-run-on">Run on</label></div>
+              <div className="ade-wt-label-row"><label htmlFor="wt-run-on">{t("wsx.ws.runOn")}</label></div>
               <div className="ade-wt-select-wrap">
                 <Laptop className="size-3.5 opacity-60 shrink-0" />
                 <select id="wt-run-on" className="ade-wt-select-bare" value={runOn} onChange={e => setRunOn(e.target.value as RunTarget)}>
@@ -178,8 +180,8 @@ function CreateWorktreeModalDialog({
 
           <div className="ade-wt-field">
             <div className="ade-wt-label-row">
-              <label htmlFor="wt-agent">Agent <span className="opacity-50 font-normal">[Optional]</span></label>
-              <IconButton title="Configure providers" aria-label="Configure providers" onClick={() => { onClose(); onOpenProviderSettings() }}>
+              <label htmlFor="wt-agent">{t("wsx.ws.agent")} <span className="opacity-50 font-normal">{t("wsx.ws.optionalTag")}</span></label>
+              <IconButton title={t("wsx.ws.configureProviders")} aria-label={t("wsx.ws.configureProviders")} onClick={() => { onClose(); onOpenProviderSettings() }}>
                 <SlidersHorizontal className="size-3.5" />
               </IconButton>
             </div>
@@ -201,9 +203,9 @@ function CreateWorktreeModalDialog({
         </div>
 
         <div className="ade-wt-footer">
-          <Switch checked={createMore} onCheckedChange={setCreateMore} label="Create more" showLabel />
+          <Switch checked={createMore} onCheckedChange={setCreateMore} label={t("wsx.ws.createMore")} showLabel />
           <Button variant="primary" size="md" className="ade-wt-create-btn" loading={starting} disabled={!canCreate} onClick={() => void submitCreate()}>
-            <span>{starting ? "Creating…" : "Create"}</span>
+            <span>{starting ? t("wsx.ws.creating") : t("wsx.ws.create")}</span>
             <kbd>⌘↩</kbd>
           </Button>
         </div>

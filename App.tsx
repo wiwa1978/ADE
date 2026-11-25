@@ -26,6 +26,7 @@ import { MobileAuthGate, type MobileSessionState } from "./src/mobile/MobileAuth
 import { MobileAppShell } from "./src/mobile/MobileAppShell"
 import { useIsMobile } from "./src/mobile/useIsMobile"
 import { I18nProvider } from "./src/i18n/I18nProvider"
+import { useI18n } from "./src/i18n/I18nContext"
 import { request } from "./api"
 
 type LastView = { screen?: Screen; activeSessionId?: string; selectedProjectId?: string | null; expandedProjects?: string[] }
@@ -62,6 +63,7 @@ export default function App() {
 }
 
 function AppInner({ settingsHook }: { settingsHook: ReturnType<typeof useSettings> }) {
+  const { t } = useI18n()
   const [lastView] = useState(readLastView)
   const { settings, error: settingsError, resolved, update } = settingsHook
   const [screen, setScreen] = useState<Screen>(() => lastView.screen === "project" || lastView.screen === "work" ? lastView.screen : String(lastView.screen) === "factory" ? "project" : "inbox")
@@ -454,8 +456,8 @@ function AppInner({ settingsHook }: { settingsHook: ReturnType<typeof useSetting
       <>
         {mobileSession?.mobileBridge && mobileSession.paired && urlFlags.paired && !pairedToastDismissed ? (
           <div className="ade-mobile-paired-toast" role="status">
-            <span>Connected to <strong>{mobileSession.hostName}</strong>{mobileSession.device?.name ? ` · ${mobileSession.device.name}` : ""}</span>
-            <button type="button" className="ade-chip-btn" onClick={() => setPairedToastDismissed(true)}>Done</button>
+            <span>{t("wsx.app.connectedTo")} <strong>{mobileSession.hostName}</strong>{mobileSession.device?.name ? ` · ${mobileSession.device.name}` : ""}</span>
+            <button type="button" className="ade-chip-btn" onClick={() => setPairedToastDismissed(true)}>{t("wsx.app.done")}</button>
           </div>
         ) : null}
         <MobileAppShell
@@ -517,8 +519,8 @@ function AppInner({ settingsHook }: { settingsHook: ReturnType<typeof useSetting
     <div className="ade-app-shell">
       {mobileSession?.mobileBridge && mobileSession.paired && urlFlags.paired && !pairedToastDismissed ? (
         <div className="ade-mobile-paired-toast" role="status">
-          <span>Connected to <strong>{mobileSession.hostName}</strong>{mobileSession.device?.name ? ` · ${mobileSession.device.name}` : ""}</span>
-          <button type="button" className="ade-chip-btn" onClick={() => setPairedToastDismissed(true)}>Done</button>
+          <span>{t("wsx.app.connectedTo")} <strong>{mobileSession.hostName}</strong>{mobileSession.device?.name ? ` · ${mobileSession.device.name}` : ""}</span>
+          <button type="button" className="ade-chip-btn" onClick={() => setPairedToastDismissed(true)}>{t("wsx.app.done")}</button>
         </div>
       ) : null}
       {/* Settings take over the window (they have their own navigation and a Back button). */}

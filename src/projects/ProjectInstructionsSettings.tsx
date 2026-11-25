@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { request, requestJson } from "../../api"
+import { useI18n } from "../i18n/I18nContext"
 
 type InstructionFile = { name: "AGENTS.md" | "CLAUDE.md"; readBy: string; exists: boolean; content: string }
 
@@ -8,6 +9,7 @@ type InstructionFile = { name: "AGENTS.md" | "CLAUDE.md"; readBy: string; exists
  * They live in the repository root, so commit them to share them with your team.
  */
 export function ProjectInstructionsSettings({ projectId }: { projectId: string }) {
+  const { t } = useI18n()
   const [files, setFiles] = useState<InstructionFile[] | null>(null)
   const [active, setActive] = useState<InstructionFile["name"]>("AGENTS.md")
   const [drafts, setDrafts] = useState<Record<string, string>>({})
@@ -25,9 +27,9 @@ export function ProjectInstructionsSettings({ projectId }: { projectId: string }
         const existing = result.files.find(file => file.exists)
         if (existing) setActive(existing.name)
       })
-      .catch(err => { if (!cancelled) setMessage(err instanceof Error ? err.message : "Could not read the instruction files.") })
+      .catch(err => { if (!cancelled) setMessage(err instanceof Error ? err.message : t("prjx.cfg.instr.readError")) })
     return () => { cancelled = true }
-  }, [projectId])
+  }, [projectId, t])
 
   const file = files?.find(item => item.name === active)
   const draft = drafts[active] ?? ""
@@ -39,9 +41,9 @@ export function ProjectInstructionsSettings({ projectId }: { projectId: string }
     try {
       const result = await requestJson<{ files: InstructionFile[] }>(`/api/projects/${encodeURIComponent(projectId)}/instructions`, "PUT", { name: active, content: draft })
       setFiles(result.files)
-      setMessage(`Saved ${active}. New messages use it.`)
+      setMessage(t("prjx.cfg.instr.savedMsg", { file: active }))
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Could not save.")
+      setMessage(err instanceof Error ? err.message : t("prjx.cfg.instr.saveError"))
     } finally {
       setSaving(false)
     }
@@ -49,9 +51,9 @@ export function ProjectInstructionsSettings({ projectId }: { projectId: string }
 
   return (
     <section className="project-scripts" aria-labelledby="project-instructions-title">
-      <h3 id="project-instructions-title">Agent instructions</h3>
-      <p className="hint">Conventions agents read before every task: how to build and test, code style, what not to touch. Saved in the project folder.</p>
-      <div className="st-segmented" role="tablist" aria-label="Instruction file">
+      <h3 id="project-instructions-title">{t("prjx.cfg.instr.title")}</h3>
+      <p className="hint">{t("prjx.cfg.instr.intro")}</p>
+      <div className="st-segmented" role="tablist" aria-label={t("prjx.cfg.instr.tablistAria")}>
         {(files ?? [{ name: "AGENTS.md" }, { name: "CLAUDE.md" }] as Array<Pick<InstructionFile, "name"> & Partial<InstructionFile>>).map(item => (
           <button
             key={item.name}
@@ -74,13 +76,13 @@ export function ProjectInstructionsSettings({ projectId }: { projectId: string }
           disabled={!files || saving}
           onChange={event => setDrafts(current => ({ ...current, [active]: event.target.value }))}
           placeholder={active === "AGENTS.md"
-            ? "# How to work in this project\n\n- Install with `npm install`; run tests with `npm test`.\n- Keep changes small and add tests for new behaviour."
-            : "# Claude Code instructions\n\nSee AGENTS.md for build and test commands."}
+            ? t("prjx.cfg.instr.agentsPlaceholder")
+            : t("prjx.cfg.instr.claudePlaceholder")}
         />
-        {file ? <small className="hint">Read by {file.readBy}.{file.exists ? "" : " It doesn’t exist yet; saving creates it in the project folder."}</small> : null}
+        {file ? <small className="hint">{t("prjx.cfg.instr.readBy", { readBy: file.readBy })}{file.exists ? "" : t("prjx.cfg.instr.notCreatedYet")}</small> : null}
       </label>
       <div className="form-actions">
-        <button type="button" className="action-button" disabled={!dirty || saving} onClick={() => void save()}>{saving ? "Saving…" : `Save ${active}`}</button>
+        <button type="button" className="action-button" disabled={!dirty || saving} onClick={() => void save()}>{saving ? t("prjx.cfg.saving") : t("prjx.cfg.instr.saveButton", { file: active })}</button>
         {message ? <span className="hint" role="status">{message}</span> : null}
       </div>
     </section>

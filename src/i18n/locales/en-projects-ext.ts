@@ -393,4 +393,10 @@ export const enProjectsExt = {
   "prjx.auto.runNowTitle": "Start a run now",
   "prjx.auto.runNow": "Run now",
   "prjx.auto.deleteAria": "Delete {name}",
+
+  // --- Additional drawer & PR keys ---
+  "prjx.drawer.checkoutHint": "Applies to new sessions.",
+  "prjx.pr.minutesAgo": "{count}m ago",
+  "prjx.pr.hoursAgo": "{count}h ago",
+  "prjx.pr.daysAgo": "{count}d ago",
 } as const

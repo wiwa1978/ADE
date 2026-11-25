@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react"
 import { request, requestJson } from "../../api"
+import { useI18n } from "../i18n/I18nContext"
 import { runTargetDescriptions, targetLabel, targetUnavailable, useRunTargets, type TargetSettings } from "../run-targets"
 
 /** Project settings: where new sessions run by default, with the settings each target needs. */
 export function ProjectRunOnSettings({ projectId }: { projectId: string }) {
+  const { t } = useI18n()
   const info = useRunTargets()
   const [saved, setSaved] = useState<TargetSettings | null>(null)
   const [draft, setDraft] = useState<TargetSettings | null>(null)
@@ -31,9 +33,9 @@ export function ProjectRunOnSettings({ projectId }: { projectId: string }) {
       const result = await requestJson<TargetSettings>(`/api/projects/${encodeURIComponent(projectId)}/run-on`, "PUT", draft)
       setSaved(result)
       setDraft(result)
-      setMessage("Saved. New sessions use this.")
+      setMessage(t("prjx.cfg.runOn.savedMsg"))
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Could not save.")
+      setMessage(err instanceof Error ? err.message : t("prjx.cfg.runOn.saveError"))
     } finally {
       setSaving(false)
     }
@@ -41,9 +43,9 @@ export function ProjectRunOnSettings({ projectId }: { projectId: string }) {
 
   return (
     <section className="project-scripts" aria-labelledby="project-run-on-title">
-      <h3 id="project-run-on-title">Run sessions on</h3>
-      <p className="hint">Where agents' commands, terminals and scripts run in new sessions. You can still choose per session.</p>
-      <div className="st-segmented ade-run-on-choices" role="radiogroup" aria-label="Default for new sessions">
+      <h3 id="project-run-on-title">{t("prjx.cfg.runOn.title")}</h3>
+      <p className="hint">{t("prjx.cfg.runOn.intro")}</p>
+      <div className="st-segmented ade-run-on-choices" role="radiogroup" aria-label={t("prjx.cfg.runOn.groupAria")}>
         {(info?.available ?? ["local", "docker"]).map(target => {
           const blocked = target === "ssh" ? "" : targetUnavailable(target, info)
           return (
@@ -55,34 +57,34 @@ export function ProjectRunOnSettings({ projectId }: { projectId: string }) {
       </div>
       <p className="hint">{runTargetDescriptions[draft.target]}</p>
       {draft.target === "docker" ? (
-        <label>Docker image
+        <label>{t("prjx.cfg.runOn.dockerImage")}
           <input value={draft.image} onChange={event => set({ image: event.target.value })} placeholder="node:22-bookworm" spellCheck={false} disabled={saving} />
-          <small className="hint">Needs git and a shell; npm lets ADE install Claude Code or Codex inside. Pulled the first time it's used.</small>
+          <small className="hint">{t("prjx.cfg.runOn.dockerHint")}</small>
         </label>
       ) : null}
       {draft.target === "ssh" ? (
         <>
-          <label>SSH host
-            <input value={draft.sshHost} onChange={event => set({ sshHost: event.target.value })} placeholder="build-server or me@10.0.0.5" spellCheck={false} disabled={saving} />
-            <small className="hint">A host or alias from your ~/.ssh/config that you can reach without a password prompt (an SSH key). The machine needs rsync and bash.</small>
+          <label>{t("prjx.cfg.runOn.sshHost")}
+            <input value={draft.sshHost} onChange={event => set({ sshHost: event.target.value })} placeholder={t("prjx.cfg.runOn.sshHostPlaceholder")} spellCheck={false} disabled={saving} />
+            <small className="hint">{t("prjx.cfg.runOn.sshHostHint")}</small>
           </label>
-          <label>Folder on that machine
+          <label>{t("prjx.cfg.runOn.remoteFolder")}
             <input value={draft.remoteRoot} onChange={event => set({ remoteRoot: event.target.value })} placeholder="ade-workspaces" spellCheck={false} disabled={saving} />
-            <small className="hint">Relative to the home folder unless it starts with /. Each session gets a folder inside it.</small>
+            <small className="hint">{t("prjx.cfg.runOn.remoteFolderHint")}</small>
           </label>
         </>
       ) : null}
       {draft.target === "wsl" ? (
-        <label>WSL distribution
-          <input value={draft.wslDistro} onChange={event => set({ wslDistro: event.target.value })} placeholder="Default distribution" spellCheck={false} disabled={saving} />
+        <label>{t("prjx.cfg.runOn.wslDistro")}
+          <input value={draft.wslDistro} onChange={event => set({ wslDistro: event.target.value })} placeholder={t("prjx.cfg.runOn.wslDistroPlaceholder")} spellCheck={false} disabled={saving} />
         </label>
       ) : null}
       {draft.target === "boat" ? (
-        <p className="hint">{info?.boat.configured ? "Each session gets its own Boat.dev VM, deleted when the session is archived. Boat stops idle VMs after an hour and ADE resumes them when needed." : "Add a Boat.dev API key in Settings → Integrations to use this."}</p>
+        <p className="hint">{info?.boat.configured ? t("prjx.cfg.runOn.boatConfigured") : t("prjx.cfg.runOn.boatUnconfigured")}</p>
       ) : null}
       {draft.target === "docker" && info && !info.docker.available ? <p className="hint">{info.docker.message}</p> : null}
       <div className="form-actions">
-        <button type="button" className="action-button" disabled={!dirty || saving} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button>
+        <button type="button" className="action-button" disabled={!dirty || saving} onClick={() => void save()}>{saving ? t("prjx.cfg.saving") : t("prjx.cfg.runOn.saveButton")}</button>
         {message ? <span className="hint" role="status">{message}</span> : null}
       </div>
     </section>

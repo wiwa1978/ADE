@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { GitPullRequest, Upload } from "lucide-react"
 import { Button, Input, Textarea } from "../../../components/ui/index.ts"
+import { useI18n } from "../../i18n/I18nContext"
 import type { BranchStatus } from "./usePullRequestState"
 
 interface CreatePullRequestFormProps {
@@ -26,6 +27,7 @@ export function CreatePullRequestForm({
   onCreate,
   onPush,
 }: CreatePullRequestFormProps) {
+  const { t } = useI18n()
   const [title, setTitle] = useState(initialTitle)
   const [body, setBody] = useState(initialBody)
   const [draft, setDraft] = useState(draftDefault)
@@ -38,25 +40,25 @@ export function CreatePullRequestForm({
         onCreate({ title, body, draft, base })
       }}
     >
-      <h3>Open a pull request</h3>
+      <h3>{t("pnlx.pr.createHeading")}</h3>
       {status.commitsAhead === 0 ? (
-        <p className="ade-muted ade-xs">There are no commits on this branch yet. Commit changes first.</p>
+        <p className="ade-muted ade-xs">{t("pnlx.pr.noCommitsYet")}</p>
       ) : null}
       <label>
-        Title
+        {t("pnlx.pr.labelTitle")}
         <Input value={title} onChange={event => setTitle(event.target.value)} maxLength={256} required />
       </label>
       <label>
-        Description
-        <Textarea value={body} onChange={event => setBody(event.target.value)} rows={6} placeholder="What changed and why" />
+        {t("pnlx.pr.labelDescription")}
+        <Textarea value={body} onChange={event => setBody(event.target.value)} rows={6} placeholder={t("pnlx.pr.descPlaceholder")} />
       </label>
       <div className="ade-pr-form-row">
         <label className="ade-pr-base">
-          Base branch
+          {t("pnlx.pr.labelBaseBranch")}
           <Input value={base} onChange={event => onBaseChange(event.target.value)} placeholder="main" />
         </label>
         <label className="ade-pr-draft">
-          <input type="checkbox" checked={draft} onChange={event => setDraft(event.target.checked)} /> Draft
+          <input type="checkbox" checked={draft} onChange={event => setDraft(event.target.checked)} /> {t("pnlx.pr.labelDraft")}
         </label>
       </div>
       <div className="ade-pr-actions">
@@ -68,11 +70,11 @@ export function CreatePullRequestForm({
           loading={busy === "create"}
         >
           <GitPullRequest className="size-3.5" />{" "}
-          {busy === "create" ? "Pushing and opening…" : draft ? "Push and open draft PR" : "Push and open PR"}
+          {busy === "create" ? t("pnlx.pr.pushingAndOpening") : draft ? t("pnlx.pr.pushAndOpenDraft") : t("pnlx.pr.pushAndOpen")}
         </Button>
         {status.unpushed > 0 ? (
           <Button variant="chip" size="xs" disabled={Boolean(busy)} loading={busy === "push"} onClick={onPush}>
-            <Upload className="size-3" /> {busy === "push" ? "Pushing…" : "Push only"}
+            <Upload className="size-3" /> {busy === "push" ? t("pnlx.pr.pushing") : t("pnlx.pr.pushOnly")}
           </Button>
         ) : null}
       </div>

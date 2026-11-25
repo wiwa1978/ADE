@@ -13,6 +13,7 @@ import {
 } from "lucide-react"
 import { request, requestJson } from "../../api"
 import type { WorkspaceEntry } from "../../app-types"
+import { useI18n } from "../i18n/I18nContext"
 import { RichFilePreview } from "./RichFilePreview"
 
 function joinRelativePath(root: string, rel: string): string {
@@ -43,6 +44,7 @@ function DirectoryBranch({
   onOpenFile: (filePath: string) => void
   onOpenExternal: (app: "vscode" | "cursor", absPath: string) => void
 }) {
+  const { t } = useI18n()
   const [entries, setEntries] = useState<WorkspaceEntry[] | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [error, setError] = useState("")
@@ -59,20 +61,20 @@ function DirectoryBranch({
         }
       })
       .catch(err => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load directory")
+        if (!cancelled) setError(err instanceof Error ? err.message : t("pnlx.files.errLoadDir"))
       })
     return () => { cancelled = true }
-  }, [queryParam, path])
+  }, [queryParam, path, t])
 
   if (error) return <div className="ade-pane-note">{error}</div>
-  if (!entries) return <div className="ade-pane-note">Loading…</div>
+  if (!entries) return <div className="ade-pane-note">{t("pnlx.files.loading")}</div>
 
   const visible = filter.trim()
     ? entries.filter(e => e.kind === "directory" || e.name.toLowerCase().includes(filter.trim().toLowerCase()))
     : entries
 
   if (visible.length === 0 && depth === 0) {
-    return <div className="ade-pane-note">{filter.trim() ? `No files match “${filter}”.` : "This folder is empty."}</div>
+    return <div className="ade-pane-note">{filter.trim() ? t("pnlx.files.noMatch", { filter }) : t("pnlx.files.emptyFolder")}</div>
   }
 
   return (
@@ -112,8 +114,8 @@ function DirectoryBranch({
                 <button
                   type="button"
                   className="ade-tree-action-btn"
-                  title={`Open ${entry.name} in VS Code`}
-                  aria-label={`Open ${entry.name} in VS Code`}
+                  title={t("pnlx.files.openInVsCode", { name: entry.name })}
+                  aria-label={t("pnlx.files.openInVsCode", { name: entry.name })}
                   onClick={e => { e.stopPropagation(); onOpenExternal("vscode", absPath) }}
                 >
                   VS
@@ -121,8 +123,8 @@ function DirectoryBranch({
                 <button
                   type="button"
                   className="ade-tree-action-btn"
-                  title={`Open ${entry.name} in Cursor`}
-                  aria-label={`Open ${entry.name} in Cursor`}
+                  title={t("pnlx.files.openInCursor", { name: entry.name })}
+                  aria-label={t("pnlx.files.openInCursor", { name: entry.name })}
                   onClick={e => { e.stopPropagation(); onOpenExternal("cursor", absPath) }}
                 >
                   Cu
@@ -160,6 +162,7 @@ export function FilesPanel({
   onOpenFile?: (path: string) => void
   onOpenSettings?: () => void
 }) {
+  const { t } = useI18n()
   const [filter, setFilter] = useState("")
   const [refreshKey, setRefreshKey] = useState(0)
   const [openError, setOpenError] = useState("")
@@ -177,7 +180,7 @@ export function FilesPanel({
     try {
       await openPathInEditor(app, absPath)
     } catch (err) {
-      setOpenError(err instanceof Error ? err.message : `Could not open in ${app === "vscode" ? "VS Code" : "Cursor"}.`)
+      setOpenError(err instanceof Error ? err.message : t("pnlx.files.errOpenIn", { app: app === "vscode" ? "VS Code" : "Cursor" }))
     } finally {
       setOpeningApp(null)
     }
@@ -186,10 +189,10 @@ export function FilesPanel({
   if (!workspacePath) {
     return (
       <div className="ade-pane-empty">
-        <p>{projectId ? "No local folder linked to this project yet." : "This session has no bound local workspace."}</p>
+        <p>{projectId ? t("pnlx.files.noProjectFolder") : t("pnlx.files.noSessionWorkspace")}</p>
         {onOpenSettings ? (
           <button type="button" className="sf-btn-secondary !h-8 mt-2" onClick={onOpenSettings}>
-            <Settings2 className="size-3.5" /> Configure folder
+            <Settings2 className="size-3.5" /> {t("pnlx.files.configureFolder")}
           </button>
         ) : null}
       </div>
@@ -204,7 +207,7 @@ export function FilesPanel({
         projectId={projectId}
         filePath={previewPath}
         onBack={() => setPreviewPath(null)}
-        backLabel="Files"
+        backLabel={t("pnlx.files.backToFiles")}
         canEdit={Boolean(sessionId)}
         toolbarExtra={
           <>
@@ -213,7 +216,7 @@ export function FilesPanel({
               className="ade-editor-pill"
               disabled={openingApp !== null}
               onClick={() => void handleOpenIn("vscode", absFile)}
-              title="Open file in VS Code"
+              title={t("pnlx.files.openFileInVsCode")}
             >
               VS Code
             </button>
@@ -222,7 +225,7 @@ export function FilesPanel({
               className="ade-editor-pill"
               disabled={openingApp !== null}
               onClick={() => void handleOpenIn("cursor", absFile)}
-              title="Open file in Cursor"
+              title={t("pnlx.files.openFileInCursor")}
             >
               Cursor
             </button>
@@ -240,10 +243,10 @@ export function FilesPanel({
           className="ade-editor-btn"
           disabled={openingApp !== null}
           onClick={() => void handleOpenIn("vscode", workspacePath)}
-          title={`Open ${workspacePath} in VS Code`}
+          title={t("pnlx.files.openInVsCode", { name: workspacePath })}
         >
           <Code2 className="size-3.5 opacity-80" />
-          <span>{openingApp === "vscode" ? "Opening…" : "VS Code"}</span>
+          <span>{openingApp === "vscode" ? t("pnlx.files.opening") : "VS Code"}</span>
           <ExternalLink className="size-3 opacity-50" />
         </button>
         <button
@@ -251,10 +254,10 @@ export function FilesPanel({
           className="ade-editor-btn"
           disabled={openingApp !== null}
           onClick={() => void handleOpenIn("cursor", workspacePath)}
-          title={`Open ${workspacePath} in Cursor`}
+          title={t("pnlx.files.openInCursor", { name: workspacePath })}
         >
           <Code2 className="size-3.5 opacity-80" />
-          <span>{openingApp === "cursor" ? "Opening…" : "Cursor"}</span>
+          <span>{openingApp === "cursor" ? t("pnlx.files.opening") : "Cursor"}</span>
           <ExternalLink className="size-3 opacity-50" />
         </button>
       </div>
@@ -266,12 +269,12 @@ export function FilesPanel({
           <Search className="size-3.5 opacity-60" />
           <input
             type="text"
-            placeholder="Filter files…"
+            placeholder={t("pnlx.files.filterPlaceholder")}
             value={filter}
             onChange={e => setFilter(e.target.value)}
           />
         </div>
-        <button type="button" className="ade-icon-btn" onClick={() => setRefreshKey(k => k + 1)} title="Refresh files" aria-label="Refresh files">
+        <button type="button" className="ade-icon-btn" onClick={() => setRefreshKey(k => k + 1)} title={t("pnlx.files.refreshFiles")} aria-label={t("pnlx.files.refreshFiles")}>
           <RefreshCw className="size-3.5" />
         </button>
       </div>

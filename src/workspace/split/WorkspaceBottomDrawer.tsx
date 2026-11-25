@@ -4,6 +4,7 @@ import type { SessionBlueprintSummary } from "../../../app-types"
 import { StagesPanel, WayOfWorkingSelect } from "../../blueprints/StagesPanel"
 import { StageBar } from "../../blueprints/StageBar"
 import type { SessionStages } from "../../blueprints/session-stages"
+import { useI18n } from "../../i18n/I18nContext"
 
 export function WorkspaceBottomDrawer({
   sessionId,
@@ -58,6 +59,7 @@ export function WorkspaceBottomDrawer({
   onOpenFile?: (path: string) => void
   onOpenProgress: () => void
 }) {
+  const { t } = useI18n()
   return (
     <>
       {mounted ? (
@@ -65,17 +67,17 @@ export function WorkspaceBottomDrawer({
           className="ade-bottom-drawer"
           style={{ height: `${height}px` }}
           hidden={!open}
-          aria-label="Stages and terminal"
+          aria-label={t("wsx.ws.stagesAndTerminal")}
         >
           <div
             className="ade-bottom-resize-handle"
             role="separator"
             aria-orientation="horizontal"
             onPointerDown={onStartResize}
-            title="Drag to resize terminal"
+            title={t("wsx.ws.dragResizeTerminal")}
           />
           <div className="ade-bottom-drawer-head">
-            <div className="flex items-center gap-1 min-w-0" role="tablist" aria-label="Drawer">
+            <div className="flex items-center gap-1 min-w-0" role="tablist" aria-label={t("wsx.ws.drawerAria")}>
               {showStagesTab ? (
                 <button
                   type="button"
@@ -84,9 +86,9 @@ export function WorkspaceBottomDrawer({
                   className={`ade-drawer-tab ${activeDrawerTab === "stages" ? "is-active" : ""}`}
                   onClick={() => onSelectTab("stages")}
                 >
-                  <Workflow className="size-3.5" /> Stages
+                  <Workflow className="size-3.5" /> {t("wsx.ws.stages")}
                   {blueprint?.stage?.status === "awaiting_approval" ? (
-                    <span className="ade-drawer-tab-dot" aria-label="Waiting for you" />
+                    <span className="ade-drawer-tab-dot" aria-label={t("wsx.ws.waitingForYou")} />
                   ) : null}
                 </button>
               ) : null}
@@ -97,7 +99,7 @@ export function WorkspaceBottomDrawer({
                 className={`ade-drawer-tab ${activeDrawerTab === "terminal" ? "is-active" : ""}`}
                 onClick={() => onSelectTab("terminal")}
               >
-                <Terminal className="size-3.5" /> Terminal
+                <Terminal className="size-3.5" /> {t("wsx.ws.terminal")}
               </button>
               {activeDrawerTab === "terminal" ? <span className="ade-pill ade-mono ade-truncate">{terminalCwd}</span> : null}
             </div>
@@ -117,17 +119,17 @@ export function WorkspaceBottomDrawer({
                   type="button"
                   className="ade-chip-btn"
                   onClick={onOpenTerminalSidePane}
-                  title="Open terminal in a side-by-side split pane"
+                  title={t("wsx.ws.openTerminalSidePane")}
                 >
-                  <Columns2 className="size-3" /> Side pane
+                  <Columns2 className="size-3" /> {t("wsx.ws.sidePane")}
                 </button>
               ) : null}
               <button
                 type="button"
                 className="ade-icon-btn"
                 onClick={onClose}
-                aria-label="Close drawer"
-                title="Close drawer (Cmd+J)"
+                aria-label={t("wsx.ws.closeDrawer")}
+                title={t("wsx.ws.closeDrawerShortcut")}
               >
                 <X className="size-3.5" />
               </button>
