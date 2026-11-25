@@ -6,7 +6,7 @@ import type { Router } from "../router.ts";
 import type { RouteDeps } from "./context.ts";
 import { readInstructions, searchWorkspaceFiles, writeInstructions } from "../agent-context.ts";
 import { harnessGuidance } from "../subagent-policy.ts";
-import { sessionBlueprintOptions, VIBE_BLUEPRINT_ID } from "../../packages/blueprints/index.ts";
+import { sessionBlueprintOptions, VIBE_BLUEPRINT_ID } from "@ade/blueprints";
 import { resolveSessionBlueprint } from "../session-blueprints.ts";
 import { buildBrief } from "../session-brief.ts";
 import { getWorkspaceGitSummary } from "../workspace-files.ts";

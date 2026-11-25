@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { ModelRoutingConfig, ToolDescriptor } from "../protocol/index.ts";
+import type { ModelRoutingConfig, ToolDescriptor } from "@ade/protocol";
 import {
   BUILTIN_BLUEPRINTS,
   egmBlueprint,

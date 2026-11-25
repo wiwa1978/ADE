@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { ModelProfileSelect } from "@/components/ui"
 import type { ModelProfileId } from "../../app-types"
-import { BUILTIN_BLUEPRINTS } from "../../../packages/blueprints/index.ts"
+import { BUILTIN_BLUEPRINTS } from "@ade/blueprints"
 import type { GitHubRepositoryPage } from "../../ProjectsView"
 import { useI18n } from "../../i18n/I18nContext"
 import { AddProjectSourceFields, type DirBrowserState } from "../AddProjectForms"

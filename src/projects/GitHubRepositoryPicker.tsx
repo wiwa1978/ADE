@@ -2,7 +2,7 @@ import { useEffect, useId, useState, type KeyboardEvent } from "react"
 import { Plus } from "lucide-react"
 import { request } from "../api"
 import { Banner, Button, Input } from "@/components/ui"
-import type { GitHubRepository, GitHubRepositoryPage } from "../../packages/protocol/index.ts"
+import type { GitHubRepository, GitHubRepositoryPage } from "@ade/protocol"
 import { useI18n } from "../i18n/I18nContext"
 
 export type SearchGitHubRepositories = (login: string, query: string, page: number, signal?: AbortSignal) => Promise<GitHubRepositoryPage>

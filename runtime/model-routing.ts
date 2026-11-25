@@ -2,8 +2,8 @@
 // user picked unless the project asks for something else for the stage (a stage override, or a
 // model profile it chose); a review always runs on a fresh reader, on another model family when
 // ADE has one. EU-only mode filters every choice.
-import { getModelFamily, getModelProfile, resolveStageModel } from "../packages/captain-core/index.ts";
-import type { BlueprintStage, ModelRef, ModelRoutingConfig } from "../packages/protocol/index.ts";
+import { getModelFamily, getModelProfile, resolveStageModel } from "@ade/captain-core";
+import type { BlueprintStage, ModelRef, ModelRoutingConfig } from "@ade/protocol";
 import type { EuPolicy } from "./eu-policy.ts";
 
 export type ModelChoice = { provider: string; model: string };

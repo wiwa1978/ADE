@@ -4,7 +4,7 @@ import { existsSync, statSync } from "node:fs";
 import { platform } from "node:os";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { bool, int, obj, opt, str } from "@earendil-works/pi-schema";
-import type { ManagedProcessSummary } from "../packages/protocol/index.ts";
+import type { ManagedProcessSummary } from "@ade/protocol";
 import type { RuntimeEventBus } from "./events.ts";
 import { isErrorCode, logger } from "./log.ts";
 import { conflict, notFound } from "./http-error.ts";

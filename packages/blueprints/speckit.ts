@@ -1,4 +1,4 @@
-import type { FactoryBlueprint } from "../protocol/index.ts";
+import type { FactoryBlueprint } from "@ade/protocol";
 
 export const specKitBlueprint: FactoryBlueprint = {
   id: "speckit",

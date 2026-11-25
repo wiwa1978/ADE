@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { describeToolCall, replaySteps, transcriptMarkdown, type TranscriptItem } from "../packages/protocol/transcript.ts";
+import { describeToolCall, replaySteps, transcriptMarkdown, type TranscriptItem } from "@ade/protocol/transcript.ts";
 
 const items: TranscriptItem[] = [
 	{ id: "u1", kind: "user", content: "Fix the login bug", createdAt: Date.UTC(2026, 10, 23, 9, 0, 0) },

@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { ProviderCatalogEntry, RuntimeHealth } from "../../packages/protocol/index.ts";
+import type { ProviderCatalogEntry, RuntimeHealth } from "@ade/protocol";
 import { copilotId } from "../copilot-auth.ts";
 import { badRequest, conflict, notFound } from "../http-error.ts";
 import { createRuntimeModels, safeErrorMessage } from "../models.ts";

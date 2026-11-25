@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import type { CaptainEndpointConfig } from "../packages/protocol/index.ts";
+import type { CaptainEndpointConfig } from "@ade/protocol";
 
 let activeEndpoint: CaptainEndpointConfig = {
   flavor: "local",

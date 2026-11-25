@@ -3,7 +3,7 @@ import { lstatSync, readdirSync, readFileSync, statSync, writeFileSync } from "n
 import { lstat, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
 import { promisify } from "node:util";
-import type { GitFileChange, WorkspaceEntry, WorkspaceGitSummary } from "../packages/protocol/index.ts";
+import type { GitFileChange, WorkspaceEntry, WorkspaceGitSummary } from "@ade/protocol";
 import { workspacePath } from "./coding-tools.ts";
 import { isErrorCode, logger } from "./log.ts";
 import { badRequest, internalError, payloadTooLarge } from "./http-error.ts";

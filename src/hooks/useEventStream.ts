@@ -4,7 +4,7 @@ import {
   RuntimeEventPayloadSchemas,
   type RuntimeEventType,
   type TypedRuntimeEvent,
-} from "../../packages/protocol/index.ts"
+} from "@ade/protocol"
 
 export type EventStreamListener = (event: MessageEvent) => void
 

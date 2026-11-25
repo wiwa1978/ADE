@@ -18,7 +18,7 @@ import { restoreWorktree } from "../worktrees.ts";
 import type { RouteDeps } from "./context.ts";
 import { redactForCwd } from "../project-secrets.ts";
 import { mergeSubagentBranch, subagentChanges, subagentFileDiff } from "../subagent-work.ts";
-import { transcriptMarkdown, type TranscriptItem } from "../../packages/protocol/transcript.ts";
+import { transcriptMarkdown, type TranscriptItem } from "@ade/protocol/transcript.ts";
 import { getWorkspaceGitSummary, listWorkspaceFilesFlat } from "../workspace-files.ts";
 
 export function registerSessionRoutes(

@@ -9,7 +9,7 @@ import type { Inbox } from "../inbox.ts";
 import type { ProjectScriptStore, ScriptRunner } from "../project-scripts.ts";
 import type { Checkpoints } from "../checkpoints.ts";
 import type { EngineManager } from "../engines.ts";
-import type { Conversation } from "../../packages/protocol/index.ts";
+import type { Conversation } from "@ade/protocol";
 
 export type ArchivedWorkspaceCleanup = {
 	terminalsClosed: number;

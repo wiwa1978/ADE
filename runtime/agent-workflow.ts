@@ -6,7 +6,7 @@ import { ProjectSecrets, setSecretResolver } from "./project-secrets.ts";
 import { ExecutionTargets, sessionTarget, setExecutionTargets } from "./execution-targets.ts";
 import { setExternalSubagentRunner } from "./subagent-harness.ts";
 import { SubagentPolicyStore, type SubagentHarness } from "./subagent-policy.ts";
-import { checkFailedPrompt } from "../packages/protocol/agent-prompts.ts";
+import { checkFailedPrompt } from "@ade/protocol/agent-prompts.ts";
 import { createInbox } from "./inbox.ts";
 import { copyIntoWorktree, ProjectScriptStore, ScriptRunner } from "./project-scripts.ts";
 import { createCheckpoints } from "./checkpoints.ts";
@@ -23,7 +23,7 @@ import { createAutomationRunner } from "./automation-runner.ts";
 import type { LocalAgentHost } from "./host.ts";
 import type { WorktreeManager } from "./worktrees.ts";
 import type { createSessionGit } from "./session-git.ts";
-import type { Conversation } from "../packages/protocol/index.ts";
+import type { Conversation } from "@ade/protocol";
 
 export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	host: LocalAgentHost;

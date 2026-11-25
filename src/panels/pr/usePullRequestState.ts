@@ -6,7 +6,7 @@ import {
   resolveConflictsPrompt,
   reviewFeedbackPrompt,
   type PromptFailedRun,
-} from "../../../packages/protocol/agent-prompts.ts"
+} from "@ade/protocol/agent-prompts.ts"
 
 export type BranchStatus = {
   branch: string | null; base: string | null; baseBranch: string | null; commitsAhead: number

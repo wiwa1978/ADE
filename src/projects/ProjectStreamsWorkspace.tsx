@@ -22,7 +22,7 @@ import {
 } from "lucide-react"
 import type { Conversation } from "../app-types"
 import type { FeatureAgent } from "../FeatureAgents"
-import { BUILTIN_BLUEPRINTS } from "../../packages/blueprints/index.ts"
+import { BUILTIN_BLUEPRINTS } from "@ade/blueprints"
 import type { Project, ProjectActivity } from "../ProjectsView"
 import type { InboxEntry } from "../session-state"
 import { request } from "../api"

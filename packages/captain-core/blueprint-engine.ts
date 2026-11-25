@@ -4,7 +4,7 @@ import type {
   FactoryBlueprint,
   ModelRoutingConfig,
   StageVerdict,
-} from "../protocol/index.ts";
+} from "@ade/protocol";
 import { resolveStageModel } from "./model-router.ts";
 
 export type NextStageAction =

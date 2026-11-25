@@ -7,7 +7,7 @@ import type {
 	ArtifactStatus,
 	SessionArtifact,
 	SessionTaskItem,
-} from "../packages/protocol/index.ts";
+} from "@ade/protocol";
 import type { RuntimeEventBus } from "./events.ts";
 import { runHostMigrations } from "./db/migrations.ts";
 import { notFound } from "./http-error.ts";

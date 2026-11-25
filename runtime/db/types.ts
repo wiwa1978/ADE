@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import type { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { createModels } from "@earendil-works/pi-ai/models";
 import type { Harness } from "@earendil-works/pi-durable";
-import type { Project as SharedProject } from "../../packages/protocol/index.ts";
+import type { Project as SharedProject } from "@ade/protocol";
 import type { TimelineEntryLike } from "../timeline.ts";
 
 const execFileAsync = promisify(execFile);

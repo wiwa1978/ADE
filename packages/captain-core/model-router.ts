@@ -6,7 +6,7 @@ import type {
   ModelRole,
   ModelRoutingConfig,
   ResolvedModel,
-} from "../protocol/index.ts";
+} from "@ade/protocol";
 
 export type ModelProfileDefinition = {
   id: ModelProfileId;

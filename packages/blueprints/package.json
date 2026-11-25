@@ -1,0 +1,12 @@
+{
+  "name": "@ade/blueprints",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./*": "./*"
+  },
+  "dependencies": {
+    "@ade/protocol": "*"
+  }
+}

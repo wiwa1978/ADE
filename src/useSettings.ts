@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { z } from "zod"
 import { isAccentColor, paletteVariables, resolveAccentHex, type ColorPalette, type Theme } from "./appearance-palettes"
-import { ReasoningLevelSchema } from "../packages/protocol/index.ts"
+import { ReasoningLevelSchema } from "@ade/protocol"
 import { ensureGoogleFontLoaded } from "./appearance/fonts"
 import {
   DEFAULT_FORMAT_PREFERENCES, DEFAULT_LANGUAGE, getLanguageMeta, isCurrencyCode, isDateFormatPreference, isLanguageCode, isTimeFormatPreference, setCurrentLanguage, t,

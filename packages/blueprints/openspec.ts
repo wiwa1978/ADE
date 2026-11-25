@@ -1,4 +1,4 @@
-import type { FactoryBlueprint } from "../protocol/index.ts";
+import type { FactoryBlueprint } from "@ade/protocol";
 
 export const openSpecBlueprint: FactoryBlueprint = {
   id: "openspec",

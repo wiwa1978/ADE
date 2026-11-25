@@ -4,7 +4,7 @@ export type {
   GitHubRepositoryPage,
   Project,
   ProjectInput,
-} from "../packages/protocol/index.ts"
+} from "@ade/protocol"
 
 export {
   GitHubRepositoryPicker,

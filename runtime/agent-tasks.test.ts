@@ -18,15 +18,6 @@ test("a task cannot start until depends_on are DONE, and a parent cannot finish 
 		assert.throws(() => transitionAgentTask(root, { path: "auth/login", status: "IN_PROGRESS", sessionId: "s1" }), /Start gate/);
 		transitionAgentTask(root, { path: "auth", status: "IN_PROGRESS", sessionId: "parent" });
 		assert.throws(() => transitionAgentTask(root, { path: "auth", status: "DONE" }), /child tasks still open/);
-		transitionAgentTask(root, { path: "auth", status: "DONE" }).task;
-	} catch (error) {
-		if (!(error instanceof Error) || !/child tasks still open/.test(error.message)) throw error;
-	}
-	try {
-		transitionAgentTask(root, { path: "auth", status: "DONE", sessionId: "parent" });
-		assert.fail("parent should stay open");
-	} catch (error) {
-		assert.match(String(error), /child tasks still open/);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

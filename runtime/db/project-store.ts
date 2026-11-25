@@ -5,7 +5,7 @@ import { readLocalGhToken } from "../github-repositories.ts";
 import { badGateway, badRequest, conflict, notFound } from "../http-error.ts";
 import { logger } from "../log.ts";
 import { resolveCheckout } from "../worktrees.ts";
-import { isSessionBlueprint } from "../../packages/blueprints/index.ts";
+import { isSessionBlueprint } from "@ade/blueprints";
 import { dbAll, dbGet, dbRun, withTransaction } from "./schema.ts";
 import { detectGitHubRemoteFromCheckout, type ProjectRow, type SerializedProject } from "./types.ts";
 

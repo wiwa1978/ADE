@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { resolveCaptainUrl } from "../api"
-import type { RuntimeEventType } from "../../packages/protocol/index.ts"
+import type { RuntimeEventType } from "@ade/protocol"
 import {
   decodeRuntimeEvent,
   EventStreamContext,

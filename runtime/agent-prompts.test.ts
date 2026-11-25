@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fixCiPrompt, resolveConflictsPrompt, reviewFeedbackPrompt } from "../packages/protocol/agent-prompts.ts";
+import { fixCiPrompt, resolveConflictsPrompt, reviewFeedbackPrompt } from "@ade/protocol/agent-prompts.ts";
 
 test("review feedback prompt lists each point with its location and replies", () => {
 	const prompt = reviewFeedbackPrompt([

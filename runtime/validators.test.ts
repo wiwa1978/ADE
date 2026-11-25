@@ -13,7 +13,7 @@ import {
 	EscalationCardSchema,
 	McpServerConfigSchema,
 	RuntimeEventSchema,
-} from "../packages/protocol/index.ts";
+} from "@ade/protocol";
 import { RuntimeEventBus } from "./events.ts";
 import { LocalAgentHost } from "./host.ts";
 import { MobilePairingManager } from "./mobile-pairing.ts";

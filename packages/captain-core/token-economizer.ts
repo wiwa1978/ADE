@@ -4,7 +4,7 @@ import type {
   RepoMicroSkill,
   ToolDescriptor,
   ToolUsageRecord,
-} from "../protocol/index.ts";
+} from "@ade/protocol";
 
 const DEFAULT_TOOL_SCHEMA_TOKENS = 180;
 

@@ -58,8 +58,8 @@ export type {
   TypedRuntimeEvent,
   WorkspaceEntry,
   WorkspaceGitSummary,
-} from "../packages/protocol/index.ts"
-import type { GitHubIssue, RunTargetDto, WorkerTaskSpec } from "../packages/protocol/index.ts"
+} from "@ade/protocol"
+import type { GitHubIssue, RunTargetDto, WorkerTaskSpec } from "@ade/protocol"
 
 export type Screen = "inbox" | "projects" | "project" | "work" | "settings" | "worktrees" | "attempts"
 

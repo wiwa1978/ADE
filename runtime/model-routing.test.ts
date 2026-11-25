@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { openSpecBlueprint } from "../packages/blueprints/index.ts";
+import { openSpecBlueprint } from "@ade/blueprints";
 import { EuPolicy } from "./eu-policy.ts";
 import { ModelRouting, type CatalogProvider } from "./model-routing.ts";
 

@@ -1,4 +1,4 @@
-import type { BlueprintStage, FactoryBlueprint } from "../protocol/index.ts";
+import type { BlueprintStage, FactoryBlueprint } from "@ade/protocol";
 import { automatedFactoryBlueprint } from "./automated-factory.ts";
 import { openSpecBlueprint } from "./openspec.ts";
 import { specKitBlueprint } from "./speckit.ts";

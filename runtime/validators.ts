@@ -71,7 +71,7 @@ import {
 	WorktreeInspectRequestSchema,
 	type ApprovalPolicy,
 	type BrowserInputRequest,
-} from "../packages/protocol/index.ts";
+} from "@ade/protocol";
 import type { McpServerConfig } from "./mcp.ts";
 import { badRequest } from "./http-error.ts";
 

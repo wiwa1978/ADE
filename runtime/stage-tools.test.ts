@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BUILTIN_BLUEPRINTS } from "../packages/blueprints/index.ts";
+import { BUILTIN_BLUEPRINTS } from "@ade/blueprints";
 import { allowedStageTools, stageToolBlock } from "./stage-tools.ts";
 
 test("groups turn into real tools; looking around and the team are always there", () => {

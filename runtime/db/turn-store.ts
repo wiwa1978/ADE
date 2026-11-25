@@ -4,7 +4,7 @@ import type {
 	Conversation,
 	ConversationMessage,
 	ConversationWorkspace,
-} from "../../packages/protocol/index.ts";
+} from "@ade/protocol";
 import { dbAll, dbGet, dbPrepare, dbRun, withTransaction } from "./schema.ts";
 import { MODES, type ChatThreadRow, type CodingTaskRow, type SessionMode, type TurnRow } from "./types.ts";
 

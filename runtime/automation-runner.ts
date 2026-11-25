@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { AutomationStore, scheduleIsDue, type Automation } from "./automations.ts";
-import type { Conversation } from "../packages/protocol/index.ts";
+import type { Conversation } from "@ade/protocol";
 
 const execute = promisify(execFile);
 

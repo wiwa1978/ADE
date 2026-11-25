@@ -3,7 +3,7 @@ import { Check, FileCode2, GitCommit, Minus, Plus, RefreshCw, RotateCcw, Send } 
 import { request, requestJson } from "../api"
 import { useConfirm } from "../../components/ui/index.ts"
 import { useI18n } from "../i18n/I18nContext"
-import { reviewFeedbackPrompt } from "../../packages/protocol/agent-prompts.ts"
+import { reviewFeedbackPrompt } from "@ade/protocol/agent-prompts.ts"
 import { DiffLines } from "./DiffLines"
 import { useDiffNotes } from "./diff-notes"
 import type { WorkspaceGitSummary } from "../app-types"

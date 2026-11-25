@@ -6,5 +6,29 @@
     "react/rules-of-hooks": "error",
     "react/only-export-components": ["warn", { "allowConstantExport": true }],
     "typescript/no-explicit-any": "warn"
-  }
+  },
+  "overrides": [
+    {
+      "files": ["packages/captain-core/**", "packages/protocol/**", "packages/blueprints/**"],
+      "rules": {
+        "no-restricted-imports": ["error", {
+          "patterns": [{
+            "group": ["**/runtime/**", "**/src/**", "../runtime/**", "../../runtime/**", "../src/**", "../../src/**"],
+            "message": "Packages stay free of the runtime and the UI. Import @ade/protocol, @ade/blueprints, or @ade/captain-core."
+          }]
+        }]
+      }
+    },
+    {
+      "files": ["src/**"],
+      "rules": {
+        "no-restricted-imports": ["error", {
+          "patterns": [{
+            "group": ["**/runtime/**", "../runtime/**", "../../runtime/**"],
+            "message": "The UI does not import the Node runtime."
+          }]
+        }]
+      }
+    }
+  ]
 }

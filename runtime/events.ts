@@ -3,7 +3,7 @@ import type {
 	RuntimeEventMap,
 	RuntimeEventType,
 	TypedRuntimeEvent,
-} from "../packages/protocol/index.ts";
+} from "@ade/protocol";
 import { logger } from "./log.ts";
 
 export type { RuntimeEventMap, RuntimeEventType, TypedRuntimeEvent };

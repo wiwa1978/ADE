@@ -5,7 +5,7 @@
 // in that document's folder even without the edit group, and a stage with checks may fix what
 // fails. Applies to the Captain only; subagents have their own tool sets.
 import { dirname, isAbsolute, relative, resolve } from "node:path";
-import type { BlueprintStage } from "../packages/protocol/index.ts";
+import type { BlueprintStage } from "@ade/protocol";
 
 const ALWAYS = new Set([
 	"read", "list_files", "grep_search", "find_files", "read_skill", "finish_stage",

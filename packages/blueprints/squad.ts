@@ -1,4 +1,4 @@
-import type { FactoryBlueprint } from "../protocol/index.ts";
+import type { FactoryBlueprint } from "@ade/protocol";
 
 export const squadBlueprint: FactoryBlueprint = {
   id: "squad",
