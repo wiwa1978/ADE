@@ -38,6 +38,7 @@ import type { EuPolicy } from "../eu-policy.ts";
 import type { ModelChoice, ModelRouting } from "../model-routing.ts";
 import { TEAM_INSTRUCTIONS, type TeamBoard } from "../team-board.ts";
 import { createTeamTools } from "../team-tools.ts";
+import { createAgentTaskTools } from "../agent-tasks-tools.ts";
 import {
 	projectTimeline,
 	type ConversationTimelineSnapshot,
@@ -237,6 +238,7 @@ export class SessionManager {
 				agents: async () => (await this.featureAgents(task.id)).map(agent => ({ id: String(agent.id), name: agent.name })),
 			}) : null;
 			if (teamExt) registry.install(teamExt);
+			if (task?.workspace) registry.install(createAgentTaskTools({ workspace: task.workspace, sessionId: key }));
 			if (task) {
 				const wsTools = workspaceExt?.tools ?? [];
 				const eu = this.#eu;
