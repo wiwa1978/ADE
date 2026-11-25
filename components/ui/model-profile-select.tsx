@@ -1,4 +1,4 @@
-import type { ModelProfileId } from "../../app-types"
+import type { ModelProfileId } from "../../src/app-types"
 import { NativeSelect, type SelectOption } from "./compact-select"
 
 export interface ModelProfileOption {

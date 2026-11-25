@@ -12,8 +12,8 @@ import {
   Smartphone,
   Tablet,
 } from "lucide-react"
-import { request, requestJson } from "../../api"
-import type { BrowserState, BrowserViewport } from "../../app-types"
+import { request, requestJson } from "../api"
+import type { BrowserState, BrowserViewport } from "../app-types"
 import { useI18n } from "../i18n/I18nContext"
 
 const QUICK_BOOKMARKS = [

@@ -43,7 +43,7 @@ before(async () => {
   ;({ createRoot } = await import("react-dom/client"))
   cacheDirectory = mkdtempSync(join(tmpdir(), "ade-app-test-"))
   server = await createServer({ cacheDir: cacheDirectory, server: { middlewareMode: true, hmr: false }, appType: "custom", optimizeDeps: { noDiscovery: true } })
-  ;({ default: App } = (await server.ssrLoadModule("/App.tsx")) as { default: React.ComponentType })
+  ;({ default: App } = (await server.ssrLoadModule("/src/App.tsx")) as { default: React.ComponentType })
   ;({ setViewMode } = (await server.ssrLoadModule("/src/view-mode.ts")) as { setViewMode: typeof setViewMode })
 })
 

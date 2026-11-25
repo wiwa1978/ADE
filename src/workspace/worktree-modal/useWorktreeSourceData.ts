@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
-import { request } from "../../../api"
-import type { GitHubIssue, StartFrom, TaskStart } from "../../../app-types"
+import { request } from "../../api"
+import type { GitHubIssue, StartFrom, TaskStart } from "../../app-types"
 import type { RunTarget } from "../../run-targets"
 
 export type EngineId = "pi" | "claude-code" | "codex"

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ChevronDown, Sparkles } from "lucide-react"
 import { useClickOutside } from "../../components/ui/index.ts"
-import type { ApprovalPolicy, ProviderCatalogEntry } from "../../app-types"
+import type { ApprovalPolicy, ProviderCatalogEntry } from "../app-types"
 import { ModelPickerFooter } from "./ModelPickerFooter"
 import { ProviderGlyph } from "./ProviderGlyph"
 import {

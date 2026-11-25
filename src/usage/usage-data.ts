@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { request } from "../../api"
+import { request } from "../api"
 import { formatNumber } from "../i18n"
 
 export type UsageTotals = { inputTokens: number; outputTokens: number; cost: number }

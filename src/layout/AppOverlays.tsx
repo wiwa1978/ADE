@@ -1,13 +1,13 @@
-import type { Conversation, EnvironmentDirectory, SubagentInfo, WorkspaceTab } from "../../app-types"
-import type { Project } from "../../ProjectsView"
-import type { SettingsCategory } from "../../SettingsView"
+import type { Conversation, EnvironmentDirectory, SubagentInfo, WorkspaceTab } from "../app-types"
+import type { Project } from "../ProjectsView"
+import type { SettingsCategory } from "../SettingsView"
 import { CommandCenter } from "../sidebar/CommandCenter"
 import { EnvironmentPalette } from "../sidebar/EnvironmentPalette"
 import { SidebarContextMenu, type ContextMenuTarget } from "../sidebar/SidebarContextMenu"
 import { AddProjectWizard, type AddProjectSource } from "../projects/AddProjectWizard"
 import { CreateWorktreeModal } from "../workspace/CreateWorktreeModal"
 import { formatShortcut, type KeybindingMap } from "../keybindings"
-import type { GitHubIssue, StartFrom, TaskStart } from "../../app-types"
+import type { GitHubIssue, StartFrom, TaskStart } from "../app-types"
 import type { RunTarget } from "../run-targets"
 
 type AppOverlaysProps = {

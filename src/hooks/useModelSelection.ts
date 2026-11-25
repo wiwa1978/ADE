@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
-import { request, requestJson } from "../../api"
-import type { ProviderCatalogEntry, ProviderTool, RuntimeHealth } from "../../app-types"
-import type { Settings } from "../../useSettings"
+import { request, requestJson } from "../api"
+import type { ProviderCatalogEntry, ProviderTool, RuntimeHealth } from "../app-types"
+import type { Settings } from "../useSettings"
 
 function mergeCliToolsIntoCatalog(
   catalog: ProviderCatalogEntry[],

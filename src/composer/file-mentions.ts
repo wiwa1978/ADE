@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { request } from "../../api"
+import { request } from "../api"
 
 /** The "@query" being typed right before the caret, if any. */
 export function mentionAt(text: string, caret: number): { start: number; query: string } | null {

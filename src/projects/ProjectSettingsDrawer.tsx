@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react"
 import { ArrowUpRight, PanelRight } from "lucide-react"
-import { request } from "../../api"
+import { request } from "../api"
 import { Banner, Button, FolderPathInput, IconButton, Input, ModelProfileSelect } from "@/components/ui"
 import { BUILTIN_BLUEPRINTS } from "../../packages/blueprints/index.ts"
 import type { GitHubConnection, Project, ProjectInput } from "../../packages/protocol/index.ts"

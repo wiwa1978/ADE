@@ -1,5 +1,5 @@
 import { Check, ChevronUp, Shield, ShieldAlert, ShieldOff } from "lucide-react"
-import type { ApprovalPolicy } from "../../app-types"
+import type { ApprovalPolicy } from "../app-types"
 import { useI18n } from "../i18n/I18nContext"
 import type { TranslationKey } from "../i18n"
 

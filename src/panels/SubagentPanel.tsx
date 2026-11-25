@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { ArrowUp, Bot, GitBranch, Loader2, Square } from "lucide-react"
 import { TimelineView } from "../timeline/TimelineView"
-import type { ConversationTimelineSnapshot, SubagentInfo } from "../../app-types"
+import type { ConversationTimelineSnapshot, SubagentInfo } from "../app-types"
 
 export function SubagentPanel({
   subagent,

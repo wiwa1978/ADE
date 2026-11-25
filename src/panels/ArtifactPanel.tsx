@@ -1,4 +1,4 @@
-import type { SessionArtifact, TimelineItem, WorkspaceGitSummary } from "../../app-types"
+import type { SessionArtifact, TimelineItem, WorkspaceGitSummary } from "../app-types"
 import { ArtefactsBrowserPanel } from "./ArtefactsBrowserPanel"
 
 export function ArtifactPanel({

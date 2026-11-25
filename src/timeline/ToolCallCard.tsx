@@ -14,10 +14,10 @@ import {
   XCircle,
 } from "lucide-react"
 import { Badge, Button, Spinner } from "../../components/ui/index.ts"
-import { MessageContent } from "../../MessageContent"
+import { MessageContent } from "../MessageContent"
 import { useI18n } from "../i18n/I18nContext"
 import { extractToolCallFilePaths, isFileToolName } from "../panels/file-preview-utils"
-import type { SubagentInfo, TimelineToolCall } from "../../app-types"
+import type { SubagentInfo, TimelineToolCall } from "../app-types"
 
 export interface ToolCallCardProps {
   tool: TimelineToolCall

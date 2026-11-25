@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { request } from "../../api"
+import { request } from "../api"
 import { useI18n } from "../i18n/I18nContext"
 import type { TranslationKey } from "../i18n"
 

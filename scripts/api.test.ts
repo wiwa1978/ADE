@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { request, requestJson } from "../api.ts"
+import { request, requestJson } from "../src/api.ts"
 
 function fakeFetch(answers: Array<{ status: number; body: string } | Error>) {
   const calls: string[] = []

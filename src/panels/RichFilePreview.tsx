@@ -13,8 +13,8 @@ import {
   RefreshCw,
   Save,
 } from "lucide-react"
-import { request, resolveCaptainUrl, requestJson } from "../../api"
-import { MessageContent } from "../../MessageContent"
+import { request, resolveCaptainUrl, requestJson } from "../api"
+import { MessageContent } from "../MessageContent"
 import { useI18n } from "../i18n/I18nContext"
 import {
   formatFileSize,

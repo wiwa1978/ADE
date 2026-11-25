@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { Link2, X } from "lucide-react"
-import { request } from "../../api"
+import { request } from "../api"
 import { useI18n } from "../i18n/I18nContext"
 
 export type LinearIssue = { id: string; identifier: string; title: string; description: string; url: string; state: string; team: string }

@@ -1,5 +1,5 @@
 import { Star } from "lucide-react"
-import type { ProviderCatalogEntry } from "../../../app-types"
+import type { ProviderCatalogEntry } from "../../app-types"
 import { ProviderGlyph } from "../ProviderGlyph"
 import { useI18n } from "../../i18n/I18nContext"
 

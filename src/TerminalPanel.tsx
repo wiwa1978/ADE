@@ -4,7 +4,7 @@ import type { FitAddon as FitAddonInstance } from "@xterm/addon-fit"
 import type { Terminal as XTermInstance } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
 import { request, requestJson } from "./api"
-import { useI18n } from "./src/i18n/I18nContext"
+import { useI18n } from "./i18n/I18nContext"
 
 /** The runtime accepts 20–300 columns and 5–200 rows; a short drawer can measure less. */
 function terminalSize(cols: number, rows: number) {

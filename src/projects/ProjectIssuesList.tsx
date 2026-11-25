@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { ExternalLink, GitPullRequest, Play, RefreshCw, Settings2 } from "lucide-react"
-import { request } from "../../api"
-import type { Project } from "../../ProjectsView"
+import { request } from "../api"
+import type { Project } from "../ProjectsView"
 import { useI18n } from "../i18n/I18nContext"
 
 export type ProjectGitHubIssue = {

@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { FileLock2, Plus, Send } from "lucide-react"
-import { requestJson } from "../../api"
+import { requestJson } from "../api"
 import type { TeamView } from "../flow/team-types"
 import { ago } from "../flow/run-model"
 import { buildSwarmModel } from "./swarm-model"

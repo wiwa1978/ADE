@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
-import { request } from "../../api"
-import type { Screen } from "../../app-types"
-import type { GitHubRepositoryPage, Project, ProjectActivity, ProjectInput } from "../../ProjectsView"
+import { request } from "../api"
+import type { Screen } from "../app-types"
+import type { GitHubRepositoryPage, Project, ProjectActivity, ProjectInput } from "../ProjectsView"
 
 export function searchGitHubRepositories(login: string, query: string, page: number, signal?: AbortSignal) {
   return request<GitHubRepositoryPage>("/api/github/repositories", {

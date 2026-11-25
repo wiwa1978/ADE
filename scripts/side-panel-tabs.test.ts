@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { tabsForNextSession } from "../src/workspace/side-panel-tabs.ts"
-import type { WorkspaceTab } from "../app-types.ts"
+import type { WorkspaceTab } from "../src/app-types.ts"
 
 const tab = (id: string, kind: WorkspaceTab["kind"], extra: Partial<WorkspaceTab> = {}): WorkspaceTab => ({ id, kind, title: id, ...extra })
 

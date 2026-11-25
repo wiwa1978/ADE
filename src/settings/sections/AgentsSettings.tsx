@@ -5,7 +5,7 @@ import type {
   BrowserState,
   ProviderCatalogEntry,
   SkillsAndRulesCatalog,
-} from "../../../app-types"
+} from "../../app-types"
 import { useI18n } from "../../i18n/I18nContext"
 import { McpAndSecuritySettings } from "../../panels/McpSettingsSection"
 import { OvernightSettings } from "../../subagents/OvernightSettings"

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type FormEvent
 import type { GitHubConnection } from "./ProjectsView"
 import type { CopilotSignIn, ModelCredential, ModelCredentialProvider, ProviderTool, RuntimeHealth, Screen } from "./app-types"
 import { request, requestJson } from "./api"
-import { usePolling } from "./src/hooks/usePolling"
+import { usePolling } from "./hooks/usePolling"
 
 const modelCredentialProviders: { id: ModelCredentialProvider; name: string }[] = [
   { id: "openai", name: "OpenAI" },

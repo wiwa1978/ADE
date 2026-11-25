@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react"
 import { Folder, GitBranch, Loader2, MessageSquare, Sparkles, X } from "lucide-react"
-import type { Project } from "../../ProjectsView"
-import type { TaskStart } from "../../app-types"
+import type { Project } from "../ProjectsView"
+import type { TaskStart } from "../app-types"
 import { useI18n } from "../i18n/I18nContext"
 
 export function MobileNewSessionSheet({

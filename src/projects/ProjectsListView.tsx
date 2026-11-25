@@ -1,6 +1,6 @@
 import { ArrowLeft, ArrowUpRight, FolderGit2, GitBranch } from "lucide-react"
 import { Banner, Button, EmptyState } from "@/components/ui"
-import type { FeatureAgent } from "../../FeatureAgents"
+import type { FeatureAgent } from "../FeatureAgents"
 import type { Project } from "../../packages/protocol/index.ts"
 import { useI18n } from "../i18n/I18nContext"
 

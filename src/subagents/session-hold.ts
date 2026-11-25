@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { request } from "../../api"
+import { request } from "../api"
 import { formatTime } from "../i18n"
 
 export type UsageWait = { until: number; reason: string; tries: number; fallback?: string }

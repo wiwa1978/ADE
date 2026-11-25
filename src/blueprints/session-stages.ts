@@ -1,6 +1,6 @@
 import { t } from "../i18n"
 import { useCallback, useEffect, useState } from "react"
-import { request } from "../../api"
+import { request } from "../api"
 
 export type StageStatus = "pending" | "awaiting_approval" | "running" | "completed" | "changes_requested" | "skipped" | "failed"
 export type StageVerdict = { outcome: "pass" | "changes_requested" | "escalate_human"; summary: string; findings?: { severity: "blocker" | "major" | "minor"; file?: string; message: string }[] }

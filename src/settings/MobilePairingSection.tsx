@@ -13,7 +13,7 @@ import {
   Trash2,
   Wifi,
 } from "lucide-react"
-import { request, requestJson } from "../../api"
+import { request, requestJson } from "../api"
 import { useI18n } from "../i18n/I18nContext"
 import { generateQrSvgData } from "../mobile/qr-code"
 

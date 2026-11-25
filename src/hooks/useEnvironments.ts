@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
-import { request, requestJson } from "../../api"
-import type { EnvironmentDirectory } from "../../app-types"
+import { request, requestJson } from "../api"
+import type { EnvironmentDirectory } from "../app-types"
 
 export function useEnvironments() {
   const [environmentVersion, setEnvironmentVersion] = useState(0)

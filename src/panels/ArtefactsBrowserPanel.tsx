@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import type { SessionArtifact, TimelineItem, WorkspaceGitSummary } from "../../app-types"
+import type { SessionArtifact, TimelineItem, WorkspaceGitSummary } from "../app-types"
 import type { ArtefactFilterBucket } from "./file-preview-utils"
 import { ArtefactFilePreview } from "./artefacts/ArtefactFilePreview"
 import { ArtefactsListView } from "./artefacts/ArtefactsListView"

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { request } from "../../../api"
-import type { Conversation } from "../../../app-types"
-import type { Project } from "../../../ProjectsView"
+import { request } from "../../api"
+import type { Conversation } from "../../app-types"
+import type { Project } from "../../ProjectsView"
 
 function readStoredIds(key: string): string[] {
   try {

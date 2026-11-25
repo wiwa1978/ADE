@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Bot, FolderPlus, Laptop, SlidersHorizontal, X } from "lucide-react"
 import { Banner, Button, IconButton, Switch, useEscapeKey } from "@/components/ui"
-import type { TaskStart } from "../../app-types"
-import type { Project } from "../../ProjectsView"
+import type { TaskStart } from "../app-types"
+import type { Project } from "../ProjectsView"
 import { targetLabel, targetUnavailable, useRunTargets, type RunTarget } from "../run-targets"
 import {
   buildWorktreeCreatePayload,

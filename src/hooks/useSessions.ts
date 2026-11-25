@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import type { Conversation } from "../../app-types"
-import type { Project } from "../../ProjectsView"
-import type { Settings } from "../../useSettings"
+import type { Conversation } from "../app-types"
+import type { Project } from "../ProjectsView"
+import type { Settings } from "../useSettings"
 import { usePolling } from "./usePolling"
 import { useSessionPreferences } from "./sessions/useSessionPreferences"
 import {

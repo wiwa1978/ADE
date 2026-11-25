@@ -20,10 +20,10 @@ import {
   Square,
   Trash2,
 } from "lucide-react"
-import type { Conversation } from "../../app-types"
-import type { FeatureAgent } from "../../FeatureAgents"
+import type { Conversation } from "../app-types"
+import type { FeatureAgent } from "../FeatureAgents"
 import { BUILTIN_BLUEPRINTS } from "../../packages/blueprints/index.ts"
-import type { Project, ProjectActivity } from "../../ProjectsView"
+import type { Project, ProjectActivity } from "../ProjectsView"
 import type { InboxEntry } from "../session-state"
 import { LiveSessionPane } from "./LiveSessionPane"
 import { ProjectAutomationsTab } from "./ProjectAutomationsTab"

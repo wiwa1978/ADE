@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react"
-import type { Conversation, PendingApproval } from "../../../app-types"
+import type { Conversation, PendingApproval } from "../../app-types"
 
 export function useDesktopNotifications(params: {
   sessions: Conversation[]

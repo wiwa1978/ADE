@@ -1,6 +1,6 @@
 import { Banner, Button, SettingsRow, SettingsSection, StatusPill, Switch } from "@/components/ui"
-import type { useConnections } from "../../../useConnections"
-import type { Settings } from "../../../useSettings"
+import type { useConnections } from "../../useConnections"
+import type { Settings } from "../../useSettings"
 import { useI18n } from "../../i18n/I18nContext"
 
 export function GitHubSettings({

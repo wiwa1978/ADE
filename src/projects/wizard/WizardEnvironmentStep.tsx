@@ -1,6 +1,6 @@
 import { ChevronRight, Cloud, Laptop, Plus } from "lucide-react"
 import { Badge, SegmentedControl, type SegmentedOption } from "@/components/ui"
-import type { EnvironmentSummary } from "../../../app-types"
+import type { EnvironmentSummary } from "../../app-types"
 import { useI18n } from "../../i18n/I18nContext"
 
 export type EnvScopeFilter = "all" | "local" | "remote"

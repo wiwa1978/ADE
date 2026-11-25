@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronUp } from "lucide-react"
 import { FolderPathInput } from "@/components/ui"
-import type { TaskStart } from "../../../app-types"
+import type { TaskStart } from "../../app-types"
 import { useI18n } from "../../i18n/I18nContext"
 
 export function WorktreeAdvancedSection({

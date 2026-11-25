@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { Bot, ChevronRight, Hand, Loader2, PauseCircle, Square } from "lucide-react"
-import type { SessionBlueprintSummary, SubagentInfo } from "../../app-types"
-import { requestJson } from "../../api"
+import type { SessionBlueprintSummary, SubagentInfo } from "../app-types"
+import { requestJson } from "../api"
 import { useI18n } from "../i18n/I18nContext"
 import "./captain-status.css"
 

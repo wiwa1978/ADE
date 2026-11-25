@@ -1,6 +1,6 @@
 import { useState } from "react"
-import { requestJson } from "../../api"
-import type { SubagentInfo } from "../../app-types"
+import { requestJson } from "../api"
+import type { SubagentInfo } from "../app-types"
 import { useI18n } from "../i18n/I18nContext"
 
 /** Bring a subagent's worktree branch into the session's branch, after asking. Shared by the Agents and Swarm views. */

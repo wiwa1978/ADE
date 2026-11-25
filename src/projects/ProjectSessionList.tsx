@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { GitBranch, Play } from "lucide-react"
-import type { Conversation } from "../../app-types"
+import type { Conversation } from "../app-types"
 import { relativeTime, sessionStateInfo, type InboxEntry } from "../session-state"
 import { ActiveThreadSpinner } from "../sidebar/ActiveThreadSpinner"
 

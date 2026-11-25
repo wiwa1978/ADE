@@ -1,6 +1,6 @@
 import { X } from "lucide-react"
 import { Banner, Button, Input, Spinner } from "../../../components/ui/index.ts"
-import type { GitHubIssue } from "../../../app-types"
+import type { GitHubIssue } from "../../app-types"
 import { useI18n } from "../../i18n/I18nContext"
 import type { OpenIssueOption } from "./useNewSessionForm"
 

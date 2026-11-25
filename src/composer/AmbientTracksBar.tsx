@@ -24,7 +24,7 @@ import type {
   SessionTaskItem,
   SubagentInfo,
   WorkspaceGitSummary,
-} from "../../app-types"
+} from "../app-types"
 import { formatUsage } from "../usage/usage-data"
 import { useI18n } from "../i18n/I18nContext"
 

@@ -1,5 +1,5 @@
 import type { useWorktrees } from "./useWorktrees"
-import { useI18n } from "./src/i18n/I18nContext"
+import { useI18n } from "./i18n/I18nContext"
 
 export function WorktreeDiagnostics({ state, onBack }: { state: ReturnType<typeof useWorktrees>; onBack: () => void }) {
   const { t, formatDateTime } = useI18n()

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { ChevronLeft, ChevronRight, Copy, Download, MessageSquare, RotateCcw, Sparkles, TriangleAlert, Wrench } from "lucide-react"
-import { getCaptainEndpoint, resolveCaptainUrl } from "../../api"
-import type { TimelineItem } from "../../app-types"
+import { getCaptainEndpoint, resolveCaptainUrl } from "../api"
+import type { TimelineItem } from "../app-types"
 import { describeToolCall, replaySteps, type ReplayStep, type TranscriptItem } from "../../packages/protocol/transcript.ts"
 import { useI18n } from "../i18n/I18nContext"
 

@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Activity, RefreshCw, Square, Terminal } from "lucide-react"
-import type { ManagedProcessSummary } from "../../app-types"
+import type { ManagedProcessSummary } from "../app-types"
 
 export function ProcessesPanel({
   processes,

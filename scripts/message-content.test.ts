@@ -9,7 +9,7 @@ let MessageContent: React.ComponentType<{ content: string }>
 
 before(async () => {
   server = await createServer({ server: { middlewareMode: true }, appType: "custom" })
-  const mod = await server.ssrLoadModule("/MessageContent.tsx") as { MessageContent: React.ComponentType<{ content: string }> }
+  const mod = await server.ssrLoadModule("/src/MessageContent.tsx") as { MessageContent: React.ComponentType<{ content: string }> }
   MessageContent = mod.MessageContent
 })
 

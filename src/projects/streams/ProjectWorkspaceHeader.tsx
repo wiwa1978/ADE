@@ -14,7 +14,7 @@ import {
   Workflow,
 } from "lucide-react"
 import { Badge, Banner, Button, IconButton } from "../../../components/ui/index.ts"
-import type { Project } from "../../../ProjectsView"
+import type { Project } from "../../ProjectsView"
 
 export type ProjectTab = "sessions" | "kanban" | "issues" | "pulls" | "subagents" | "automations"
 export type StreamLayout = "single" | "split" | "grid"

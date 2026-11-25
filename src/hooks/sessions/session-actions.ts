@@ -1,7 +1,7 @@
-import { request } from "../../../api"
-import type { Conversation, GitHubIssue, StartFrom, TaskStart } from "../../../app-types"
-import { clearPendingStart, pendingStarts, storePendingStart } from "../../../pending-task-starts"
-import type { Project } from "../../../ProjectsView"
+import { request } from "../../api"
+import type { Conversation, GitHubIssue, StartFrom, TaskStart } from "../../app-types"
+import { clearPendingStart, pendingStarts, storePendingStart } from "../../pending-task-starts"
+import type { Project } from "../../ProjectsView"
 
 export type SessionAttachment = { id: string; name: string; content: string }
 

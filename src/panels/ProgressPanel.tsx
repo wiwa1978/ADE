@@ -1,5 +1,5 @@
 import { CheckCircle2, CircleDashed, CircleSlash, Loader2, PauseCircle, XCircle } from "lucide-react"
-import type { ConversationTimelineSnapshot, SessionTaskItem, SubagentInfo, TimelineItem } from "../../app-types"
+import type { ConversationTimelineSnapshot, SessionTaskItem, SubagentInfo, TimelineItem } from "../app-types"
 import { clock, type SessionHold } from "../subagents/session-hold"
 import { stageStatusLabel, type SessionStages, type StageStatus } from "../blueprints/session-stages"
 import { shortBlueprintName } from "../blueprints/blueprint-options"

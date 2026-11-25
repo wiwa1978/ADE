@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { GitBranch, GitPullRequest } from "lucide-react"
-import { request } from "../../api"
+import { request } from "../api"
 import { relativeTime } from "../session-state"
 import { useI18n } from "../i18n/I18nContext"
 

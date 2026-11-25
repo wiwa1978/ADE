@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { Globe2, ShieldCheck } from "lucide-react"
-import { request, requestJson } from "../../api"
+import { request, requestJson } from "../api"
 import { useI18n } from "../i18n/I18nContext"
 import "./eu-only.css"
 

@@ -1,5 +1,5 @@
 import { CheckCircle2, Clock, ExternalLink, GitBranch, GitMerge, Loader2, PauseCircle, Square, XCircle } from "lucide-react"
-import type { ConversationTimelineSnapshot, SubagentInfo } from "../../app-types"
+import type { ConversationTimelineSnapshot, SubagentInfo } from "../app-types"
 import { useAgentsWork, formatDuration, type AgentChanges } from "../agents/agent-summary"
 import { SubagentPanel } from "../panels/SubagentPanel"
 import { buildSwarmModel, type SwarmMember } from "./swarm-model"

@@ -1,4 +1,4 @@
-import type { SkillsAndRulesCatalog } from "../../../app-types"
+import type { SkillsAndRulesCatalog } from "../../app-types"
 
 export function filterSlashCommands(draft: string, commands: SkillsAndRulesCatalog["commands"]) {
   const slashMatch = /^\/([a-z0-9-_]*)$/i.exec(draft.trim())

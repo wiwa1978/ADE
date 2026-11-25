@@ -2,32 +2,32 @@ import { useEffect, useMemo, useState, type FormEvent } from "react"
 import { ArrowLeft } from "lucide-react"
 import { Banner, SearchInput, SettingsRow, SettingsSection } from "@/components/ui"
 import { requestJson } from "./api"
-import { UsageSettings } from "./src/usage/UsageSettings"
-import { IntegrationsSettings } from "./src/integrations/IntegrationsSettings"
-import { SubagentSettings } from "./src/subagents/SubagentSettings"
-import { ProvidersPanel } from "./src/settings/ProvidersPanel"
-import { MobilePairingSection } from "./src/settings/MobilePairingSection"
-import { EuOnlySettings } from "./src/settings/EuOnlySettings"
-import { SkillsToolsSettings } from "./src/settings/SkillsToolsSettings"
-import { GeneralSettings } from "./src/settings/sections/GeneralSettings"
-import { AppearanceSettings } from "./src/settings/sections/AppearanceSettings"
-import { AgentsSettings } from "./src/settings/sections/AgentsSettings"
-import { GitHubSettings } from "./src/settings/sections/GitHubSettings"
-import { TerminalSettings } from "./src/settings/sections/TerminalSettings"
-import { NotificationsSettings } from "./src/settings/sections/NotificationsSettings"
-import { EnvironmentsSettingsSection } from "./src/settings/sections/EnvironmentsSettingsSection"
+import { UsageSettings } from "./usage/UsageSettings"
+import { IntegrationsSettings } from "./integrations/IntegrationsSettings"
+import { SubagentSettings } from "./subagents/SubagentSettings"
+import { ProvidersPanel } from "./settings/ProvidersPanel"
+import { MobilePairingSection } from "./settings/MobilePairingSection"
+import { EuOnlySettings } from "./settings/EuOnlySettings"
+import { SkillsToolsSettings } from "./settings/SkillsToolsSettings"
+import { GeneralSettings } from "./settings/sections/GeneralSettings"
+import { AppearanceSettings } from "./settings/sections/AppearanceSettings"
+import { AgentsSettings } from "./settings/sections/AgentsSettings"
+import { GitHubSettings } from "./settings/sections/GitHubSettings"
+import { TerminalSettings } from "./settings/sections/TerminalSettings"
+import { NotificationsSettings } from "./settings/sections/NotificationsSettings"
+import { EnvironmentsSettingsSection } from "./settings/sections/EnvironmentsSettingsSection"
 import {
   REASONING_LEVEL_IDS,
   SETTINGS_GROUP_SPECS,
   type SettingsCategory,
   type SettingsViewProps,
-} from "./src/settings/sections/settings-nav"
+} from "./settings/sections/settings-nav"
 import {
   CURRENCY_OPTIONS, DATE_FORMAT_OPTIONS, SUPPORTED_LANGUAGES, TIME_FORMAT_OPTIONS,
   type DateFormatPreference, type LanguageCode, type TimeFormatPreference, type TranslationKey,
-} from "./src/i18n"
-import { formatDateOnly } from "./src/i18n/formatting"
-import { useI18n } from "./src/i18n/I18nContext"
+} from "./i18n"
+import { formatDateOnly } from "./i18n/formatting"
+import { useI18n } from "./i18n/I18nContext"
 
 export type { SettingsCategory }
 

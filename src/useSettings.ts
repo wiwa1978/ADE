@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from "react"
 import { z } from "zod"
 import { isAccentColor, paletteVariables, resolveAccentHex, type ColorPalette, type Theme } from "./appearance-palettes"
-import { ReasoningLevelSchema } from "./packages/protocol/index.ts"
-import { ensureGoogleFontLoaded } from "./src/appearance/fonts"
+import { ReasoningLevelSchema } from "../packages/protocol/index.ts"
+import { ensureGoogleFontLoaded } from "./appearance/fonts"
 import {
   DEFAULT_FORMAT_PREFERENCES, DEFAULT_LANGUAGE, getLanguageMeta, isCurrencyCode, isDateFormatPreference, isLanguageCode, isTimeFormatPreference, setCurrentLanguage, t,
   type DateFormatPreference, type LanguageCode, type TimeFormatPreference,
-} from "./src/i18n"
-import { CUSTOM_ACTION_OPTIONS, type CustomKeybinding, type CustomKeybindingAction } from "./src/keybindings"
+} from "./i18n"
+import { CUSTOM_ACTION_OPTIONS, type CustomKeybinding, type CustomKeybindingAction } from "./keybindings"
 
 export type Settings = {
   /** Interface display language (e.g. "en", "nl"). */

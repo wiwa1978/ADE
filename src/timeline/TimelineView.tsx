@@ -2,7 +2,7 @@ import { memo, useEffect, useRef } from "react"
 import { AlertTriangle, ExternalLink, Globe } from "lucide-react"
 import { Button, Spinner } from "../../components/ui/index.ts"
 import { useI18n } from "../i18n/I18nContext"
-import { MessageContent } from "../../MessageContent"
+import { MessageContent } from "../MessageContent"
 import { WorkspaceEmptyHero } from "../workspace/WorkspaceEmptyHero"
 import type {
   ConversationMessage,
@@ -10,7 +10,7 @@ import type {
   PendingApproval,
   SubagentInfo,
   TimelineItem,
-} from "../../app-types"
+} from "../app-types"
 import { ApprovalCard } from "./ApprovalCard"
 import { ThinkingBlock } from "./ThinkingBlock"
 import { ToolCallCard } from "./ToolCallCard"

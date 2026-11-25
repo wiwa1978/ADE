@@ -24,7 +24,7 @@ import {
   WifiOff,
   X,
 } from "lucide-react"
-import { request } from "../../api"
+import { request } from "../api"
 import type {
   ApprovalPolicy,
   Conversation,
@@ -36,8 +36,8 @@ import type {
   SubagentInfo,
   TaskStart,
   WorkspaceGitSummary,
-} from "../../app-types"
-import type { Project } from "../../ProjectsView"
+} from "../app-types"
+import type { Project } from "../ProjectsView"
 import { sessionStateInfo, type InboxEntry } from "../session-state"
 import { ActiveThreadSpinner } from "../sidebar/ActiveThreadSpinner"
 import { TimelineView } from "../timeline/TimelineView"

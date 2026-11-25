@@ -1,5 +1,5 @@
 import { ChevronUp, PauseCircle, Workflow } from "lucide-react"
-import type { SessionBlueprintSummary } from "../../app-types"
+import type { SessionBlueprintSummary } from "../app-types"
 import { shortBlueprintName } from "./blueprint-options"
 import { stageStatusPhrase } from "./session-stages"
 import { useI18n } from "../i18n/I18nContext"

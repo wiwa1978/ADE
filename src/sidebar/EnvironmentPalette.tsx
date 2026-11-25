@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { ArrowLeft, Plus, Search, Settings2 } from "lucide-react"
-import type { EnvironmentSummary } from "../../app-types"
+import type { EnvironmentSummary } from "../app-types"
 import { useI18n } from "../i18n/I18nContext"
 
 export function EnvironmentPalette({

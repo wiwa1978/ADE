@@ -1,6 +1,6 @@
 import { AtSign, Slash } from "lucide-react"
 import { Badge } from "../../../components/ui/index.ts"
-import type { SkillsAndRulesCatalog } from "../../../app-types"
+import type { SkillsAndRulesCatalog } from "../../app-types"
 import { useI18n } from "../../i18n/I18nContext"
 
 interface ComposerAutocompleteMenuProps {

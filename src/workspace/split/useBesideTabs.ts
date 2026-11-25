@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import type { SessionArtifact, SubagentInfo, WorkspaceTab } from "../../../app-types"
+import type { SessionArtifact, SubagentInfo, WorkspaceTab } from "../../app-types"
 import type { PullRequestInfo } from "../../panels/PullRequestPanel"
 import { tabsForNextSession } from "../side-panel-tabs"
 

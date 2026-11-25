@@ -1,6 +1,6 @@
 import { Archive, ChevronDown, ChevronRight, FolderGit2, GitBranch, MessageSquare } from "lucide-react"
-import type { Conversation } from "../../app-types"
-import type { Project } from "../../ProjectsView"
+import type { Conversation } from "../app-types"
+import type { Project } from "../ProjectsView"
 import { useI18n } from "../i18n/I18nContext"
 
 interface SidebarArchivedSectionProps {

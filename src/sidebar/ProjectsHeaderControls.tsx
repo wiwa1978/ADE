@@ -11,7 +11,7 @@ import {
   SlidersHorizontal,
   Trash2,
 } from "lucide-react"
-import type { Project } from "../../ProjectsView"
+import type { Project } from "../ProjectsView"
 import type { AddProjectSource } from "../projects/AddProjectWizard"
 import type { SidebarPrefs } from "./sidebar-prefs"
 import { useI18n } from "../i18n/I18nContext"

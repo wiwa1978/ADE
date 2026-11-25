@@ -1,14 +1,14 @@
 import {
   Bell, Blocks, Bot, Gauge, GitPullRequest, Globe, Palette, Puzzle, Server, Settings2, Smartphone, Sparkles, Terminal, Workflow, type LucideIcon,
 } from "lucide-react"
-import type { Theme } from "../../../appearance-palettes"
+import type { Theme } from "../../appearance-palettes"
 import type {
   ApprovalPolicy, ApprovalRule, BrowserState, EnvironmentDirectory, McpServerStatus,
   ProviderCatalogEntry, RuntimeHealth, SkillsAndRulesCatalog,
-} from "../../../app-types"
-import type { Project } from "../../../ProjectsView"
-import type { useConnections } from "../../../useConnections"
-import type { Settings } from "../../../useSettings"
+} from "../../app-types"
+import type { Project } from "../../ProjectsView"
+import type { useConnections } from "../../useConnections"
+import type { Settings } from "../../useSettings"
 import type { TranslationKey } from "../../i18n"
 
 /** Settings categories. Every category here changes something real; nothing is a placeholder. */

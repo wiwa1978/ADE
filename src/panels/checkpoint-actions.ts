@@ -1,4 +1,4 @@
-import { requestJson } from "../../api"
+import { requestJson } from "../api"
 import type { ConfirmOptions } from "../../components/ui/index.ts"
 
 export type CheckpointInfo = { id: string; label: string; createdAt: number; filesChanged: number }

@@ -1,7 +1,7 @@
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import rehypeHighlight from "rehype-highlight"
-import { resolveLocalFileHref } from "./src/panels/file-preview-utils"
+import { resolveLocalFileHref } from "./panels/file-preview-utils"
 
 export function MessageContent({
   content,

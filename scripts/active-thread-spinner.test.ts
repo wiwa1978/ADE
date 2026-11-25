@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { createServer, type ViteDevServer } from "vite"
-import type { Conversation } from "../app-types.ts"
+import type { Conversation } from "../src/app-types.ts"
 
 type SidebarProps = Record<string, unknown>
 

@@ -1,7 +1,7 @@
 import { memo, useState } from "react"
 import { Check, ShieldAlert, X } from "lucide-react"
 import { Badge, Button, Input } from "../../components/ui/index.ts"
-import type { PendingApproval } from "../../app-types"
+import type { PendingApproval } from "../app-types"
 import { useI18n } from "../i18n/I18nContext"
 
 export interface ApprovalCardProps {

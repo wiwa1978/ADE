@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react"
 import { AlertTriangle, CheckCircle2, Loader2, QrCode, ShieldCheck, Smartphone } from "lucide-react"
-import { requestJson } from "../../api"
+import { requestJson } from "../api"
 import { useI18n } from "../i18n/I18nContext"
 
 export type MobileSessionState = {

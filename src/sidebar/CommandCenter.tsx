@@ -12,8 +12,8 @@ import {
   Settings2,
   Terminal,
 } from "lucide-react"
-import type { Conversation, SubagentInfo } from "../../app-types"
-import type { Project } from "../../ProjectsView"
+import type { Conversation, SubagentInfo } from "../app-types"
+import type { Project } from "../ProjectsView"
 import { useI18n } from "../i18n/I18nContext"
 
 type CommandItem = {

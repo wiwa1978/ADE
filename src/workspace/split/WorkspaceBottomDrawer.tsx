@@ -1,6 +1,6 @@
 import { Columns2, Terminal, Workflow, X } from "lucide-react"
-import { TerminalPanel } from "../../../TerminalPanel"
-import type { SessionBlueprintSummary } from "../../../app-types"
+import { TerminalPanel } from "../../TerminalPanel"
+import type { SessionBlueprintSummary } from "../../app-types"
 import { StagesPanel, WayOfWorkingSelect } from "../../blueprints/StagesPanel"
 import { StageBar } from "../../blueprints/StageBar"
 import type { SessionStages } from "../../blueprints/session-stages"

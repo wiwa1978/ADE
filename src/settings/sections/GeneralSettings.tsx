@@ -1,5 +1,5 @@
 import { SettingsRow, SettingsSection, Switch } from "@/components/ui"
-import type { Settings } from "../../../useSettings"
+import type { Settings } from "../../useSettings"
 import { useI18n } from "../../i18n/I18nContext"
 import { KeybindingsSection } from "../KeybindingsSection"
 

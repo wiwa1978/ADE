@@ -1,6 +1,6 @@
 import { ChevronRight } from "lucide-react"
-import type { Conversation } from "../../app-types"
-import type { Project } from "../../ProjectsView"
+import type { Conversation } from "../app-types"
+import type { Project } from "../ProjectsView"
 import { useI18n } from "../i18n/I18nContext"
 
 export type SubmenuKind = "open-in" | "copy" | "split" | null

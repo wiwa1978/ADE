@@ -3,8 +3,8 @@ import { ArrowLeft, ClipboardPaste, Link2, Terminal, X, type LucideIcon } from "
 import { Badge, Banner, Button, IconButton, Input, useEscapeKey } from "@/components/ui"
 import type { EnvironmentDirectory, EnvironmentSummary } from "./app-types"
 import { getCaptainEndpoint, request, setCaptainEndpoint } from "./api"
-import { useI18n } from "./src/i18n/I18nContext"
-import { usePolling } from "./src/hooks/usePolling"
+import { useI18n } from "./i18n/I18nContext"
+import { usePolling } from "./hooks/usePolling"
 
 type AddMode = "choose" | "direct" | "ssh" | "pairing"
 

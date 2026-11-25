@@ -1,6 +1,6 @@
 import type { FormEvent } from "react"
 import { Button, Input } from "@/components/ui"
-import type { useConnections } from "../../../useConnections"
+import type { useConnections } from "../../useConnections"
 import { useI18n } from "../../i18n/I18nContext"
 import type { UnifiedProviderItem } from "./provider-overrides"
 

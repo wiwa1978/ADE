@@ -1,5 +1,5 @@
-import type { Conversation } from "../../app-types"
-import type { Project } from "../../ProjectsView"
+import type { Conversation } from "../app-types"
+import type { Project } from "../ProjectsView"
 import type { InboxEntry } from "../session-state"
 import type { SidebarPrefs } from "./sidebar-prefs"
 

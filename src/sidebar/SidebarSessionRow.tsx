@@ -1,6 +1,6 @@
 import { memo } from "react"
 import { MessageCircle, MessageSquare, Pin } from "lucide-react"
-import type { Conversation } from "../../app-types"
+import type { Conversation } from "../app-types"
 import { sessionStateIcon, sessionStateInfo, type InboxEntry } from "../session-state"
 import { useI18n } from "../i18n/I18nContext"
 

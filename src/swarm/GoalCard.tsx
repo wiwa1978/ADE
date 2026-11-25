@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Check, Pencil } from "lucide-react"
-import { requestJson } from "../../api"
+import { requestJson } from "../api"
 import { useI18n } from "../i18n/I18nContext"
 
 export function GoalCard({

@@ -1,6 +1,6 @@
 import { Circle, Eye, GitMerge, GitPullRequest, Loader2, MessageCircle, ShieldQuestion, Stamp, TriangleAlert, XCircle, type LucideIcon } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { request, requestJson } from "../api"
+import { request, requestJson } from "./api"
 import { t, type TranslationKey } from "./i18n"
 
 /** Mirrors runtime/inbox.ts. One vocabulary for session status everywhere in the UI. */

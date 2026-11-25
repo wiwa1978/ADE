@@ -1,5 +1,5 @@
-import type { FeatureAgent } from "../../FeatureAgents"
-import type { ProjectActivity } from "../../ProjectsView"
+import type { FeatureAgent } from "../FeatureAgents"
+import type { ProjectActivity } from "../ProjectsView"
 
 export function ProjectSubagentsTab({
   activity,

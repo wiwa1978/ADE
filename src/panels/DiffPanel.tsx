@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from "react"
 import { Check, FileCode2, GitCommit, Minus, Plus, RefreshCw, RotateCcw, Send } from "lucide-react"
-import { request, requestJson } from "../../api"
+import { request, requestJson } from "../api"
 import { useConfirm } from "../../components/ui/index.ts"
 import { useI18n } from "../i18n/I18nContext"
 import { reviewFeedbackPrompt } from "../../packages/protocol/agent-prompts.ts"
 import { DiffLines } from "./DiffLines"
 import { useDiffNotes } from "./diff-notes"
-import type { WorkspaceGitSummary } from "../../app-types"
+import type { WorkspaceGitSummary } from "../app-types"
 import { CheckpointList } from "./CheckpointList"
 
 type BranchFile = { path: string; additions: number; deletions: number; status: "added" | "modified" | "deleted" | "renamed" }

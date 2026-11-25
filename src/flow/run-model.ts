@@ -3,7 +3,7 @@
 // reports, summary), and the flows between them. Derived from what ADE already records: the main
 // agent's and each subagent's timeline, the blueprint's stage history and the task checklist.
 // The idea and the picture follow Ensemble for Orca's data-flow view (MIT, github.com/DueGin/orca-ensemble).
-import type { SessionTaskItem, SubagentInfo, TimelineItem, TimelineToolCall } from "../../app-types.ts"
+import type { SessionTaskItem, SubagentInfo, TimelineItem, TimelineToolCall } from "../app-types.ts"
 import type { TeamView } from "./team-types.ts"
 
 export const PARTS = ["brief", "handouts", "stages", "tasks", "plans", "board", "claims", "changes", "reports", "summary"] as const

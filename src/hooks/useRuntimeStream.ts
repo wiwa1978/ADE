@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { z } from "zod"
-import { request, requestJson } from "../../api"
+import { request, requestJson } from "../api"
 import { useEventStream } from "./useEventStream"
 import { usePolling } from "./usePolling"
 import type {
@@ -16,7 +16,7 @@ import type {
   SkillsAndRulesCatalog,
   SubagentInfo,
   WorkspaceGitSummary,
-} from "../../app-types"
+} from "../app-types"
 
 const EMPTY_GIT: WorkspaceGitSummary = {
   isGitRepo: false,

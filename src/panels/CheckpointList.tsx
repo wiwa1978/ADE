@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { History, RotateCcw, Save } from "lucide-react"
-import { request, requestJson } from "../../api"
+import { request, requestJson } from "../api"
 import { useI18n } from "../i18n/I18nContext"
 import { relativeTime } from "../session-state"
 import { confirmRestore, restoreCheckpoint, type CheckpointInfo } from "./checkpoint-actions"

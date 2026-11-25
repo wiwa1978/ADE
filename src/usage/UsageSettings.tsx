@@ -1,5 +1,5 @@
 import { useState } from "react"
-import type { Project } from "../../ProjectsView"
+import type { Project } from "../ProjectsView"
 import { useI18n } from "../i18n/I18nContext"
 import { formatCost, formatTokens, formatUsage, useUsage } from "./usage-data"
 

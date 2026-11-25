@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Check, CircleDashed, CircleSlash, Eye, Loader2, PauseCircle, RotateCcw, Users, XCircle } from "lucide-react"
-import { requestJson } from "../../api"
+import { requestJson } from "../api"
 import { useConfirm } from "../../components/ui/index.ts"
 import "./stage-checks.css"
 import { shortBlueprintName, useBlueprintOptions, VIBE_ID } from "./blueprint-options"

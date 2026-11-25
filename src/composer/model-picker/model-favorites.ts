@@ -1,5 +1,5 @@
 import { z } from "zod"
-import type { ProviderCatalogEntry } from "../../../app-types"
+import type { ProviderCatalogEntry } from "../../app-types"
 
 const FAVORITES_STORAGE_KEY = "ade.favorite-models-v1"
 const favoritesSchema = z.array(z.string())

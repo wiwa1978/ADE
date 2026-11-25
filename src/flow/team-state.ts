@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { request } from "../../api"
+import { request } from "../api"
 import { useEventStreamListener } from "../hooks/useEventStream"
 import type { TeamView } from "./team-types"
 

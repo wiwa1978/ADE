@@ -3,7 +3,7 @@ import { Activity, Bot, CircleDot, FileDiff, FileText, FolderTree, GitPullReques
 import type {
   BrowserState, Conversation, ConversationTimelineSnapshot, ManagedProcessSummary,
   SessionArtifact, SessionBlueprintSummary, SessionTaskItem, SubagentInfo, WorkspaceGitSummary, WorkspaceTab,
-} from "../../../app-types"
+} from "../../app-types"
 import type { SidePanelItem } from "../SidePanelMenu"
 import { publishSessionTools } from "../../layout/session-tools"
 import type { RunStatus } from "../../panels/RunPanel"

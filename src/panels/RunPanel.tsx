@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ExternalLink, Globe, Play, RefreshCw, Settings2, Square } from "lucide-react"
 import { Badge, Banner, Button, EmptyState, IconButton, Spinner } from "../../components/ui/index.ts"
-import { request, requestJson } from "../../api"
+import { request, requestJson } from "../api"
 import { checkFailedPrompt } from "../../packages/protocol/agent-prompts.ts"
 import { usePolling } from "../hooks/usePolling"
 import { runTargetDescriptions, targetLabel, targetUnavailable, useRunTargets, type RunTarget, type TargetSettings, type TargetState } from "../run-targets"

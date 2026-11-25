@@ -1,6 +1,6 @@
 import { useEffect, useId, useState, type KeyboardEvent } from "react"
 import { Plus } from "lucide-react"
-import { request } from "../../api"
+import { request } from "../api"
 import { Banner, Button, Input } from "@/components/ui"
 import type { GitHubRepository, GitHubRepositoryPage } from "../../packages/protocol/index.ts"
 import { useI18n } from "../i18n/I18nContext"

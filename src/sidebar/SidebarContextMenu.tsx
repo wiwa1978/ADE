@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
-import type { Conversation } from "../../app-types"
-import type { Project } from "../../ProjectsView"
+import type { Conversation } from "../app-types"
+import type { Project } from "../ProjectsView"
 import { ProjectContextMenuItems, SessionContextMenuItems, type SubmenuKind } from "./ContextMenuItems"
 
 export type ContextMenuTarget =

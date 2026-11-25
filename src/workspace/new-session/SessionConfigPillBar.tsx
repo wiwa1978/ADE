@@ -4,8 +4,8 @@ import {
   GitBranch, Layers, Link2, Lock, MessageSquare, Workflow,
 } from "lucide-react"
 import { SearchInput, useClickOutside, useEscapeKey } from "../../../components/ui/index.ts"
-import type { GitHubIssue, TaskStart } from "../../../app-types"
-import type { Project } from "../../../ProjectsView"
+import type { GitHubIssue, TaskStart } from "../../app-types"
+import type { Project } from "../../ProjectsView"
 import { shortBlueprintName, stagesLine, VIBE_ID, type BlueprintOption } from "../../blueprints/blueprint-options"
 import { useI18n } from "../../i18n/I18nContext"
 import { runTargetDescriptions, targetLabel, targetUnavailable, type RunTarget, type RunTargetsInfo, type TargetSettings } from "../../run-targets"

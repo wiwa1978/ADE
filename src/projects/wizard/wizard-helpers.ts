@@ -1,6 +1,6 @@
-import { request } from "../../../api"
-import type { ModelProfileId } from "../../../app-types"
-import type { Project } from "../../../ProjectsView"
+import { request } from "../../api"
+import type { ModelProfileId } from "../../app-types"
+import type { Project } from "../../ProjectsView"
 import type { AddProjectSource } from "../AddProjectWizard"
 
 export type ConcreteProjectSource = Exclude<AddProjectSource, "menu">

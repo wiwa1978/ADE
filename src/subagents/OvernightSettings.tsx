@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
-import { request, requestJson } from "../../api"
-import type { ProviderCatalogEntry } from "../../app-types"
+import { request, requestJson } from "../api"
+import type { ProviderCatalogEntry } from "../app-types"
 import { useI18n } from "../i18n/I18nContext"
 
 type Limits = { taskMinutes: number; taskCost: number; dayCost: number; fallbackProvider: string; fallbackModel: string; maxSubagents: number }

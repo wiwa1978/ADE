@@ -11,8 +11,8 @@ import {
   paletteVariables,
   resolveAccentHex,
   type Theme,
-} from "../../../appearance-palettes"
-import type { Settings } from "../../../useSettings"
+} from "../../appearance-palettes"
+import type { Settings } from "../../useSettings"
 import { CODE_FONT_OPTIONS, INTERFACE_FONT_OPTIONS } from "../../appearance/fonts"
 import { FontPicker } from "../../appearance/FontPicker"
 import { useI18n } from "../../i18n/I18nContext"

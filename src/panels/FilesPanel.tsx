@@ -11,8 +11,8 @@ import {
   Search,
   Settings2,
 } from "lucide-react"
-import { request, requestJson } from "../../api"
-import type { WorkspaceEntry } from "../../app-types"
+import { request, requestJson } from "../api"
+import type { WorkspaceEntry } from "../app-types"
 import { useI18n } from "../i18n/I18nContext"
 import { RichFilePreview } from "./RichFilePreview"
 

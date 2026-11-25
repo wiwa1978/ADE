@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { request } from "../api"
+import { request } from "./api"
 
 export type RunTarget = "local" | "docker" | "wsl" | "ssh" | "boat"
 export type TargetSettings = { target: RunTarget; image: string; wslDistro: string; sshHost: string; remoteRoot: string }

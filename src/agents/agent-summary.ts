@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
-import { request } from "../../api"
-import type { TimelineItem, TimelineToolCall } from "../../app-types"
+import { request } from "../api"
+import type { TimelineItem, TimelineToolCall } from "../app-types"
 import { t } from "../i18n"
 
 export type AgentChanges = { base: string; files: { path: string; added: number; removed: number; status: "added" | "modified" | "deleted" }[]; added: number; removed: number; commits: number }

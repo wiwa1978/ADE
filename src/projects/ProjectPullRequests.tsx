@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { CheckCircle2, CircleDashed, ExternalLink, GitPullRequest, RefreshCw, Settings2, XCircle } from "lucide-react"
-import { request } from "../../api"
-import type { Project } from "../../ProjectsView"
+import { request } from "../api"
+import type { Project } from "../ProjectsView"
 import { useI18n, type I18nContextValue } from "../i18n/I18nContext"
 
 type PullRequestRow = {

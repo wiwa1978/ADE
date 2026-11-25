@@ -2,7 +2,7 @@ import type {
   ApprovalPolicy, BrowserState, Conversation, ConversationTimelineSnapshot, GitHubIssue,
   ManagedProcessSummary, PendingApproval, ProviderCatalogEntry, SessionArtifact, SessionTaskItem,
   SkillsAndRulesCatalog, SubagentInfo, WorkspaceGitSummary, WorkspaceTab,
-} from "../../../app-types"
+} from "../../app-types"
 import type { KeybindingMap } from "../../keybindings"
 
 export type SplitWorkspaceProps = {

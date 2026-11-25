@@ -1,4 +1,4 @@
-import type { ConversationTimelineSnapshot, SessionTaskItem, SubagentInfo, TimelineItem, TimelineToolCall } from "../../app-types.ts"
+import type { ConversationTimelineSnapshot, SessionTaskItem, SubagentInfo, TimelineItem, TimelineToolCall } from "../app-types.ts"
 import type { TeamTask, TeamView, ThreadStatus } from "../flow/team-types.ts"
 
 function describeTool(tool: TimelineToolCall) {

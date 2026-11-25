@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Button, SettingsRow, SettingsSection, StatusPill, Switch } from "@/components/ui"
-import type { Settings } from "../../../useSettings"
+import type { Settings } from "../../useSettings"
 import { useI18n } from "../../i18n/I18nContext"
 
 function notificationPermission(): NotificationPermission | "unsupported" {

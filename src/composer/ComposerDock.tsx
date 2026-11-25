@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent, type KeyboardEvent, type RefObject } from "react"
 import { ArrowUp, CornerDownLeft, FileDiff, FolderTree, Globe, Square, Terminal } from "lucide-react"
 import { Button, IconButton } from "../../components/ui/index.ts"
-import type { ApprovalPolicy, ProviderCatalogEntry, SkillsAndRulesCatalog } from "../../app-types"
+import type { ApprovalPolicy, ProviderCatalogEntry, SkillsAndRulesCatalog } from "../app-types"
 import { matchesChord } from "../keybindings"
 import { useI18n } from "../i18n/I18nContext"
 import { insertMention, mentionAt, useFileMentions } from "./file-mentions"

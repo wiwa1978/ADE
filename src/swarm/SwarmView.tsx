@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { ChevronDown, ChevronRight, Loader2, Pencil, Sparkles } from "lucide-react"
-import type { Conversation, ConversationTimelineSnapshot, SessionTaskItem, SubagentInfo, TimelineItem, TimelineToolCall } from "../../app-types"
+import type { Conversation, ConversationTimelineSnapshot, SessionTaskItem, SubagentInfo, TimelineItem, TimelineToolCall } from "../app-types"
 import type { TeamView } from "../flow/team-types"
 import { useAgentsWork } from "../agents/agent-summary"
 import { SwarmGraph } from "./SwarmGraph"

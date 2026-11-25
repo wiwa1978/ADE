@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { CircleDot, ExternalLink, Play, RefreshCw, Search } from "lucide-react"
-import { request } from "../../api"
-import type { GitHubIssue } from "../../app-types"
+import { request } from "../api"
+import type { GitHubIssue } from "../app-types"
 
 type IssueRow = Pick<GitHubIssue, "repository" | "number" | "title" | "state" | "url" | "body">
 

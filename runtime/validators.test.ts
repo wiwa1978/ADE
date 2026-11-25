@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { z } from "zod";
-import { request, requestText } from "../api.ts";
+import { request, requestText } from "../src/api.ts";
 import {
 	EscalationCardSchema,
 	McpServerConfigSchema,

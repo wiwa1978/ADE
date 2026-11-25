@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { request, requestJson } from "../../api"
+import { request, requestJson } from "../api"
 import { useI18n } from "../i18n/I18nContext"
 import { runTargetDescriptions, targetLabel, targetUnavailable, useRunTargets, type TargetSettings } from "../run-targets"
 

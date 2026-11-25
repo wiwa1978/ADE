@@ -1,6 +1,6 @@
 import { useContext, useEffect, useState, type FormEvent } from "react"
 import { KeyRound, X } from "lucide-react"
-import { request, requestJson } from "../../api"
+import { request, requestJson } from "../api"
 import { Banner, Button, IconButton, Input } from "@/components/ui"
 import { ConfirmContext } from "@/components/ui/confirm-context"
 import { useI18n } from "../i18n/I18nContext"

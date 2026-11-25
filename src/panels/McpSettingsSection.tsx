@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { Shield, Trash2 } from "lucide-react"
 import { useI18n } from "../i18n/I18nContext"
-import type { ApprovalPolicy, ApprovalRule } from "../../app-types"
+import type { ApprovalPolicy, ApprovalRule } from "../app-types"
 
 export function McpAndSecuritySettings({
   approvalPolicy,

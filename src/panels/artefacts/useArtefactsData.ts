@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { request } from "../../../api"
-import type { SessionArtifact, TimelineItem, WorkspaceGitSummary } from "../../../app-types"
+import { request } from "../../api"
+import type { SessionArtifact, TimelineItem, WorkspaceGitSummary } from "../../app-types"
 import {
   extractToolCallFilePaths,
   getFileExtension,

@@ -1,4 +1,4 @@
-import type { TimelineToolCall } from "../../app-types"
+import type { TimelineToolCall } from "../app-types"
 
 export type FilePreviewKind = "image" | "svg" | "markdown" | "html" | "pdf" | "code" | "text" | "binary"
 

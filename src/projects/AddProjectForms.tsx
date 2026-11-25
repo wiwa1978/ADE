@@ -1,5 +1,5 @@
 import { Folder, FolderGit2, FolderOpen } from "lucide-react"
-import { GitHubRepositoryPicker, type GitHubRepositoryPage } from "../../ProjectsView"
+import { GitHubRepositoryPicker, type GitHubRepositoryPage } from "../ProjectsView"
 import { useI18n } from "../i18n/I18nContext"
 
 export type DirBrowserState = {

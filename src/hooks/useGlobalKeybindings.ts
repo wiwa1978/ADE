@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react"
-import type { Screen, WorkspaceTab } from "../../app-types"
+import type { Screen, WorkspaceTab } from "../app-types"
 import { isEditableTarget, matchesChord, type CustomKeybinding, type KeybindingMap } from "../keybindings"
 
 export type GlobalKeybindingHandlers = {

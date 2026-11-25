@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { request } from "../../../api"
+import { request } from "../../api"
 import { usePolling } from "../../hooks/usePolling"
 import {
   fixCiPrompt,

@@ -1,7 +1,7 @@
 import type { RefObject } from "react"
 import { Star } from "lucide-react"
 import { Button, EmptyState, SearchInput } from "../../../components/ui/index.ts"
-import type { ProviderCatalogEntry } from "../../../app-types"
+import type { ProviderCatalogEntry } from "../../app-types"
 import { ProviderGlyph } from "../ProviderGlyph"
 import { useI18n } from "../../i18n/I18nContext"
 import type { FavoriteKey, ModelEntry } from "./model-favorites"

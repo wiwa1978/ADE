@@ -1,6 +1,6 @@
 import { useCallback, useContext, useState, type FormEvent } from "react"
 import { CalendarClock, Play, Plus, Tag, Trash2 } from "lucide-react"
-import { request } from "../../api"
+import { request } from "../api"
 import { Badge, Banner, Button, EmptyState, IconButton, Input, Switch, Textarea } from "@/components/ui"
 import { ConfirmContext } from "@/components/ui/confirm-context"
 import { usePolling } from "../hooks/usePolling"

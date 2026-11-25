@@ -1,6 +1,6 @@
 import { t } from "../i18n"
 import { useEffect, useState } from "react"
-import { request } from "../../api"
+import { request } from "../api"
 
 export type GateMode = "never" | "before" | "after"
 export type BlueprintOption = {

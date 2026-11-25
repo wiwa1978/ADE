@@ -40,8 +40,8 @@ import type {
   TimelineToolCall,
   WorkspaceGitSummary,
   WorkspaceTab,
-} from "../../app-types"
-import { TerminalPanel } from "../../TerminalPanel"
+} from "../app-types"
+import { TerminalPanel } from "../TerminalPanel"
 import { SubagentPanel } from "../panels/SubagentPanel"
 import { FilesPanel } from "../panels/FilesPanel"
 import { FileViewerPanel } from "../panels/FileViewerPanel"

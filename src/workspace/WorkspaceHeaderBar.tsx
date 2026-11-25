@@ -8,7 +8,7 @@ import type {
   SubagentInfo,
   WorkspaceGitSummary,
   WorkspaceTab,
-} from "../../app-types"
+} from "../app-types"
 import type { PullRequestInfo } from "../panels/PullRequestPanel"
 import { useI18n } from "../i18n/I18nContext"
 

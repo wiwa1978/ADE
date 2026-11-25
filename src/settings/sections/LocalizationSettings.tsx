@@ -1,5 +1,5 @@
 import { SettingsRow, SettingsSection } from "@/components/ui"
-import type { Settings } from "../../../useSettings"
+import type { Settings } from "../../useSettings"
 import {
   CURRENCY_OPTIONS,
   DATE_FORMAT_OPTIONS,

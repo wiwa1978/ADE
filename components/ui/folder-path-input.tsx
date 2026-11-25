@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { FolderOpen } from "lucide-react"
-import { request } from "../../api"
+import { request } from "../../src/api"
 import { cn } from "@/lib/utils"
 import { Button } from "./button"
 import { Input } from "./input"

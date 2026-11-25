@@ -1,8 +1,8 @@
 import { useState } from "react"
 import { ArrowLeft, Check, CheckCircle2, FileText, MessageSquareWarning } from "lucide-react"
 import { Badge, Button, Input } from "../../../components/ui/index.ts"
-import { MessageContent } from "../../../MessageContent"
-import type { SessionArtifact } from "../../../app-types"
+import { MessageContent } from "../../MessageContent"
+import type { SessionArtifact } from "../../app-types"
 import { getFileExtension } from "../file-preview-utils"
 import type { ArtefactFileEntry, EnrichedSessionArtifact } from "./useArtefactsData"
 

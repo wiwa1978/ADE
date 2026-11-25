@@ -1,6 +1,6 @@
 import { Button, SettingsRow, SettingsSection, StatusPill } from "@/components/ui"
-import type { EnvironmentDirectory, McpServerStatus, RuntimeHealth } from "../../../app-types"
-import { EnvironmentSettings } from "../../../EnvironmentSettings"
+import type { EnvironmentDirectory, McpServerStatus, RuntimeHealth } from "../../app-types"
+import { EnvironmentSettings } from "../../EnvironmentSettings"
 import { useI18n } from "../../i18n/I18nContext"
 
 export function EnvironmentsSettingsSection({

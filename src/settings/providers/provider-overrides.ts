@@ -5,8 +5,8 @@ import type {
   ProviderCatalogEntry,
   ProviderTool,
   RuntimeHealth,
-} from "../../../app-types"
-import { modelCredentialProviders } from "../../../useConnections"
+} from "../../app-types"
+import { modelCredentialProviders } from "../../useConnections"
 import type { TranslationKey, TranslationVars } from "../../i18n"
 
 const EnvVarRowSchema = z.object({

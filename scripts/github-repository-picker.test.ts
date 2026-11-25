@@ -35,7 +35,7 @@ before(async () => {
   createRoot = reactDomClient.createRoot
   cacheDirectory = mkdtempSync(join(tmpdir(), "ade-picker-test-"))
   server = await createServer({ cacheDir: cacheDirectory, server: { middlewareMode: true, hmr: false }, appType: "custom", optimizeDeps: { noDiscovery: true } })
-  const mod = await server.ssrLoadModule("/ProjectsView.tsx") as { ProjectSettings: React.ComponentType<ProjectSettingsProps> }
+  const mod = await server.ssrLoadModule("/src/ProjectsView.tsx") as { ProjectSettings: React.ComponentType<ProjectSettingsProps> }
   ProjectSettings = mod.ProjectSettings
 })
 

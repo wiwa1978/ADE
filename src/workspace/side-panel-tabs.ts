@@ -1,4 +1,4 @@
-import type { WorkspaceTab, WorkspaceTabKind } from "../../app-types.ts"
+import type { WorkspaceTab, WorkspaceTabKind } from "../app-types.ts"
 
 /** Tabs that need the session's workspace (its files, branch or project). */
 const NEEDS_WORKSPACE = new Set<WorkspaceTabKind>(["files", "diff", "run", "pr", "issues", "team", "swarm"])
