@@ -1,10 +1,11 @@
 import { useState } from "react"
 import { useViewMode } from "../view-mode"
 import { useI18n } from "../i18n/I18nContext"
-import { CalendarClock,
+import {
   Archive,
   ArchiveRestore,
   Bot,
+  CalendarClock,
   ChevronDown,
   ChevronRight,
   Columns2,
@@ -23,16 +24,45 @@ import type { Conversation } from "../../app-types"
 import type { FeatureAgent } from "../../FeatureAgents"
 import { BUILTIN_BLUEPRINTS } from "../../packages/blueprints/index.ts"
 import type { Project, ProjectActivity } from "../../ProjectsView"
+import type { InboxEntry } from "../session-state"
+import { LiveSessionPane } from "./LiveSessionPane"
+import { ProjectAutomationsTab } from "./ProjectAutomationsTab"
 import { ProjectIssuesList, type ProjectGitHubIssue } from "./ProjectIssuesList"
 import { ProjectPullRequests } from "./ProjectPullRequests"
 import { ProjectSessionList } from "./ProjectSessionList"
-import type { InboxEntry } from "../session-state"
-import { LiveSessionPane } from "./LiveSessionPane"
 import { ProjectSubagentsTab } from "./ProjectSubagentsTab"
-import { ProjectAutomationsTab } from "./ProjectAutomationsTab"
 
 type ProjectTab = "sessions" | "issues" | "pulls" | "subagents" | "automations"
 type StreamLayout = "single" | "split" | "grid"
+
+export interface ProjectStreamsWorkspaceProps {
+  project: Project
+  sessions: Conversation[]
+  archivedSessions: Conversation[]
+  openStreamIds: string[]
+  focusedStreamId: string | null
+  activity: ProjectActivity | null
+  activityError: string
+  filesOpen?: boolean
+  settingsOpen: boolean
+  onToggleFiles?: () => void
+  onToggleSettings: () => void
+  onFocusStream: (streamId: string) => void
+  onCloseStreamPane: (streamId: string) => void
+  onOpenStreamPane: (streamId: string) => void
+  onMaximizeSession: (sessionId: string) => void
+  /** Open a session that was just started outside the session list (it isn't loaded yet). */
+  onOpenStartedSession?: (sessionId: string) => Promise<void>
+  onQuickStartStream: (prompt: string) => Promise<void>
+  onSendQuickMessage: (session: Conversation, text: string) => Promise<void>
+  onUnarchiveSession: (sessionId: string) => void
+  onDeleteSession: (session: Conversation) => void
+  onOpenAgent: (sessionId: string, agent: FeatureAgent) => void
+  onStartSessionFromIssue?: (issue: ProjectGitHubIssue) => Promise<void>
+  onOpenExternal?: (url: string) => void
+  onSessionContextMenu?: (session: Conversation, x: number, y: number) => void
+  inboxEntries?: Record<string, InboxEntry>
+}
 
 export function ProjectStreamsWorkspace({
   project,
@@ -60,48 +90,19 @@ export function ProjectStreamsWorkspace({
   onOpenExternal,
   onSessionContextMenu,
   inboxEntries = {},
-}: {
-  project: Project
-  sessions: Conversation[]
-  archivedSessions: Conversation[]
-  openStreamIds: string[]
-  focusedStreamId: string | null
-  activity: ProjectActivity | null
-  activityError: string
-  filesOpen?: boolean
-  settingsOpen: boolean
-  onToggleFiles?: () => void
-  onToggleSettings: () => void
-  onFocusStream: (streamId: string) => void
-  onCloseStreamPane: (streamId: string) => void
-  onOpenStreamPane: (streamId: string) => void
-  onMaximizeSession: (sessionId: string) => void
-  /** Open a session that was just started outside the session list (it isn't loaded yet). */
-  onOpenStartedSession?: (sessionId: string) => Promise<void>
-  onQuickStartStream: (prompt: string) => Promise<void>
-  onSendQuickMessage: (session: Conversation, text: string) => Promise<void>
-  onUnarchiveSession: (sessionId: string) => void
-  onDeleteSession: (session: Conversation) => void
-  onOpenAgent: (sessionId: string, agent: FeatureAgent) => void
-  onStartSessionFromIssue?: (issue: ProjectGitHubIssue) => Promise<void>
-  onOpenExternal?: (url: string) => void
-  onSessionContextMenu?: (session: Conversation, x: number, y: number) => void
-  inboxEntries?: Record<string, InboxEntry>
-}) {
+}: ProjectStreamsWorkspaceProps) {
   const [chosenTab, setActiveTab] = useState<ProjectTab>("sessions")
   // Simple view keeps two tabs: Sessions and Agents. The others come back with Full view.
   const { t } = useI18n()
   const simple = useViewMode() === "simple"
   const activeTab: ProjectTab = simple && chosenTab !== "sessions" && chosenTab !== "subagents" ? "sessions" : chosenTab
   const [layout, setLayout] = useState<StreamLayout>("split")
-  const [archivedOpen, setArchivedOpen] = useState(false)
-  // "list" shows every session's status; "side" opens several live sessions next to each other.
   const [sessionView, setSessionView] = useState<"list" | "side">("list")
   const [quickPrompt, setQuickPrompt] = useState("")
   const [launching, setLaunching] = useState(false)
   const [launchError, setLaunchError] = useState("")
+  const [archivedOpen, setArchivedOpen] = useState(false)
 
-  // The project's default way of working: Vibe coding or a blueprint.
   const blueprint = !project.blueprintId || project.blueprintId === "vibe"
     ? { id: "vibe", name: t("ps.vibe") }
     : BUILTIN_BLUEPRINTS.find(b => b.id === project.blueprintId) ?? { id: project.blueprintId, name: project.blueprintId }
@@ -259,6 +260,7 @@ export function ProjectStreamsWorkspace({
           />
         </div>
       ) : null}
+
       {activeTab === "sessions" && sessionView === "side" ? (
         <div className="ade-streams-canvas">
           {launchError ? <div className="ade-banner-error">{launchError}</div> : null}

@@ -4,6 +4,7 @@ import type { FitAddon as FitAddonInstance } from "@xterm/addon-fit"
 import type { Terminal as XTermInstance } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
 import { request, requestJson } from "./api"
+import { useI18n } from "./src/i18n/I18nContext"
 
 /** The runtime accepts 20–300 columns and 5–200 rows; a short drawer can measure less. */
 function terminalSize(cols: number, rows: number) {
@@ -12,6 +13,14 @@ function terminalSize(cols: number, rows: number) {
 
 type TerminalStart = { id: string; shell: string; cwd: string; cols: number; rows: number }
 type TerminalOutput = { data: string; cursor: number; baseCursor: number; truncated: boolean; exited: boolean; exitCode: number | null; shell: string }
+type TerminalStatus =
+  | { kind: "not_started" }
+  | { kind: "reconnecting" }
+  | { kind: "starting" }
+  | { kind: "running"; shell: string }
+  | { kind: "exited"; exitCode: number | null }
+  | { kind: "expired" }
+  | { kind: "interrupted" }
 
 type TerminalPanelProps = {
   environmentId: string
@@ -43,6 +52,11 @@ function terminalTheme() {
 }
 
 export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontSize, scrollback, autoStart = false }: TerminalPanelProps) {
+  const { t } = useI18n()
+  const tRef = useRef(t)
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
   const hostRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTermInstance | null>(null)
   const fitRef = useRef<FitAddonInstance | null>(null)
@@ -50,11 +64,12 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
   const cursorRef = useRef(0)
   const exitedRef = useRef(false)
   const writeQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const wakePollRef = useRef<(() => void) | null>(null)
   const fontSizeRef = useRef(fontSize)
   const scrollbackRef = useRef(scrollback)
   const [terminalReady, setTerminalReady] = useState(false)
   const [terminalId, setTerminalId] = useState<string | null>(null)
-  const [status, setStatus] = useState("Not started")
+  const [status, setStatus] = useState<TerminalStatus>({ kind: "not_started" })
   const [error, setError] = useState("")
   const storageKey = `ade-terminal-v1:${environmentId}:${workspaceKey}`
 
@@ -79,7 +94,7 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
         const fitModule = loadedFitAddon as { FitAddon?: typeof import("@xterm/addon-fit").FitAddon; default?: { FitAddon?: typeof import("@xterm/addon-fit").FitAddon } }
         const TerminalConstructor = xtermModule.Terminal ?? xtermModule.default?.Terminal
         const FitAddonConstructor = fitModule.FitAddon ?? fitModule.default?.FitAddon
-        if (!TerminalConstructor || !FitAddonConstructor) throw new Error("Terminal libraries could not be loaded.")
+        if (!TerminalConstructor || !FitAddonConstructor) throw new Error(tRef.current("pnlx.term.errLibs"))
         terminal = new TerminalConstructor({
           cursorBlink: true,
           fontFamily: '"SFMono-Regular", Menlo, Monaco, Consolas, monospace',
@@ -99,7 +114,7 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
         if (savedId && !terminalIdRef.current) {
           terminalIdRef.current = savedId
           setTerminalId(savedId)
-          setStatus("Reconnecting…")
+          setStatus({ kind: "reconnecting" })
         }
 
         inputSubscription = terminal.onData(data => {
@@ -107,14 +122,15 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
           if (!id || exitedRef.current) return
           writeQueueRef.current = writeQueueRef.current.then(async () => {
             await requestJson(`/api/terminals/${id}/input`, "POST", { data })
+            wakePollRef.current?.()
           }).catch(cause => {
-            setError(cause instanceof Error ? cause.message : "Could not write to the terminal.")
+            setError(cause instanceof Error ? cause.message : tRef.current("pnlx.term.errWrite"))
           })
         })
         resizeSubscription = terminal.onResize(({ cols, rows }) => {
           const id = terminalIdRef.current
           if (!id) return
-          void requestJson(`/api/terminals/${id}/resize`, "POST", terminalSize(cols, rows)).catch(cause => setError(cause instanceof Error ? cause.message : "Could not resize the terminal."))
+          void requestJson(`/api/terminals/${id}/resize`, "POST", terminalSize(cols, rows)).catch(cause => setError(cause instanceof Error ? cause.message : tRef.current("pnlx.term.errResize")))
         })
 
         fitTerminal = () => {
@@ -126,7 +142,7 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
         window.addEventListener("resize", fitTerminal)
         requestAnimationFrame(fitTerminal)
       } catch (cause) {
-        if (active) setError(cause instanceof Error ? cause.message : "Could not load the terminal UI.")
+        if (active) setError(cause instanceof Error ? cause.message : tRef.current("pnlx.term.errLoadUi"))
       }
     })()
 
@@ -154,41 +170,112 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
 
   useEffect(() => {
     if (!visible || !terminalReady || !terminalId || !terminalRef.current) return
+    const ACTIVE_POLL_MS = 180
+    const MAX_IDLE_POLL_MS = 1000
     let active = true
     let polling = false
+    let delayMs = ACTIVE_POLL_MS
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let controller: AbortController | null = null
+
+    const isHidden = () => typeof document !== "undefined" && document.visibilityState !== "visible"
+
+    const clearTimer = () => {
+      if (timer !== null) {
+        clearTimeout(timer)
+        timer = null
+      }
+    }
+
+    const schedule = (ms: number) => {
+      clearTimer()
+      if (!active || exitedRef.current || isHidden()) return
+      timer = setTimeout(() => { void poll() }, ms)
+    }
+
     const poll = async () => {
-      if (!active || polling) return
+      if (!active || polling || exitedRef.current || isHidden()) return
       polling = true
+      clearTimer()
+      const nextController = new AbortController()
+      controller = nextController
       try {
-        const result = await request<TerminalOutput>(`/api/terminals/${terminalId}/output?cursor=${cursorRef.current}`)
-        if (!active) return
-        if (result.truncated) terminalRef.current?.write("\r\n[Earlier terminal output was truncated.]\r\n")
+        const result = await request<TerminalOutput>(
+          `/api/terminals/${terminalId}/output?cursor=${cursorRef.current}`,
+          { signal: nextController.signal },
+        )
+        if (!active || nextController.signal.aborted) return
+        if (result.truncated) terminalRef.current?.write(tRef.current("pnlx.term.truncated"))
         if (result.data) terminalRef.current?.write(result.data)
         cursorRef.current = result.cursor
         exitedRef.current = result.exited
-        setStatus(result.exited ? `Exited${result.exitCode === null ? "" : ` (${result.exitCode})`}` : `Running · ${result.shell}`)
+        setStatus(result.exited ? { kind: "exited", exitCode: result.exitCode } : { kind: "running", shell: result.shell })
+        delayMs = result.data ? ACTIVE_POLL_MS : Math.min(MAX_IDLE_POLL_MS, Math.round(delayMs * 1.5))
       } catch (cause) {
-        if (!active) return
-        const message = cause instanceof Error ? cause.message : "Terminal connection was lost."
+        if (!active || nextController.signal.aborted) return
+        const message = cause instanceof Error ? cause.message : tRef.current("pnlx.term.errLost")
         if (/not found|already closed/i.test(message)) {
           localStorage.removeItem(storageKey)
           terminalIdRef.current = null
           setTerminalId(null)
           exitedRef.current = true
-          setStatus("Terminal expired")
-        } else setStatus("Connection interrupted")
+          setStatus({ kind: "expired" })
+        } else {
+          setStatus({ kind: "interrupted" })
+          delayMs = MAX_IDLE_POLL_MS
+        }
         setError(message)
-      } finally { polling = false }
+      } finally {
+        if (controller === nextController) controller = null
+        polling = false
+        if (active && !exitedRef.current && !isHidden()) {
+          schedule(delayMs)
+        }
+      }
     }
-    void poll()
-    const timer = window.setInterval(() => { void poll() }, 180)
-    return () => { active = false; window.clearInterval(timer) }
+
+    const wake = () => {
+      if (!active || exitedRef.current || isHidden()) return
+      delayMs = ACTIVE_POLL_MS
+      if (!polling) {
+        schedule(40)
+      }
+    }
+    wakePollRef.current = wake
+
+    const onVisibilityChange = () => {
+      if (!active) return
+      if (isHidden()) {
+        clearTimer()
+        return
+      }
+      delayMs = ACTIVE_POLL_MS
+      void poll()
+    }
+
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityChange)
+    }
+
+    if (!isHidden()) {
+      void poll()
+    }
+
+    return () => {
+      active = false
+      if (wakePollRef.current === wake) wakePollRef.current = null
+      clearTimer()
+      controller?.abort()
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityChange)
+      }
+    }
   }, [visible, terminalReady, terminalId, storageKey])
 
   async function start() {
     if (!cwd || terminalId || !visible || !terminalReady || !terminalRef.current) return
     setError("")
-    setStatus("Starting…")
+    setStatus({ kind: "starting" })
     try {
       try { fitRef.current?.fit() } catch { /* Use the terminal's default size before first layout. */ }
       const terminal = terminalRef.current
@@ -198,11 +285,11 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
       exitedRef.current = false
       localStorage.setItem(storageKey, result.id)
       setTerminalId(result.id)
-      setStatus(`Running · ${result.shell}`)
+      setStatus({ kind: "running", shell: result.shell })
       terminal?.focus()
     } catch (cause) {
-      setStatus("Not started")
-      setError(cause instanceof Error ? cause.message : "Could not start the terminal.")
+      setStatus({ kind: "not_started" })
+      setError(cause instanceof Error ? cause.message : t("pnlx.term.errStart"))
     }
   }
 
@@ -220,7 +307,7 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
     if (id) {
       try { await request(`/api/terminals/${id}`, { method: "DELETE" }) }
       catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Could not close the terminal.")
+        setError(cause instanceof Error ? cause.message : t("pnlx.term.errClose"))
         return
       }
     }
@@ -229,20 +316,29 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
     cursorRef.current = 0
     exitedRef.current = false
     setTerminalId(null)
-    setStatus("Not started")
+    setStatus({ kind: "not_started" })
     terminalRef.current?.reset()
   }
 
-  return <div className={`terminal-workbench${visible ? " visible" : ""}`} aria-label="Workspace terminal">
+  const statusText = status.kind === "not_started" ? t("pnlx.term.notStarted")
+    : status.kind === "reconnecting" ? t("pnlx.term.reconnecting")
+    : status.kind === "starting" ? t("pnlx.term.starting")
+    : status.kind === "running" ? t("pnlx.term.runningShell", { shell: status.shell })
+    : status.kind === "exited" ? (status.exitCode === null ? t("pnlx.term.exited") : t("pnlx.term.exitedCode", { code: status.exitCode }))
+    : status.kind === "expired" ? t("pnlx.term.expired")
+    : t("pnlx.term.interrupted")
+  const isDocker = status.kind === "running" && status.shell === "docker"
+
+  return <div className={`terminal-workbench${visible ? " visible" : ""}`} aria-label={t("pnlx.term.ariaWorkbench")}>
     <div className="terminal-toolbar">
-      <div className="terminal-location"><TerminalIcon size={14} /><span title={cwd || "No workspace selected"}>{cwd || "No workspace selected"}</span><small>{status}</small></div>
+      <div className="terminal-location"><TerminalIcon size={14} /><span title={cwd || t("pnlx.term.noWorkspace")}>{cwd || t("pnlx.term.noWorkspace")}</span><small>{statusText}</small></div>
       <div className="terminal-actions">{terminalId
-        ? <button type="button" className="quiet-button" onClick={() => void close()}><Square size={13} /> Close terminal</button>
-        : <button type="button" className="quiet-button" disabled={!cwd || !visible || !terminalReady} onClick={() => void start()}><Play size={13} /> Start terminal</button>}</div>
+        ? <button type="button" className="quiet-button" onClick={() => void close()}><Square size={13} /> {t("pnlx.term.close")}</button>
+        : <button type="button" className="quiet-button" disabled={!cwd || !visible || !terminalReady} onClick={() => void start()}><Play size={13} /> {t("pnlx.term.start")}</button>}</div>
     </div>
-    {!cwd && <p className="terminal-empty">Open a coding session with a checkout or worktree to start a terminal.</p>}
+    {!cwd && <p className="terminal-empty">{t("pnlx.term.empty")}</p>}
     {error && <p className="terminal-error" role="alert">{error}</p>}
-    <div className="terminal-viewport" ref={hostRef} aria-label="Terminal output" />
-    <p className="terminal-safety-note">{status.endsWith("· docker") ? "Commands run inside this session's Docker container." : "Commands run as the active host user."} Terminal input is user-operated and is not exposed as an agent tool.</p>
+    <div className="terminal-viewport" ref={hostRef} aria-label={t("pnlx.term.ariaOutput")} />
+    <p className="terminal-safety-note">{isDocker ? t("pnlx.term.safetyDocker") : t("pnlx.term.safetyHost")}</p>
   </div>
 }

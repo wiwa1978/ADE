@@ -1,5 +1,6 @@
 import { Folder, FolderGit2, FolderOpen } from "lucide-react"
 import { GitHubRepositoryPicker, type GitHubRepositoryPage } from "../../ProjectsView"
+import { useI18n } from "../i18n/I18nContext"
 
 export type DirBrowserState = {
   currentPath: string
@@ -75,12 +76,14 @@ export function AddProjectSourceFields({
   onLoadDirectory: (path?: string) => void
   onUseBrowserFolder: (path: string) => void
 }) {
+  const { t } = useI18n()
+
   return (
     <>
       {source === "github" ? (
         <>
           <div className="sf-label">
-            <span>GitHub Repository</span>
+            <span>{t("prjx.wiz.forms.githubRepo")}</span>
             <GitHubRepositoryPicker
               inputId="wizard-github-repo"
               login={activeGhLogin}
@@ -98,15 +101,15 @@ export function AddProjectSourceFields({
           </div>
           <label className="flex items-center gap-2 text-xs cursor-pointer">
             <input type="checkbox" checked={cloneLocally} onChange={e => onCloneLocallyChange(e.target.checked)} />
-            <span>Clone repository locally into workspace folder</span>
+            <span>{t("prjx.wiz.forms.cloneLocally")}</span>
           </label>
           {cloneLocally ? (
             <div className="sf-label">
-              <span>Clone into parent folder</span>
+              <span>{t("prjx.wiz.forms.cloneIntoParent")}</span>
               <div className="flex gap-2">
                 <input className="sf-field flex-1" value={cloneParentDir} onChange={e => onCloneParentDirChange(e.target.value)} placeholder="/Users/you/Code" />
                 <button type="button" className="sf-btn-secondary" onClick={() => onPickFolderNative("parent")}>
-                  <Folder className="size-3.5" /> Browse…
+                  <Folder className="size-3.5" /> {t("prjx.wiz.forms.browse")}
                 </button>
               </div>
             </div>
@@ -117,10 +120,10 @@ export function AddProjectSourceFields({
       {source === "url" ? (
         <>
           <label className="sf-label">
-            <span>Git Repository URL (GitHub, Azure DevOps, GitLab, SSH)</span>
+            <span>{t("prjx.wiz.forms.gitUrlLabel")}</span>
             <input
               className="sf-field"
-              placeholder="https://dev.azure.com/org/proj/_git/repo  or  git@github.com:org/repo.git"
+              placeholder={t("prjx.wiz.forms.gitUrlPlaceholder")}
               value={gitUrl}
               onChange={e => {
                 onGitUrlChange(e.target.value)
@@ -131,11 +134,11 @@ export function AddProjectSourceFields({
             />
           </label>
           <div className="sf-label">
-            <span>Clone into parent folder</span>
+            <span>{t("prjx.wiz.forms.cloneIntoParent")}</span>
             <div className="flex gap-2">
               <input className="sf-field flex-1" value={cloneParentDir} onChange={e => onCloneParentDirChange(e.target.value)} placeholder="/Users/you/Code" />
               <button type="button" className="sf-btn-secondary" onClick={() => onPickFolderNative("parent")}>
-                <Folder className="size-3.5" /> Browse…
+                <Folder className="size-3.5" /> {t("prjx.wiz.forms.browse")}
               </button>
             </div>
           </div>
@@ -145,7 +148,7 @@ export function AddProjectSourceFields({
       {source === "local" ? (
         <>
           <div className="sf-label">
-            <span>Select Folder</span>
+            <span>{t("prjx.wiz.forms.selectFolder")}</span>
             {!localPath ? (
               <div className="flex flex-col gap-2">
                 <button
@@ -155,18 +158,18 @@ export function AddProjectSourceFields({
                   onClick={() => onPickFolderNative("local")}
                 >
                   <FolderOpen className="size-4 opacity-80" />
-                  <span>+ Add Folder</span>
+                  <span>{t("prjx.wiz.forms.addFolder")}</span>
                 </button>
                 <div className="flex items-center gap-2">
                   <input
                     className="sf-field flex-1"
-                    placeholder="Or paste a path, e.g. /Users/you/Code/my-project"
+                    placeholder={t("prjx.wiz.forms.pastePathPlaceholder")}
                     value={localPath}
                     onChange={e => onLocalPathChange(e.target.value)}
                     onBlur={() => { if (localPath.trim()) onDetectRemote(localPath.trim()) }}
                   />
                   <button type="button" className="sf-btn-ghost shrink-0" onClick={onToggleBrowser}>
-                    Browse tree
+                    {t("prjx.wiz.forms.browseTree")}
                   </button>
                 </div>
               </div>
@@ -180,14 +183,14 @@ export function AddProjectSourceFields({
                   onBlur={() => { if (localPath.trim()) onDetectRemote(localPath.trim()) }}
                 />
                 <button type="button" className="sf-btn-secondary" onClick={() => onPickFolderNative("local")}>
-                  <FolderOpen className="size-3.5" /> Change…
+                  <FolderOpen className="size-3.5" /> {t("prjx.wiz.forms.change")}
                 </button>
-                <button type="button" className="sf-btn-ghost" onClick={onToggleBrowser}>Tree</button>
+                <button type="button" className="sf-btn-ghost" onClick={onToggleBrowser}>{t("prjx.wiz.forms.tree")}</button>
               </div>
             )}
             {detectedGh ? (
               <span className="text-[11px] text-emerald-400">
-                Detected GitHub remote: <code>{detectedGh}</code>
+                {t("prjx.wiz.forms.detectedGhRemote")} <code>{detectedGh}</code>
               </span>
             ) : null}
           </div>
@@ -198,10 +201,10 @@ export function AddProjectSourceFields({
                 <span className="truncate">{dirState.currentPath}</span>
                 <div className="flex gap-1.5 shrink-0">
                   {dirState.parentPath ? (
-                    <button type="button" className="sf-btn-ghost !h-6 !px-2 !text-[11px]" onClick={() => onLoadDirectory(dirState.parentPath!)}>Up</button>
+                    <button type="button" className="sf-btn-ghost !h-6 !px-2 !text-[11px]" onClick={() => onLoadDirectory(dirState.parentPath!)}>{t("prjx.wiz.forms.up")}</button>
                   ) : null}
                   <button type="button" className="sf-btn-primary !h-6 !px-2 !text-[11px]" onClick={() => onUseBrowserFolder(dirState.currentPath)}>
-                    Use This Folder
+                    {t("prjx.wiz.forms.useThisFolder")}
                   </button>
                 </div>
               </div>
@@ -227,7 +230,7 @@ export function AddProjectSourceFields({
           {showInitGit ? (
             <label className="flex items-center gap-2 text-xs cursor-pointer">
               <input type="checkbox" checked={initGitIfMissing} onChange={e => onInitGitChange(e.target.checked)} />
-              <span>Run <code>git init</code> automatically if this folder is not a Git repository yet</span>
+              <span>{t("prjx.wiz.forms.initGitBefore")} <code>git init</code> {t("prjx.wiz.forms.initGitAfter")}</span>
             </label>
           ) : null}
         </>
@@ -236,35 +239,35 @@ export function AddProjectSourceFields({
       {source === "scratch" ? (
         <>
           <label className="sf-label">
-            <span>Project Name *</span>
-            <input className="sf-field" placeholder="my-awesome-service" value={projectName} onChange={e => onProjectNameChange(e.target.value)} autoFocus />
+            <span>{t("prjx.wiz.forms.projectNameRequired")}</span>
+            <input className="sf-field" placeholder={t("prjx.wiz.forms.projectNamePlaceholder")} value={projectName} onChange={e => onProjectNameChange(e.target.value)} autoFocus />
           </label>
           <div className="sf-label">
-            <span>Create inside folder</span>
+            <span>{t("prjx.wiz.forms.createInsideFolder")}</span>
             <div className="flex gap-2">
               <input className="sf-field flex-1" value={cloneParentDir} onChange={e => onCloneParentDirChange(e.target.value)} />
               <button type="button" className="sf-btn-secondary" onClick={() => onPickFolderNative("parent")}>
-                <Folder className="size-3.5" /> Browse…
+                <Folder className="size-3.5" /> {t("prjx.wiz.forms.browse")}
               </button>
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
             <label className="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" checked={createOnGitHub} onChange={e => onCreateOnGitHubChange(e.target.checked)} />
-              <span>Also create repository on GitHub</span>
+              <span>{t("prjx.wiz.forms.alsoCreateOnGitHub")}</span>
             </label>
             {createOnGitHub ? (
               <div className="sf-segmented">
-                <button type="button" className={`sf-seg-btn !h-6 !text-[11px] ${visibility === "private" ? "is-active" : ""}`} onClick={() => onVisibilityChange("private")}>Private</button>
-                <button type="button" className={`sf-seg-btn !h-6 !text-[11px] ${visibility === "public" ? "is-active" : ""}`} onClick={() => onVisibilityChange("public")}>Public</button>
+                <button type="button" className={`sf-seg-btn !h-6 !text-[11px] ${visibility === "private" ? "is-active" : ""}`} onClick={() => onVisibilityChange("private")}>{t("prjx.gh.private")}</button>
+                <button type="button" className={`sf-seg-btn !h-6 !text-[11px] ${visibility === "public" ? "is-active" : ""}`} onClick={() => onVisibilityChange("public")}>{t("prjx.gh.public")}</button>
               </div>
             ) : null}
           </div>
         </>
       ) : (
         <label className="sf-label">
-          <span>Project Display Name</span>
-          <input className="sf-field" placeholder="Auto-filled from repository name" value={projectName} onChange={e => onProjectNameChange(e.target.value)} />
+          <span>{t("prjx.wiz.forms.projectDisplayName")}</span>
+          <input className="sf-field" placeholder={t("prjx.wiz.forms.projectDisplayNamePlaceholder")} value={projectName} onChange={e => onProjectNameChange(e.target.value)} />
         </label>
       )}
     </>

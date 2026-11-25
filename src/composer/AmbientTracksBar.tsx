@@ -26,6 +26,7 @@ import type {
   WorkspaceGitSummary,
 } from "../../app-types"
 import { formatUsage } from "../usage/usage-data"
+import { useI18n } from "../i18n/I18nContext"
 
 export function AmbientTracksBar({
   subagents,
@@ -64,6 +65,7 @@ export function AmbientTracksBar({
   /** Open the Progress panel (from the tasks pill). */
   onOpenProgress?: () => void
 }) {
+  const { t } = useI18n()
   const [expandedTrack, setExpandedTrack] = useState<"subagents" | "tasks" | null>(null)
 
   const runningSubagents = subagents.filter(s => s.status === "running" || s.status === "waiting")
@@ -77,9 +79,9 @@ export function AmbientTracksBar({
     "auto-all": "auto-safe",
   }
   const policyLabels: Record<ApprovalPolicy, string> = {
-    "auto-safe": "Auto-safe",
-    ask: "Ask every cmd",
-    "auto-all": "Autopilot",
+    "auto-safe": t("wsx.comp.policyAutoSafe"),
+    ask: t("wsx.comp.policyAsk"),
+    "auto-all": t("wsx.comp.policyAutoAll"),
   }
 
   return (
@@ -87,14 +89,14 @@ export function AmbientTracksBar({
       {expandedTrack === "subagents" && subagents.length > 0 ? (
         <div className="ade-track-drawer">
           <div className="ade-track-drawer-head">
-            <span>Subagents ({subagents.length})</span>
-            <button type="button" className="ade-icon-btn" onClick={() => setExpandedTrack(null)} aria-label="Collapse subagents">
+            <span>{t("wsx.comp.subagentsCount", { count: subagents.length })}</span>
+            <button type="button" className="ade-icon-btn" onClick={() => setExpandedTrack(null)} aria-label={t("wsx.comp.collapseSubagents")}>
               <ChevronDown className="size-3.5" />
             </button>
           </div>
           <div className="ade-subagent-strip">
             {subagents.map(sub => {
-              const activeTool = sub.liveTools?.find(t => t.status === "running" || t.status === "pending")
+              const activeTool = sub.liveTools?.find(tool => tool.status === "running" || tool.status === "pending")
               return (
                 <div key={sub.id} className={`ade-subagent-tile ${sub.status === "running" ? "is-running" : ""}`}>
                   <div className="ade-subagent-tile-top">
@@ -107,16 +109,16 @@ export function AmbientTracksBar({
                   </div>
                   <div className="ade-subagent-tile-desc ade-truncate">
                     {activeTool
-                      ? `Running ${activeTool.name}…`
-                      : sub.assignment || sub.role || "Assigned subagent"}
+                      ? t("wsx.comp.runningTool", { name: activeTool.name })
+                      : sub.assignment || sub.role || t("wsx.comp.assignedSubagent")}
                   </div>
                   <div className="ade-subagent-tile-actions">
                     <button type="button" className="ade-chip-btn" onClick={() => onOpenSubagent(sub.id)}>
-                      <Columns2 className="size-3" /> Inspect beside
+                      <Columns2 className="size-3" /> {t("wsx.comp.inspectBeside")}
                     </button>
                     {sub.status === "running" || sub.status === "waiting" ? (
                       <button type="button" className="ade-chip-btn ade-chip-danger" onClick={() => onStopSubagent(sub.id)}>
-                        <Square className="size-3" /> Stop
+                        <Square className="size-3" /> {t("wsx.comp.stop")}
                       </button>
                     ) : null}
                   </div>
@@ -130,8 +132,8 @@ export function AmbientTracksBar({
       {expandedTrack === "tasks" && tasks.length > 0 ? (
         <div className="ade-track-drawer">
           <div className="ade-track-drawer-head">
-            <span>Session checklist ({doneTasks}/{tasks.length})</span>
-            <button type="button" className="ade-icon-btn" onClick={() => setExpandedTrack(null)} aria-label="Collapse checklist">
+            <span>{t("wsx.comp.sessionChecklist", { done: doneTasks, total: tasks.length })}</span>
+            <button type="button" className="ade-icon-btn" onClick={() => setExpandedTrack(null)} aria-label={t("wsx.comp.collapseChecklist")}>
               <ChevronDown className="size-3.5" />
             </button>
           </div>
@@ -148,7 +150,7 @@ export function AmbientTracksBar({
         </div>
       ) : null}
 
-      <div className="ade-tracks-bar" role="toolbar" aria-label="Session context tracks">
+      <div className="ade-tracks-bar" role="toolbar" aria-label={t("wsx.comp.sessionContextTracks")}>
         {/* Subagents Track Pill */}
         {subagents.length > 0 ? (
           <button
@@ -159,8 +161,12 @@ export function AmbientTracksBar({
             {runningSubagents.length > 0 ? <Loader2 className="size-3.5 animate-spin" /> : <Bot className="size-3.5" />}
             <span>
               {runningSubagents.length > 0
-                ? `${runningSubagents.length} running · ${subagents.length} subagent${subagents.length === 1 ? "" : "s"}`
-                : `${subagents.length} subagent${subagents.length === 1 ? "" : "s"}`}
+                ? (subagents.length === 1
+                  ? t("wsx.comp.runningSubagentsOne", { running: runningSubagents.length })
+                  : t("wsx.comp.runningSubagentsMany", { running: runningSubagents.length, total: subagents.length }))
+                : (subagents.length === 1
+                  ? t("wsx.comp.subagentCountOne")
+                  : t("wsx.comp.subagentCountMany", { count: subagents.length }))}
             </span>
             {expandedTrack === "subagents" ? <ChevronDown className="size-3" /> : <ChevronUp className="size-3" />}
           </button>
@@ -168,16 +174,20 @@ export function AmbientTracksBar({
 
         {/* Git Diff Stat Pill (Paseo-inspired) */}
         {hasWorkspace && gitSummary.isGitRepo ? (
-          <button type="button" className="ade-track-pill" onClick={onOpenDiff} title="Review workspace Git changes">
+          <button type="button" className="ade-track-pill" onClick={onOpenDiff} title={t("wsx.comp.reviewGitChanges")}>
             <FileDiff className="size-3.5" />
             {gitSummary.files.length > 0 ? (
               <>
                 <span className="ade-diff-add">+{gitSummary.additions}</span>
                 <span className="ade-diff-del">-{gitSummary.deletions}</span>
-                <span className="ade-muted">· {gitSummary.files.length} file{gitSummary.files.length === 1 ? "" : "s"}</span>
+                <span className="ade-muted">
+                  {gitSummary.files.length === 1
+                    ? t("wsx.comp.filesCountOne")
+                    : t("wsx.comp.filesCountMany", { count: gitSummary.files.length })}
+                </span>
               </>
             ) : (
-              <span>Clean ({gitSummary.branch || "git"})</span>
+              <span>{t("wsx.comp.cleanBranch", { branch: gitSummary.branch || "git" })}</span>
             )}
           </button>
         ) : null}
@@ -190,7 +200,7 @@ export function AmbientTracksBar({
             onClick={() => (onOpenProgress ? onOpenProgress() : setExpandedTrack(v => v === "tasks" ? null : "tasks"))}
           >
             <ListChecks className="size-3.5" />
-            <span>{doneTasks}/{tasks.length} tasks</span>
+            <span>{t("wsx.comp.tasksProgress", { done: doneTasks, total: tasks.length })}</span>
           </button>
         ) : null}
 
@@ -203,7 +213,11 @@ export function AmbientTracksBar({
           >
             <FileText className="size-3.5" />
             <span>
-              {pendingArtifact ? `Review: ${pendingArtifact.title}` : `${artifacts.length} artifact${artifacts.length === 1 ? "" : "s"}`}
+              {pendingArtifact
+                ? t("wsx.comp.reviewArtifact", { title: pendingArtifact.title })
+                : artifacts.length === 1
+                  ? t("wsx.comp.artifactsCountOne")
+                  : t("wsx.comp.artifactsCountMany", { count: artifacts.length })}
             </span>
           </button>
         ) : null}
@@ -218,8 +232,10 @@ export function AmbientTracksBar({
             {runningProcesses.length > 0 ? <Activity className="size-3.5" /> : <Terminal className="size-3.5" />}
             <span>
               {runningProcesses.length > 0
-                ? `${runningProcesses.length} running cmd`
-                : `${processes.length} cmd log${processes.length === 1 ? "" : "s"}`}
+                ? t("wsx.comp.runningCmdCount", { count: runningProcesses.length })
+                : processes.length === 1
+                  ? t("wsx.comp.cmdLogsOne")
+                  : t("wsx.comp.cmdLogsMany", { count: processes.length })}
             </span>
           </button>
         ) : null}
@@ -227,12 +243,18 @@ export function AmbientTracksBar({
         {/* Pending Approvals indicator */}
         {approvals.length > 0 ? (
           <span className="ade-track-pill is-warn">
-            <Shield className="size-3.5" /> {approvals.length} approval{approvals.length === 1 ? "" : "s"} waiting
+            <Shield className="size-3.5" />{" "}
+            {approvals.length === 1
+              ? t("wsx.comp.approvalsWaitingOne")
+              : t("wsx.comp.approvalsWaitingMany", { count: approvals.length })}
           </span>
         ) : null}
 
         {usage && (usage.inputTokens || usage.outputTokens) ? (
-          <span className="ade-usage-chip ade-track-pill-right" title={`This session: ${usage.inputTokens.toLocaleString()} input and ${usage.outputTokens.toLocaleString()} output tokens. See Settings → Usage for totals.`}>
+          <span
+            className="ade-usage-chip ade-track-pill-right"
+            title={t("wsx.comp.usageTooltip", { input: usage.inputTokens.toLocaleString(), output: usage.outputTokens.toLocaleString() })}
+          >
             {formatUsage({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cost: usage.totalCost ?? 0 })}
           </span>
         ) : null}
@@ -242,7 +264,7 @@ export function AmbientTracksBar({
           type="button"
           className="ade-track-pill ade-track-pill-right"
           onClick={() => onChangeApprovalPolicy(nextPolicy[approvalPolicy])}
-          title="Click to cycle command approval policy (Auto-safe → Ask every cmd → Autopilot)"
+          title={t("wsx.comp.cycleApprovalPolicy")}
         >
           <Shield className="size-3" />
           <span>{policyLabels[approvalPolicy]}</span>

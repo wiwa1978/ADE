@@ -1,5 +1,10 @@
 import type { Router } from "../router.ts";
-import type { MobileAddressMode } from "../mobile-pairing.ts";
+import {
+	validateMobileDeviceRename,
+	validateMobileEnable,
+	validateMobilePair,
+	validateMobileTunnel,
+} from "../validators.ts";
 import type { RouteDeps } from "./context.ts";
 
 export function registerMobileRoutes(router: Router, { mobilePairing }: RouteDeps): void {
@@ -22,13 +27,8 @@ export function registerMobileRoutes(router: Router, { mobilePairing }: RouteDep
 	router.post(
 		"/api/mobile/enable",
 		async (ctx) => {
-			const body = await ctx.readBody();
-			const status = await mobilePairing.configure({
-				...(typeof body.enabled === "boolean" ? { enabled: body.enabled } : {}),
-				...(typeof body.port === "number" ? { port: body.port } : {}),
-				...(typeof body.mode === "string" ? { mode: body.mode as MobileAddressMode } : {}),
-				...(typeof body.customUrl === "string" ? { customUrl: body.customUrl } : {}),
-			});
+			const input = validateMobileEnable(await ctx.readBody());
+			const status = await mobilePairing.configure(input);
 			ctx.json(200, status);
 		},
 		{ originError: "Use ADE on this computer to manage mobile pairing." },
@@ -37,11 +37,9 @@ export function registerMobileRoutes(router: Router, { mobilePairing }: RouteDep
 	router.post(
 		"/api/mobile/pair",
 		async (ctx) => {
-			const body = await ctx.readBody().catch(() => ({} as Record<string, unknown>));
-			const status = mobilePairing.createChallenge({
-				...(typeof body.mode === "string" ? { mode: body.mode as MobileAddressMode } : {}),
-				...(typeof body.customUrl === "string" ? { customUrl: body.customUrl } : {}),
-			});
+			const raw = ctx.request.headers["content-type"] ? await ctx.readBody() : {};
+			const input = validateMobilePair(raw);
+			const status = mobilePairing.createChallenge(input);
 			ctx.json(200, status);
 		},
 		{ originError: "Use ADE on this computer to generate a pairing QR code." },
@@ -50,8 +48,8 @@ export function registerMobileRoutes(router: Router, { mobilePairing }: RouteDep
 	router.post(
 		"/api/mobile/tunnel",
 		async (ctx) => {
-			const body = await ctx.readBody();
-			const status = body.action === "stop"
+			const input = validateMobileTunnel(await ctx.readBody());
+			const status = input.action === "stop"
 				? await mobilePairing.stopTunnel()
 				: await mobilePairing.startTunnel();
 			ctx.json(200, status);
@@ -62,9 +60,8 @@ export function registerMobileRoutes(router: Router, { mobilePairing }: RouteDep
 	router.patch(
 		"/api/mobile/devices/:id",
 		async (ctx) => {
-			const body = await ctx.readBody();
-			const name = typeof body.name === "string" ? body.name : "";
-			ctx.json(200, { device: mobilePairing.renameDevice(ctx.params.id, name) });
+			const input = validateMobileDeviceRename(await ctx.readBody());
+			ctx.json(200, { device: mobilePairing.renameDevice(ctx.params.id, input.name) });
 		},
 		{ originError: "Use ADE on this computer to rename paired devices." },
 	);

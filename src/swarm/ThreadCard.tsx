@@ -1,6 +1,7 @@
 import { CheckCircle2, ChevronDown, ChevronRight, Clock, Loader2, XCircle } from "lucide-react"
 import { type SwarmThreadView } from "./swarm-model"
 import { MemberBadge } from "./MemberBadge"
+import { useI18n } from "../i18n/I18nContext"
 
 const THREAD_DOT: Record<string, string> = {
   moving: "#3b82f6",
@@ -21,6 +22,7 @@ export function ThreadCard({
   onToggle: () => void
   onInspectMember: (memberId: string) => void
 }) {
+  const { t } = useI18n()
   const color = THREAD_DOT[thread.status] ?? THREAD_DOT.open
   const pct = thread.total > 0 ? Math.round((thread.done / thread.total) * 100) : thread.status === "done" ? 100 : 0
   return (
@@ -43,7 +45,7 @@ export function ThreadCard({
         {thread.summary ? <p className="ade-swarm-thread-summary">{thread.summary}</p> : null}
         {thread.now ? (
           <p className="ade-swarm-thread-now">
-            <strong>Now</strong> <span>{thread.now}</span>
+            <strong>{t("swx.swarm.thread.now")}</strong> <span>{thread.now}</span>
           </p>
         ) : null}
       </button>
@@ -60,7 +62,7 @@ export function ThreadCard({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="ade-swarm-task-title">{task.title}</span>
-                {task.dependsOn.length ? <span className="ade-swarm-task-dep">waits for {task.dependsOn.join(", ")}</span> : null}
+                {task.dependsOn.length ? <span className="ade-swarm-task-dep">{t("swx.swarm.board.waitsFor", { deps: task.dependsOn.join(", ") })}</span> : null}
                 {task.result && task.status === "done" ? <span className="ade-swarm-task-result">{task.result}</span> : null}
               </span>
               {task.ownerHandle ? (

@@ -3,6 +3,7 @@ import { GitBranch, Maximize2, Send, X } from "lucide-react"
 import { request } from "../../api"
 import type { Conversation, ConversationTimelineSnapshot, WorkspaceGitSummary } from "../../app-types"
 import { useEventStreamListener } from "../hooks/useEventStream"
+import { useI18n } from "../i18n/I18nContext"
 import { DiffPanel } from "../panels/DiffPanel"
 
 const EMPTY_GIT: WorkspaceGitSummary = {
@@ -30,6 +31,7 @@ export function LiveSessionPane({
   onClose: () => void
   onSendQuickMessage: (session: Conversation, text: string) => Promise<void>
 }) {
+  const { t } = useI18n()
   const [timeline, setTimeline] = useState<ConversationTimelineSnapshot | null>(null)
   const [gitSummary, setGitSummary] = useState<WorkspaceGitSummary>(EMPTY_GIT)
   const [paneView, setPaneView] = useState<"chat" | "diff">("chat")
@@ -125,21 +127,21 @@ export function LiveSessionPane({
               className={paneView === "chat" ? "is-active" : ""}
               onClick={() => setPaneView("chat")}
             >
-              Stream
+              {t("prjx.streams.pane.stream")}
             </button>
             <button
               type="button"
               className={paneView === "diff" ? "is-active" : ""}
               onClick={() => { setPaneView("diff"); void refreshGit() }}
-              title="Inspect git diff for this session"
+              title={t("prjx.streams.pane.diffTitle")}
             >
-              Diff{changedCount > 0 ? ` (${changedCount})` : ""}
+              {t("prjx.streams.pane.diff")}{changedCount > 0 ? ` (${changedCount})` : ""}
             </button>
           </div>
           <button
             type="button"
             className="ade-icon-btn !w-6 !h-6"
-            title="Open full workspace (Terminal, Diff, Files, Browser)"
+            title={t("prjx.streams.pane.maximizeTitle")}
             onClick={e => { e.stopPropagation(); onMaximize() }}
           >
             <Maximize2 className="size-3.5" />
@@ -147,7 +149,7 @@ export function LiveSessionPane({
           <button
             type="button"
             className="ade-icon-btn !w-6 !h-6"
-            title="Close pane (the session stays in the sidebar)"
+            title={t("prjx.streams.pane.closeTitle")}
             onClick={e => { e.stopPropagation(); onClose() }}
           >
             <X className="size-3.5" />
@@ -164,9 +166,9 @@ export function LiveSessionPane({
           <div className="ade-stream-pane-body">
             {items.length === 0 ? (
               <div className="my-auto text-center py-6 px-3 opacity-65">
-                <div className="text-[12.5px] font-medium">Session ready</div>
+                <div className="text-[12.5px] font-medium">{t("prjx.streams.pane.readyTitle")}</div>
                 <div className="text-[11.5px] mt-1">
-                  Send a message below, or open the session for Changes, Run, Terminal, Browser, and Pull request.
+                  {t("prjx.streams.pane.readyDesc")}
                 </div>
               </div>
             ) : (
@@ -218,7 +220,7 @@ export function LiveSessionPane({
             )}
             {isWorking ? (
               <div className="flex items-center gap-2 text-[11.5px] opacity-70">
-                <span className="ade-dot ade-dot-running" /> Working…
+                <span className="ade-dot ade-dot-running" /> {t("prjx.streams.pane.working")}
               </div>
             ) : null}
           </div>
@@ -230,14 +232,14 @@ export function LiveSessionPane({
             <input
               value={draft}
               onChange={e => setDraft(e.target.value)}
-              placeholder={`Message ${session.label}…`}
+              placeholder={t("prjx.streams.pane.messagePlaceholder", { label: session.label })}
               disabled={sending}
             />
             <button
               type="submit"
               className="ade-icon-btn !w-7 !h-7"
               disabled={sending || !draft.trim()}
-              title="Send to session"
+              title={t("prjx.streams.pane.sendTitle")}
             >
               <Send className="size-3.5" />
             </button>

@@ -1,121 +1,23 @@
 import { useMemo, useState, type FormEvent } from "react"
-import {
-  Bot,
-  Check,
-  Cpu,
-  KeyRound,
-  Plus,
-  RefreshCw,
-  RotateCcw,
-  Server,
-  Sparkles,
-  Terminal,
-  Trash2,
-} from "lucide-react"
-import type {
-  ModelCredential,
-  ModelCredentialProvider,
-  ProviderCatalogEntry,
-  ProviderTool,
-  RuntimeHealth,
-} from "../../app-types"
+import { Plus, RefreshCw, RotateCcw } from "lucide-react"
+import { Badge, Banner, Button, IconButton, Input, StatusPill } from "@/components/ui"
+import type { ProviderCatalogEntry, RuntimeHealth } from "../../app-types"
 import type { useConnections } from "../../useConnections"
-import { modelCredentialProviders } from "../../useConnections"
 import { useI18n } from "../i18n/I18nContext"
+import { ProviderAuthSection } from "./providers/ProviderAuthSection"
+import { ProviderGlyph, ProviderMasterList } from "./providers/ProviderMasterList"
+import { ProviderModelsSection } from "./providers/ProviderModelsSection"
+import { ProviderRuntimeSection } from "./providers/ProviderRuntimeSection"
+import {
+  buildUnifiedProviderItems,
+  loadOverrides,
+  saveOverrides,
+  type ProviderOverridesMap,
+  type ProviderRuntimeOverride,
+  type UnifiedProviderItem,
+} from "./providers/provider-overrides"
 
-type EnvVarRow = { key: string; value: string }
-type ProviderRuntimeOverride = {
-  displayName?: string
-  binaryPath?: string
-  homePath?: string
-  launchArgs?: string
-  envVars?: EnvVarRow[]
-}
-
-const RUNTIME_OVERRIDES_KEY = "ade-provider-overrides-v1"
-
-function loadOverrides(): Record<string, ProviderRuntimeOverride> {
-  try {
-    const raw = localStorage.getItem(RUNTIME_OVERRIDES_KEY)
-    const parsed = raw ? JSON.parse(raw) : {}
-    return parsed && typeof parsed === "object" ? parsed : {}
-  } catch {
-    return {}
-  }
-}
-
-function saveOverrides(next: Record<string, ProviderRuntimeOverride>): void {
-  try {
-    localStorage.setItem(RUNTIME_OVERRIDES_KEY, JSON.stringify(next))
-  } catch {
-    // Ignore storage quota errors.
-  }
-}
-
-const DEFAULT_HOME_PATHS: Record<string, string> = {
-  codex: "~/.codex",
-  claude: "~/.claude",
-  copilot: "~/.config/github-copilot",
-  opencode: "~/.config/opencode",
-  pi: "~/.pi",
-  "oh-my-pi": "~/.omp",
-  cursor: "~/.cursor",
-  antigravity: "~/.gemini/antigravity",
-  "muse-code": "~/.muse",
-  hermes: "~/.hermes",
-  devin: "~/.devin",
-}
-
-type UnifiedProviderItem = {
-  id: string
-  name: string
-  kind: "cli" | "api" | "copilot"
-  command?: string | null
-  installed?: boolean
-  available: boolean
-  enabled: boolean
-  canToggle: boolean
-  statusText: string
-  tone: "ok" | "off" | "warn"
-  modelCount: number | null
-  models: { id: string; name: string }[]
-  credentialProvider?: ModelCredentialProvider
-  credentialSource?: ModelCredential["source"]
-  installHint?: string | null
-}
-
-function providerGlyph(item: UnifiedProviderItem) {
-  if (item.kind === "copilot") return <Sparkles className="size-4 shrink-0" />
-  if (item.kind === "api") {
-    return item.id === "compatible" ? <Server className="size-4 shrink-0" /> : <KeyRound className="size-4 shrink-0" />
-  }
-  if (item.id === "claude" || item.id === "codex") return <Bot className="size-4 shrink-0" />
-  if (item.id === "pi" || item.id === "oh-my-pi") return <Cpu className="size-4 shrink-0" />
-  return <Terminal className="size-4 shrink-0" />
-}
-
-export function ProvidersPanel({
-  activeEnvironmentName,
-  modelCatalog,
-  selectedProvider,
-  selectedModel,
-  reasoning,
-  reasoningLevels,
-  runtime,
-  connections,
-  sending,
-  credentialChangesBlocked,
-  compatible,
-  compatibleDraft,
-  compatibleBusy,
-  compatibleMessage,
-  onCompatibleDraftChange,
-  onSaveCompatible,
-  onSelectDefaultProvider,
-  onSelectDefaultModel,
-  onSelectReasoning,
-  onModelsChanged,
-}: {
+export interface ProvidersPanelProps {
   activeEnvironmentName: string
   modelCatalog: ProviderCatalogEntry[]
   selectedProvider: string
@@ -136,139 +38,39 @@ export function ProvidersPanel({
   onSelectDefaultModel: (providerId: string, modelId: string) => void
   onSelectReasoning: (level: string) => void
   onModelsChanged?: () => void
-}) {
+}
+
+export function ProvidersPanel({
+  activeEnvironmentName, modelCatalog, selectedProvider, selectedModel, reasoning, reasoningLevels,
+  runtime, connections, sending, credentialChangesBlocked, compatible, compatibleDraft, compatibleBusy,
+  compatibleMessage, onCompatibleDraftChange, onSaveCompatible, onSelectDefaultProvider,
+  onSelectDefaultModel, onSelectReasoning, onModelsChanged,
+}: ProvidersPanelProps) {
+  const { t } = useI18n()
   const {
-    copilotHealth,
-    copilotStatusError,
-    copilotActionError,
-    copilotSignIn,
-    copilotWaiting,
-    authBusy,
-    changeCopilotAuth,
-    modelCredentials,
-    modelCredentialStatusError,
-    modelCredentialActionError,
-    modelCredentialBusy,
-    saveModelCredential,
-    changeModelCredential,
-    providerTools,
-    providerToolsError,
-    providerToolsBusy,
-    setProviderEnabled,
+    copilotHealth, copilotStatusError, copilotActionError, copilotWaiting,
+    modelCredentials, modelCredentialStatusError, modelCredentialActionError, modelCredentialBusy,
+    providerTools, providerToolsError, providerToolsBusy, setProviderEnabled,
   } = connections
 
-  const { t } = useI18n()
-  const [overrides, setOverrides] = useState<Record<string, ProviderRuntimeOverride>>(loadOverrides)
+  const [overrides, setOverrides] = useState<ProviderOverridesMap>(loadOverrides)
   const [selectedId, setSelectedId] = useState<string>("")
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [rescanning, setRescanning] = useState(false)
 
-  const items: UnifiedProviderItem[] = useMemo(() => {
-    const credMap = new Map((modelCredentials ?? []).map(c => [c.provider, c.source]))
-    const catalogMap = new Map(modelCatalog.map(c => [c.id, c]))
-    const toolMap = new Map((providerTools ?? []).map(tool => [tool.id, tool]))
-    const list: UnifiedProviderItem[] = []
-    const seen = new Set<string>()
+  const items = useMemo(
+    () => buildUnifiedProviderItems({
+      providerTools, modelCatalog, modelCredentials, copilotHealth, copilotStatusError, copilotWaiting, t,
+    }),
+    [providerTools, modelCatalog, modelCredentials, copilotHealth, copilotStatusError, copilotWaiting, t],
+  )
 
-    // 1. CLI & detected tools from /api/provider-tools (excluding API duplicates handled below)
-    for (const tool of providerTools ?? []) {
-      if (tool.kind === "api") continue
-      seen.add(tool.id)
-      const cat = catalogMap.get(tool.id)
-      const models = cat?.models?.length ? cat.models : (tool.models ?? [])
-      const count = models.length || tool.modelCount || null
-      const enabled = tool.enabled
-      const statusText = !enabled
-        ? t("prov.disabled")
-        : tool.installed
-          ? (count ? (count === 1 ? t("prov.availableOne") : t("prov.availableModels", { count })) : t("prov.available"))
-          : t("prov.notInstalled")
-      list.push({
-        id: tool.id,
-        name: tool.name,
-        kind: "cli",
-        command: tool.command,
-        installed: tool.installed,
-        available: tool.installed && enabled,
-        enabled,
-        canToggle: true,
-        statusText,
-        tone: !enabled ? "off" : tool.installed ? "ok" : "warn",
-        modelCount: count,
-        models,
-        installHint: tool.install,
-      })
-    }
-
-    // 2. GitHub Copilot subscription provider
-    const copilotCat = catalogMap.get("github-copilot")
-    const copilotTool = toolMap.get("github-copilot")
-    const copilotSignedIn = Boolean(copilotHealth?.copilotSignedIn)
-    const copilotEnabled = copilotTool ? copilotTool.enabled : copilotSignedIn
-    list.push({
-      id: "github-copilot",
-      name: "GitHub Copilot",
-      kind: "copilot",
-      available: copilotSignedIn,
-      enabled: copilotEnabled,
-      canToggle: Boolean(copilotTool),
-      statusText: copilotStatusError
-        ? t("prov.unavailable")
-        : copilotSignedIn
-          ? t("prov.authSubscription")
-          : copilotWaiting
-            ? t("prov.waitingSignIn")
-            : t("prov.notSignedIn"),
-      tone: copilotStatusError ? "warn" : copilotSignedIn ? "ok" : "off",
-      modelCount: copilotCat?.models.length || null,
-      models: copilotCat?.models ?? [],
-    })
-    seen.add("github-copilot")
-
-    // 3. API credential providers (OpenAI, Anthropic, Radius (Pi), OpenAI-compatible)
-    for (const cred of modelCredentialProviders) {
-      if (seen.has(cred.id)) continue
-      seen.add(cred.id)
-      const source = credMap.get(cred.id)
-      const cat = catalogMap.get(cred.id)
-      const tool: ProviderTool | undefined = toolMap.get(cred.id)
-      const configured = Boolean(cat?.configured || source === "saved" || source === "environment")
-      const enabled = tool ? tool.enabled : configured
-      const statusText = !enabled && tool
-        ? t("prov.disabled")
-        : source === "saved"
-          ? t("prov.authKeySaved")
-          : source === "environment"
-            ? t("prov.authEnvironment")
-            : configured
-              ? t("prov.configured")
-              : t("prov.notSetUp")
-      list.push({
-        id: cred.id,
-        name: cred.name,
-        kind: "api",
-        available: configured && enabled,
-        enabled,
-        canToggle: Boolean(tool),
-        statusText,
-        tone: configured && enabled ? "ok" : "off",
-        modelCount: cat?.models.length || null,
-        models: cat?.models ?? [],
-        credentialProvider: cred.id,
-        credentialSource: source,
-      })
-    }
-
-    return list
-  }, [providerTools, modelCatalog, modelCredentials, copilotHealth, copilotStatusError, copilotWaiting, t])
-
-  const activeItem = items.find(i => i.id === selectedId)
-    ?? items.find(i => i.id === selectedProvider)
-    ?? items[0]
-    ?? null
-
+  const activeItem = items.find(i => i.id === selectedId) ?? items.find(i => i.id === selectedProvider) ?? items[0] ?? null
   const activeOverride = activeItem ? (overrides[activeItem.id] ?? {}) : {}
   const credentialDisabled = Boolean(modelCredentialBusy) || credentialChangesBlocked
+  const activeCatalogProvider = activeItem ? modelCatalog.find(p => p.id === activeItem.id) : null
+  const isDefaultProvider = Boolean(activeItem && selectedProvider === activeItem.id)
+  const panelError = providerToolsError || modelCredentialStatusError || modelCredentialActionError || copilotActionError
 
   function updateOverride(id: string, patch: Partial<ProviderRuntimeOverride>) {
     setOverrides(prev => {
@@ -293,34 +95,21 @@ export function ProvidersPanel({
     onModelsChanged?.()
   }
 
-  async function handleRescan() {
+  function handleRescan() {
     setRescanning(true)
-    try {
-      onModelsChanged?.()
-    } finally {
-      setTimeout(() => setRescanning(false), 350)
-    }
+    onModelsChanged?.()
+    setTimeout(() => setRescanning(false), 350)
   }
-
-  const activeCatalogProvider = activeItem ? modelCatalog.find(p => p.id === activeItem.id) : null
-  const isDefaultProvider = Boolean(activeItem && selectedProvider === activeItem.id)
 
   return (
     <div className="st-prov-wrap">
-      {/* Compact Scope + Toolbar Row */}
       <div className="st-prov-topbar">
         <div className="st-prov-topbar-left">
           <span className="st-prov-heading">{t("prov.heading")}</span>
-          <button
-            type="button"
-            className="st-prov-icon-btn"
-            title={t("prov.addCompatibleTitle")}
-            aria-label={t("prov.addProvider")}
-            onClick={() => setSelectedId("compatible")}
-          >
+          <IconButton title={t("prov.addCompatibleTitle")} aria-label={t("prov.addProvider")} onClick={() => setSelectedId("compatible")}>
             <Plus className="size-3.5" />
-          </button>
-          <span className="st-prov-scope-pill">{t("prov.onEnvironment", { name: activeEnvironmentName })}</span>
+          </IconButton>
+          <Badge size="sm">{t("prov.onEnvironment", { name: activeEnvironmentName })}</Badge>
         </div>
         <div className="st-prov-topbar-right">
           {runtime?.online ? (
@@ -329,435 +118,87 @@ export function ProvidersPanel({
               {selectedModel ? <> · <code>{selectedModel}</code></> : null}
             </span>
           ) : null}
-          <button
-            type="button"
-            className="st-button is-quiet"
-            onClick={() => void handleRescan()}
-            disabled={rescanning}
-          >
-            <RefreshCw className={`size-3.5 inline mr-1 ${rescanning ? "animate-spin" : ""}`} />
-            {t("prov.rescan")}
-          </button>
+          <Button variant="outline" size="sm" onClick={handleRescan} disabled={rescanning}>
+            <RefreshCw className={`size-3.5 ${rescanning ? "animate-spin" : ""}`} /> {t("prov.rescan")}
+          </Button>
         </div>
       </div>
 
-      {providerToolsError || modelCredentialStatusError || modelCredentialActionError || copilotActionError ? (
-        <div className="st-banner is-error">
-          {providerToolsError || modelCredentialStatusError || modelCredentialActionError || copilotActionError}
-        </div>
-      ) : null}
+      {panelError ? <Banner tone="error">{panelError}</Banner> : null}
 
-      {/* Master-Detail Split Card */}
       <div className="st-prov-card">
-        {/* Left Master List */}
-        <div className="st-prov-list" role="listbox" aria-label={t("prov.modelProviders")}>
-          <div className="st-prov-list-items">
-            {items.map(item => {
-              const selected = activeItem?.id === item.id
-              const busyToggle = providerToolsBusy === item.id
-              return (
-                <div
-                  key={item.id}
-                  role="option"
-                  aria-selected={selected}
-                  tabIndex={0}
-                  className={`st-prov-row ${selected ? "is-active" : ""}`}
-                  onClick={() => { setSelectedId(item.id); setEditingKey(null) }}
-                  onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedId(item.id); setEditingKey(null) } }}
-                >
-                  <span className="st-prov-row-icon">{providerGlyph(item)}</span>
-                  <span className="st-prov-row-copy">
-                    <span className="st-prov-row-head">
-                      <span className="st-prov-row-name">{overrides[item.id]?.displayName || item.name}</span>
-                      {item.command ? <code className="st-prov-row-ver">{item.command}</code> : null}
-                    </span>
-                    <span className={`st-prov-row-status is-${item.tone}`}>
-                      {item.statusText}
-                    </span>
-                  </span>
-                  {item.canToggle ? (
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={item.enabled}
-                      aria-label={t("prov.enable", { name: item.name })}
-                      className={`st-switch ${item.enabled ? "is-on" : ""}`}
-                      disabled={busyToggle}
-                      onClick={e => {
-                        e.stopPropagation()
-                        void handleToggleProvider(item, !item.enabled)
-                      }}
-                    >
-                      <span />
-                    </button>
-                  ) : (
-                    <span className={`st-dot ${item.available ? "is-ok" : ""}`} title={item.statusText} />
-                  )}
-                </div>
-              )
-            })}
-          </div>
+        <ProviderMasterList
+          items={items}
+          activeId={activeItem?.id ?? null}
+          overrides={overrides}
+          busyProviderId={providerToolsBusy}
+          onSelect={id => { setSelectedId(id); setEditingKey(null) }}
+          onToggle={(item, enabled) => void handleToggleProvider(item, enabled)}
+          onAddCompatible={() => { setSelectedId("compatible"); setEditingKey(null) }}
+        />
 
-          <button
-            type="button"
-            className="st-prov-add-row"
-            onClick={() => { setSelectedId("compatible"); setEditingKey(null) }}
-          >
-            <Plus className="size-3.5" />
-            <span>{t("prov.addProvider")}</span>
-          </button>
-        </div>
-
-        {/* Right Detail Inspector */}
         {activeItem ? (
           <div className="st-prov-detail">
             <div className="st-prov-detail-head">
               <div className="flex items-center gap-2.5 min-w-0">
-                <span className="st-prov-detail-icon">{providerGlyph(activeItem)}</span>
+                <span className="st-prov-detail-icon"><ProviderGlyph item={activeItem} /></span>
                 <h3 className="st-prov-detail-title">{activeOverride.displayName || activeItem.name}</h3>
-                {isDefaultProvider ? <span className="st-prov-default-tag">{t("prov.defaultTag")}</span> : null}
+                {isDefaultProvider ? <Badge tone="accent">{t("prov.defaultTag")}</Badge> : null}
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 {activeCatalogProvider?.configured && !isDefaultProvider ? (
-                  <button
-                    type="button"
-                    className="st-button"
-                    onClick={() => onSelectDefaultProvider(activeItem.id)}
-                  >
+                  <Button variant="secondary" size="sm" onClick={() => onSelectDefaultProvider(activeItem.id)}>
                     {t("prov.useAsDefault")}
-                  </button>
+                  </Button>
                 ) : null}
                 {Object.keys(activeOverride).length > 0 ? (
-                  <button
-                    type="button"
-                    className="st-prov-icon-btn"
-                    title={t("prov.resetTitle")}
-                    aria-label={t("prov.resetAria")}
-                    onClick={() => resetOverride(activeItem.id)}
-                  >
+                  <IconButton title={t("prov.resetTitle")} aria-label={t("prov.resetAria")} onClick={() => resetOverride(activeItem.id)}>
                     <RotateCcw className="size-3.5" />
-                  </button>
+                  </IconButton>
                 ) : null}
               </div>
             </div>
 
-            {/* Status Block */}
             <div className="st-prov-block">
               <div className="st-prov-block-label">{t("prov.status")}</div>
               <div className="st-prov-status-line">
-                <span className={`st-status is-${activeItem.tone}`}>
-                  <i /> {activeItem.statusText}
-                </span>
+                <StatusPill tone={activeItem.tone === "off" ? "neutral" : activeItem.tone}>
+                  {activeItem.statusText}
+                </StatusPill>
                 {activeItem.installHint && activeItem.kind === "cli" && !activeItem.installed ? (
                   <span className="st-hint">{activeItem.installHint}</span>
                 ) : null}
               </div>
             </div>
 
-            {/* Display Name */}
             <div className="st-prov-field-row">
-              <div className="st-prov-field-text">
-                <label htmlFor="prov-display-name">{t("prov.displayName")}</label>
-              </div>
-              <input
+              <div className="st-prov-field-text"><label htmlFor="prov-display-name">{t("prov.displayName")}</label></div>
+              <Input
                 id="prov-display-name"
-                className="st-input st-prov-field-input"
+                className="st-prov-field-input"
                 value={activeOverride.displayName ?? activeItem.name}
                 onChange={e => updateOverride(activeItem.id, { displayName: e.target.value })}
               />
             </div>
 
-            {/* API Credentials / Copilot Auth Section */}
-            {activeItem.kind === "copilot" ? (
-              <div className="st-prov-section">
-                <div className="st-prov-section-title">{t("prov.authentication")}</div>
-                <div className="st-prov-field-row">
-                  <div className="st-prov-field-text">
-                    <label>{t("prov.copilotSubscription")}</label>
-                    <p>
-                      {copilotWaiting && copilotSignIn?.code && copilotSignIn.url ? (
-                        <>{t("prov.copilotOpen", { link: "§L§", code: "§C§" }).split(/(§[LC]§)/).map((part, index) => part === "§L§" ? <a key={index} href={copilotSignIn.url} target="_blank" rel="noreferrer">github.com/login/device</a> : part === "§C§" ? <strong key={index}>{copilotSignIn.code}</strong> : part)}</>
-                      ) : (
-                        t("prov.copilotUses")
-                      )}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      className="st-button is-primary"
-                      disabled={authBusy || !copilotHealth || Boolean(copilotStatusError) || sending}
-                      onClick={() => void changeCopilotAuth(copilotWaiting ? "cancel" : "start")}
-                    >
-                      {copilotWaiting ? t("common.cancel") : copilotHealth?.copilotSignedIn ? t("prov.reconnect") : t("prov.signIn")}
-                    </button>
-                    {!copilotWaiting && copilotHealth?.copilotSignedIn ? (
-                      <button
-                        type="button"
-                        className="st-button is-quiet"
-                        disabled={authBusy || sending}
-                        onClick={() => void changeCopilotAuth("sign-out")}
-                      >
-                        {t("prov.signOut")}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-            ) : null}
+            <ProviderAuthSection
+              item={activeItem} connections={connections} sending={sending}
+              credentialDisabled={credentialDisabled} editingKey={editingKey} onEditingKeyChange={setEditingKey}
+              compatible={compatible} compatibleDraft={compatibleDraft} compatibleBusy={compatibleBusy}
+              compatibleMessage={compatibleMessage} onCompatibleDraftChange={onCompatibleDraftChange}
+              onSaveCompatible={onSaveCompatible} onModelsChanged={onModelsChanged}
+            />
 
-            {activeItem.credentialProvider ? (
-              <div className="st-prov-section">
-                <div className="st-prov-section-title">{t("prov.authentication")}</div>
-                <div className="st-prov-field-row">
-                  <div className="st-prov-field-text">
-                    <label>{t("prov.apiKey")}</label>
-                    <p>{t("prov.apiKeyHint")}</p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {editingKey !== activeItem.credentialProvider ? (
-                      <button
-                        type="button"
-                        className="st-button"
-                        disabled={credentialDisabled}
-                        onClick={() => setEditingKey(activeItem.credentialProvider!)}
-                      >
-                        {activeItem.credentialSource === "saved" ? t("prov.replaceKey") : t("prov.addKey")}
-                      </button>
-                    ) : null}
-                    {activeItem.credentialSource === "saved" && editingKey !== activeItem.credentialProvider ? (
-                      <button
-                        type="button"
-                        className="st-button is-quiet"
-                        disabled={credentialDisabled}
-                        onClick={async () => {
-                          await changeModelCredential("remove", activeItem.credentialProvider!)
-                          onModelsChanged?.()
-                        }}
-                      >
-                        {modelCredentialBusy?.provider === activeItem.credentialProvider && modelCredentialBusy.action === "remove" ? t("prov.removing") : t("common.remove")}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-                {editingKey === activeItem.credentialProvider ? (
-                  <form
-                    className="flex items-center gap-2 mt-2"
-                    onSubmit={async event => {
-                      await saveModelCredential(event, activeItem.credentialProvider!)
-                      setEditingKey(null)
-                      onModelsChanged?.()
-                    }}
-                  >
-                    <input
-                      name="apiKey"
-                      type="password"
-                      className="st-input flex-1 !w-auto"
-                      autoFocus
-                      autoComplete="new-password"
-                      maxLength={4096}
-                      placeholder={t("prov.keyFor", { name: activeItem.name })}
-                      required
-                      disabled={credentialDisabled}
-                      aria-label={t("prov.keyFor", { name: activeItem.name })}
-                    />
-                    <button className="st-button is-primary" disabled={credentialDisabled}>
-                      {modelCredentialBusy?.provider === activeItem.credentialProvider && modelCredentialBusy.action === "save" ? t("common.saving") : t("common.save")}
-                    </button>
-                    <button type="button" className="st-button is-quiet" onClick={() => setEditingKey(null)}>
-                      {t("common.cancel")}
-                    </button>
-                  </form>
-                ) : null}
+            <ProviderModelsSection
+              item={activeItem} selectedProvider={selectedProvider} selectedModel={selectedModel}
+              isDefaultProvider={isDefaultProvider} reasoning={reasoning} reasoningLevels={reasoningLevels}
+              onSelectDefaultModel={onSelectDefaultModel} onSelectReasoning={onSelectReasoning}
+            />
 
-                {activeItem.credentialProvider === "compatible" ? (
-                  <form className="flex flex-col gap-3 mt-3 pt-3 border-t border-[rgb(var(--border)/0.7)]" onSubmit={event => void onSaveCompatible(event)}>
-                    <div className="st-prov-field-row">
-                      <div className="st-prov-field-text">
-                        <label htmlFor="compat-url">{t("prov.endpointUrl")}</label>
-                        <p>{t("prov.endpointHint")}</p>
-                      </div>
-                      <input
-                        id="compat-url"
-                        className="st-input st-prov-field-input"
-                        value={compatibleDraft.url}
-                        onChange={e => onCompatibleDraftChange({ ...compatibleDraft, url: e.target.value })}
-                        placeholder="http://127.0.0.1:11434/v1"
-                        disabled={compatible?.fromEnvironment || compatibleBusy}
-                      />
-                    </div>
-                    <div className="st-prov-field-row">
-                      <div className="st-prov-field-text">
-                        <label htmlFor="compat-model">{t("prov.defaultModelId")}</label>
-                        <p>{t("prov.defaultModelHint")}</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <input
-                          id="compat-model"
-                          className="st-input !w-[165px]"
-                          value={compatibleDraft.model}
-                          onChange={e => onCompatibleDraftChange({ ...compatibleDraft, model: e.target.value })}
-                          placeholder="llama3.2"
-                          disabled={compatible?.fromEnvironment || compatibleBusy}
-                        />
-                        <button className="st-button is-primary" disabled={compatible?.fromEnvironment || compatibleBusy}>
-                          {compatibleBusy ? t("common.saving") : t("common.save")}
-                        </button>
-                      </div>
-                    </div>
-                    {compatibleMessage ? <span className="st-hint" role="status">{compatibleMessage}</span> : null}
-                  </form>
-                ) : null}
-              </div>
-            ) : null}
-
-            {/* Runtime Section (for CLI providers, matching screenshot!) */}
-            {activeItem.kind === "cli" ? (
-              <div className="st-prov-section">
-                <div className="st-prov-section-title">{t("prov.runtime")}</div>
-                <div className="st-prov-field-row">
-                  <div className="st-prov-field-text">
-                    <label htmlFor="prov-bin-path">{t("prov.binaryPath")}</label>
-                    <p>{t("prov.binaryHint", { name: activeItem.name })}</p>
-                  </div>
-                  <input
-                    id="prov-bin-path"
-                    className="st-input st-prov-field-input font-mono !text-[12px]"
-                    value={activeOverride.binaryPath ?? activeItem.command ?? ""}
-                    placeholder={activeItem.command ?? activeItem.id}
-                    onChange={e => updateOverride(activeItem.id, { binaryPath: e.target.value })}
-                  />
-                </div>
-                <div className="st-prov-field-row">
-                  <div className="st-prov-field-text">
-                    <label htmlFor="prov-home-path">{t("prov.homePath")}</label>
-                    <p>{t("prov.homeHint", { name: activeItem.name })}</p>
-                  </div>
-                  <input
-                    id="prov-home-path"
-                    className="st-input st-prov-field-input font-mono !text-[12px]"
-                    value={activeOverride.homePath ?? DEFAULT_HOME_PATHS[activeItem.id] ?? `~/.${activeItem.id}`}
-                    onChange={e => updateOverride(activeItem.id, { homePath: e.target.value })}
-                  />
-                </div>
-                <div className="st-prov-field-row">
-                  <div className="st-prov-field-text">
-                    <label htmlFor="prov-launch-args">{t("prov.launchArgs")}</label>
-                    <p>{t("prov.launchHint")}</p>
-                  </div>
-                  <input
-                    id="prov-launch-args"
-                    className="st-input st-prov-field-input font-mono !text-[12px]"
-                    value={activeOverride.launchArgs ?? ""}
-                    placeholder={t("prov.optionalFlags")}
-                    onChange={e => updateOverride(activeItem.id, { launchArgs: e.target.value })}
-                  />
-                </div>
-              </div>
-            ) : null}
-
-            {/* Models & Reasoning Section */}
-            {activeItem.models.length > 0 ? (
-              <div className="st-prov-section">
-                <div className="st-prov-section-title">{t("prov.models")}</div>
-                <div className="st-prov-models-grid">
-                  {activeItem.models.map(m => {
-                    const isSelected = selectedProvider === activeItem.id && selectedModel === m.id
-                    return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        className={`st-prov-model-chip ${isSelected ? "is-active" : ""}`}
-                        onClick={() => onSelectDefaultModel(activeItem.id, m.id)}
-                      >
-                        <span className="truncate">{m.name}</span>
-                        {isSelected ? <Check className="size-3.5 text-[rgb(var(--primary))] shrink-0" /> : null}
-                      </button>
-                    )
-                  })}
-                </div>
-                {isDefaultProvider ? (
-                  <div className="st-prov-field-row mt-2">
-                    <div className="st-prov-field-text">
-                      <label htmlFor="prov-reasoning">{t("prov.reasoningEffort")}</label>
-                      <p>{t("prov.reasoningHint")}</p>
-                    </div>
-                    <select
-                      id="prov-reasoning"
-                      className="st-select"
-                      aria-label={t("prov.reasoningAria")}
-                      value={reasoning === "off" ? "none" : reasoning}
-                      onChange={e => onSelectReasoning(e.target.value)}
-                    >
-                      {reasoningLevels.map(level => (
-                        <option key={level.id} value={level.id}>{level.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-
-            {/* Environment Variables Section (matching screenshot!) */}
-            <div className="st-prov-section">
-              <div className="st-prov-section-title">{t("prov.environment")}</div>
-              <div className="st-prov-field-row">
-                <div className="st-prov-field-text">
-                  <label>{t("prov.variables")}</label>
-                  <p>{t("prov.variablesHint")}</p>
-                </div>
-                <button
-                  type="button"
-                  className="st-button"
-                  onClick={() =>
-                    updateOverride(activeItem.id, {
-                      envVars: [...(activeOverride.envVars ?? []), { key: "", value: "" }],
-                    })
-                  }
-                >
-                  <Plus className="size-3.5 inline mr-1" /> {t("prov.addVariable")}
-                </button>
-              </div>
-              {(activeOverride.envVars ?? []).length > 0 ? (
-                <div className="flex flex-col gap-2 mt-2">
-                  {(activeOverride.envVars ?? []).map((row, idx) => (
-                    <div key={idx} className="flex items-center gap-2">
-                      <input
-                        className="st-input !w-[160px] font-mono !text-[12px]"
-                        placeholder="ENV_KEY"
-                        value={row.key}
-                        onChange={e => {
-                          const next = [...(activeOverride.envVars ?? [])]
-                          next[idx] = { ...next[idx], key: e.target.value }
-                          updateOverride(activeItem.id, { envVars: next })
-                        }}
-                      />
-                      <input
-                        className="st-input flex-1 !w-auto font-mono !text-[12px]"
-                        placeholder={t("prov.valuePlaceholder")}
-                        value={row.value}
-                        onChange={e => {
-                          const next = [...(activeOverride.envVars ?? [])]
-                          next[idx] = { ...next[idx], value: e.target.value }
-                          updateOverride(activeItem.id, { envVars: next })
-                        }}
-                      />
-                      <button
-                        type="button"
-                        className="st-prov-icon-btn"
-                        aria-label={t("prov.removeVariable")}
-                        onClick={() => {
-                          const next = (activeOverride.envVars ?? []).filter((_, i) => i !== idx)
-                          updateOverride(activeItem.id, { envVars: next })
-                        }}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </div>
+            <ProviderRuntimeSection
+              item={activeItem} override={activeOverride}
+              onUpdateOverride={patch => updateOverride(activeItem.id, patch)}
+            />
           </div>
         ) : null}
       </div>

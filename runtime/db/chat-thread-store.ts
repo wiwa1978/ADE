@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { badRequest, conflict, notFound } from "../http-error.ts";
-import { dbAll, dbGet } from "./schema.ts";
+import { dbAll, dbGet, dbRun, withTransaction } from "./schema.ts";
 import type { ProjectStore } from "./project-store.ts";
 import type { TaskStore } from "./task-store.ts";
 import type { TurnStore } from "./turn-store.ts";
@@ -29,7 +29,7 @@ export class ChatThreadStore {
 	}
 
 	exists(id: string): boolean {
-		return Boolean(this.#db.prepare("SELECT 1 FROM chat_threads WHERE id=?").get(id));
+		return Boolean(dbGet(this.#db, "SELECT 1 FROM chat_threads WHERE id=?", id));
 	}
 
 	create(input: { id?: unknown; mode?: unknown } | null | undefined): string {
@@ -42,8 +42,7 @@ export class ChatThreadStore {
 			if (existing.mode !== input.mode) throw conflict("This chat ID already belongs to a different conversation.");
 			return input.id;
 		}
-		this.#db.prepare("INSERT INTO chat_threads (id,mode,title,createdAt) VALUES (?,?,?,?)")
-			.run(input.id, input.mode, "New chat", Date.now());
+		dbRun(this.#db, "INSERT INTO chat_threads (id,mode,title,createdAt) VALUES (?,?,?,?)", input.id, input.mode, "New chat", Date.now());
 		return input.id;
 	}
 
@@ -51,89 +50,140 @@ export class ChatThreadStore {
 		if (typeof title !== "string" || !title.trim() || title.length > 200) {
 			throw badRequest("Provide a chat name of up to 200 characters.");
 		}
-		const result = this.#db.prepare("UPDATE chat_threads SET title=?,manuallyNamed=1 WHERE id=?").run(title.trim(), id);
+		const result = dbRun(this.#db, "UPDATE chat_threads SET title=?,manuallyNamed=1 WHERE id=?", title.trim(), id);
 		if (!result.changes) throw notFound("Chat not found.");
 	}
 
 	delete(id: string): { deleted: true; id: string } {
-		this.#turns.deleteForChat(id);
-		const result = this.#db.prepare("DELETE FROM chat_threads WHERE id=?").run(id);
-		if (!result.changes) throw notFound("Chat not found.");
-		return { deleted: true, id };
+		return withTransaction(this.#db, () => {
+			this.#turns.deleteForChat(id);
+			const result = dbRun(this.#db, "DELETE FROM chat_threads WHERE id=?", id);
+			if (!result.changes) throw notFound("Chat not found.");
+			return { deleted: true, id };
+		});
 	}
 
 	setArchivedAt(id: string, archivedAt: number | null): void {
-		this.#db.prepare("UPDATE chat_threads SET archivedAt=? WHERE id=?").run(archivedAt, id);
+		dbRun(this.#db, "UPDATE chat_threads SET archivedAt=? WHERE id=?", archivedAt, id);
 	}
 
 	autoNameIfUnset(chatId: string, title: string): void {
-		this.#db.prepare("UPDATE chat_threads SET title=? WHERE id=? AND manuallyNamed=0").run(title, chatId);
+		dbRun(this.#db, "UPDATE chat_threads SET title=? WHERE id=? AND manuallyNamed=0", title, chatId);
 	}
 
 	forkSession(sourceId: string): string {
-		const newId = randomUUID();
-		const now = Date.now();
-		const chat = this.get(sourceId);
-		if (chat) {
-			const forkTitle = `${chat.title} (fork)`.slice(0, 200);
-			this.#db.prepare("INSERT INTO chat_threads (id,mode,title,manuallyNamed,createdAt) VALUES (?,?,?,?,?)")
-				.run(newId, chat.mode, forkTitle, 1, now);
-			this.#turns.copyTurnsForChat(sourceId, newId);
-			return newId;
-		}
-		const task = this.#tasks.get(sourceId);
-		if (task) {
-			const forkTitle = `${task.title} (fork)`.slice(0, 200);
-			this.#db.prepare(
-				"INSERT INTO coding_tasks (id,title,repository,kind,base,branch,workspace,status,message,createdAt,projectId,initialTitle) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-			).run(newId, forkTitle, task.repository, task.kind, task.base, task.branch, task.workspace, task.status, task.message, now, task.projectId ?? null, forkTitle);
-			this.#turns.copyTurnsForTask(sourceId, newId);
-			return newId;
-		}
-		if (sourceId === "coding" || sourceId === "personal") {
-			const forkTitle = sourceId === "coding" ? "Coding chat (fork)" : "Personal chat (fork)";
-			this.#db.prepare("INSERT INTO chat_threads (id,mode,title,manuallyNamed,createdAt) VALUES (?,?,?,?,?)")
-				.run(newId, sourceId, forkTitle, 1, now);
-			this.#turns.copyTurnsForRootMode(sourceId, newId);
-			return newId;
-		}
-		throw notFound("Session not found.");
+		return withTransaction(this.#db, () => {
+			const newId = randomUUID();
+			const now = Date.now();
+			const chat = this.get(sourceId);
+			if (chat) {
+				const forkTitle = `${chat.title} (fork)`.slice(0, 200);
+				dbRun(
+					this.#db,
+					"INSERT INTO chat_threads (id,mode,title,manuallyNamed,createdAt) VALUES (?,?,?,?,?)",
+					newId,
+					chat.mode,
+					forkTitle,
+					1,
+					now,
+				);
+				this.#turns.copyTurnsForChat(sourceId, newId);
+				return newId;
+			}
+			const task = this.#tasks.get(sourceId);
+			if (task) {
+				const forkTitle = `${task.title} (fork)`.slice(0, 200);
+				dbRun(
+					this.#db,
+					"INSERT INTO coding_tasks (id,title,repository,kind,base,branch,workspace,status,message,createdAt,projectId,initialTitle) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+					newId,
+					forkTitle,
+					task.repository,
+					task.kind,
+					task.base,
+					task.branch,
+					task.workspace,
+					task.status,
+					task.message,
+					now,
+					task.projectId ?? null,
+					forkTitle,
+				);
+				this.#turns.copyTurnsForTask(sourceId, newId);
+				return newId;
+			}
+			if (sourceId === "coding" || sourceId === "personal") {
+				const forkTitle = sourceId === "coding" ? "Coding chat (fork)" : "Personal chat (fork)";
+				dbRun(
+					this.#db,
+					"INSERT INTO chat_threads (id,mode,title,manuallyNamed,createdAt) VALUES (?,?,?,?,?)",
+					newId,
+					sourceId,
+					forkTitle,
+					1,
+					now,
+				);
+				this.#turns.copyTurnsForRootMode(sourceId, newId);
+				return newId;
+			}
+			throw notFound("Session not found.");
+		});
 	}
 
 	moveSession(sourceId: string, opts: { mode?: "coding" | "personal"; projectId?: string | null }): string {
-		const task = this.#tasks.get(sourceId);
-		if (task) {
-			if (opts.projectId !== undefined) {
-				const targetProjectId = opts.projectId ? String(opts.projectId) : null;
-				if (targetProjectId) {
-					const proj = this.#projects.get(targetProjectId);
-					if (!proj) throw notFound("Target project not found.");
-					this.#db.prepare("UPDATE coding_tasks SET projectId=?, repository=CASE WHEN repository='' THEN ? ELSE repository END WHERE id=?")
-						.run(targetProjectId, proj.repository ?? "", sourceId);
-				} else {
-					this.#db.prepare("UPDATE coding_tasks SET projectId=NULL WHERE id=?").run(sourceId);
+		return withTransaction(this.#db, () => {
+			const task = this.#tasks.get(sourceId);
+			if (task) {
+				if (opts.projectId !== undefined) {
+					const targetProjectId = opts.projectId ? String(opts.projectId) : null;
+					if (targetProjectId) {
+						const proj = this.#projects.get(targetProjectId);
+						if (!proj) throw notFound("Target project not found.");
+						dbRun(
+							this.#db,
+							"UPDATE coding_tasks SET projectId=?, repository=CASE WHEN repository='' THEN ? ELSE repository END WHERE id=?",
+							targetProjectId,
+							proj.repository ?? "",
+							sourceId,
+						);
+					} else {
+						dbRun(this.#db, "UPDATE coding_tasks SET projectId=NULL WHERE id=?", sourceId);
+					}
 				}
+				return sourceId;
 			}
-			return sourceId;
-		}
-		const chat = this.get(sourceId);
-		if (chat) {
-			if (opts.projectId) {
-				const proj = this.#projects.get(opts.projectId);
-				if (!proj) throw notFound("Target project not found.");
-				this.#db.prepare(
-					"INSERT INTO coding_tasks (id,title,repository,kind,base,branch,workspace,status,message,createdAt,projectId,initialTitle) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-				).run(chat.id, chat.title, proj.repository ?? "", proj.repository ? "existing" : "none", "main", null, proj.repository ?? null, "ready", null, chat.createdAt, proj.id, chat.title);
-				this.#db.prepare("UPDATE turns SET taskId=?, chatId=NULL, mode='coding' WHERE chatId=?").run(chat.id, chat.id);
-				this.#db.prepare("DELETE FROM chat_threads WHERE id=?").run(chat.id);
-				return chat.id;
+			const chat = this.get(sourceId);
+			if (chat) {
+				if (opts.projectId) {
+					const proj = this.#projects.get(opts.projectId);
+					if (!proj) throw notFound("Target project not found.");
+					dbRun(
+						this.#db,
+						"INSERT INTO coding_tasks (id,title,repository,kind,base,branch,workspace,status,message,createdAt,projectId,initialTitle) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+						chat.id,
+						chat.title,
+						proj.repository ?? "",
+						proj.repository ? "existing" : "none",
+						"main",
+						null,
+						proj.repository ?? null,
+						"ready",
+						null,
+						chat.createdAt,
+						proj.id,
+						chat.title,
+					);
+					dbRun(this.#db, "UPDATE turns SET taskId=?, chatId=NULL, mode='coding' WHERE chatId=?", chat.id, chat.id);
+					dbRun(this.#db, "DELETE FROM chat_threads WHERE id=?", chat.id);
+					return chat.id;
+				}
+				if (opts.mode === "coding" || opts.mode === "personal") {
+					dbRun(this.#db, "UPDATE chat_threads SET mode=? WHERE id=?", opts.mode, sourceId);
+					dbRun(this.#db, "UPDATE turns SET mode=? WHERE chatId=?", opts.mode, sourceId);
+				}
+				return sourceId;
 			}
-			if (opts.mode === "coding" || opts.mode === "personal") {
-				this.#db.prepare("UPDATE chat_threads SET mode=? WHERE id=?").run(opts.mode, sourceId);
-				this.#db.prepare("UPDATE turns SET mode=? WHERE chatId=?").run(opts.mode, sourceId);
-			}
-			return sourceId;
-		}
-		throw notFound("Session not found.");
+			throw notFound("Session not found.");
+		});
 	}
 }

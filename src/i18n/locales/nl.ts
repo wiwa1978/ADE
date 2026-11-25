@@ -1,6 +1,16 @@
 import type { TranslationKey } from "./en.ts"
+import { nlSettingsExt } from "./nl-settings-ext.ts"
+import { nlWorkspaceExt } from "./nl-workspace-ext.ts"
+import { nlProjectsExt } from "./nl-projects-ext.ts"
+import { nlPanelsExt } from "./nl-panels-ext.ts"
+import { nlSwarmExt } from "./nl-swarm-ext.ts"
 
 export const nl: Record<TranslationKey, string> = {
+  ...nlSettingsExt,
+  ...nlWorkspaceExt,
+  ...nlProjectsExt,
+  ...nlPanelsExt,
+  ...nlSwarmExt,
   // --- Common ---
   "common.save": "Opslaan",
   "common.saving": "Opslaan…",

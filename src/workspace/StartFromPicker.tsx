@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { GitBranch, GitPullRequest } from "lucide-react"
 import { request } from "../../api"
 import { relativeTime } from "../session-state"
+import { useI18n } from "../i18n/I18nContext"
 
 /** Where a new worktree session starts: a fresh branch, an existing branch, or a pull request. */
 export type StartChoice =
@@ -23,6 +24,7 @@ export function StartFromPicker({
   value: StartChoice
   onChange: (value: StartChoice) => void
 }) {
+  const { t } = useI18n()
   const [branches, setBranches] = useState<BranchOption[] | null>(null)
   const [pulls, setPulls] = useState<PullOption[] | null>(null)
   const [loadError, setLoadError] = useState("")
@@ -33,18 +35,18 @@ export function StartFromPicker({
     let cancelled = false
     void request<{ branches: BranchOption[] }>(`/api/projects/${encodeURIComponent(projectId)}/branches`)
       .then(result => { if (!cancelled) setBranches(result.branches) })
-      .catch(err => { if (!cancelled) { setBranches([]); setLoadError(err instanceof Error ? err.message : "Could not list branches.") } })
+      .catch(err => { if (!cancelled) { setBranches([]); setLoadError(err instanceof Error ? err.message : t("wsx.ws.couldNotListBranches")) } })
     return () => { cancelled = true }
-  }, [value.mode, projectId, branches])
+  }, [value.mode, projectId, branches, t])
 
   useEffect(() => {
     if (value.mode !== "pr" || pulls || !hasGitHub) return
     let cancelled = false
     void request<{ pullRequests: PullOption[] }>(`/api/projects/${encodeURIComponent(projectId)}/pulls?state=open`)
       .then(result => { if (!cancelled) setPulls(result.pullRequests) })
-      .catch(err => { if (!cancelled) { setPulls([]); setLoadError(err instanceof Error ? err.message : "Could not list pull requests.") } })
+      .catch(err => { if (!cancelled) { setPulls([]); setLoadError(err instanceof Error ? err.message : t("wsx.ws.couldNotListPulls")) } })
     return () => { cancelled = true }
-  }, [value.mode, projectId, pulls, hasGitHub])
+  }, [value.mode, projectId, pulls, hasGitHub, t])
 
   const query = filter.trim().toLowerCase()
   const shownBranches = (branches ?? [])
@@ -55,12 +57,12 @@ export function StartFromPicker({
 
   return (
     <div className="sf-label">
-      <span>Start from</span>
-      <div className="sf-segmented h-9 w-full justify-between" role="radiogroup" aria-label="Start from">
+      <span>{t("wsx.ws.startFrom")}</span>
+      <div className="sf-segmented h-9 w-full justify-between" role="radiogroup" aria-label={t("wsx.ws.startFrom")}>
         {([
-          { mode: "new", label: "New branch" },
-          { mode: "branch", label: "Existing branch" },
-          { mode: "pr", label: "Pull request" },
+          { mode: "new", label: t("wsx.ws.newBranch") },
+          { mode: "branch", label: t("wsx.ws.existingBranch") },
+          { mode: "pr", label: t("wsx.ws.pullRequest") },
         ] as const).map(option => (
           <button
             key={option.mode}
@@ -84,8 +86,8 @@ export function StartFromPicker({
           <input
             className="sf-field !h-8"
             value={filter}
-            placeholder={value.mode === "branch" ? "Filter branches" : hasGitHub ? "Filter pull requests, or type a number" : "Pull request number"}
-            aria-label={value.mode === "branch" ? "Filter branches" : "Find a pull request"}
+            placeholder={value.mode === "branch" ? t("wsx.ws.filterBranches") : hasGitHub ? t("wsx.ws.filterPullsOrNumber") : t("wsx.ws.pullRequestNumber")}
+            aria-label={value.mode === "branch" ? t("wsx.ws.filterBranches") : t("wsx.ws.findPullRequest")}
             onChange={event => {
               setFilter(event.target.value)
               // A typed PR number works even when the list can't be loaded.
@@ -95,9 +97,9 @@ export function StartFromPicker({
           />
           {loadError ? <p className="ade-start-from-note">{loadError}</p> : null}
           {value.mode === "branch" ? (
-            branches === null ? <p className="ade-start-from-note">Loading branches…</p>
+            branches === null ? <p className="ade-start-from-note">{t("wsx.ws.loadingBranches")}</p>
               : (
-                <ul className="ade-start-from-list" role="listbox" aria-label="Branches">
+                <ul className="ade-start-from-list" role="listbox" aria-label={t("wsx.ws.branchesAria")}>
                   {shownBranches.map(branch => (
                     <li key={branch.name}>
                       <button
@@ -105,33 +107,33 @@ export function StartFromPicker({
                         role="option"
                         aria-selected={value.branch === branch.name}
                         disabled={Boolean(branch.checkedOutAt)}
-                        title={branch.checkedOutAt ? `Checked out in ${branch.checkedOutAt}. A branch can only be open in one place.` : branch.subject}
+                        title={branch.checkedOutAt ? t("wsx.ws.checkedOutIn", { path: branch.checkedOutAt }) : branch.subject}
                         className={value.branch === branch.name ? "is-selected" : ""}
                         onClick={() => onChange({ mode: "branch", branch: branch.name })}
                       >
                         <GitBranch className="size-3.5" />
                         <span className="ade-start-from-name">{branch.name}</span>
-                        <span className="ade-start-from-meta">{branch.checkedOutAt ? "in use · " : branch.remote ? "origin · " : ""}{relativeTime(branch.updatedAt)}</span>
+                        <span className="ade-start-from-meta">{branch.checkedOutAt ? t("wsx.ws.inUsePrefix") : branch.remote ? t("wsx.ws.originPrefix") : ""}{relativeTime(branch.updatedAt)}</span>
                       </button>
                     </li>
                   ))}
-                  {!shownBranches.length ? <li className="ade-start-from-note">No branches match.</li> : null}
+                  {!shownBranches.length ? <li className="ade-start-from-note">{t("wsx.ws.noBranchesMatch")}</li> : null}
                 </ul>
               )
           ) : !hasGitHub ? (
-            <p className="ade-start-from-note">This project isn’t linked to a GitHub repository, so type the pull request number.</p>
-          ) : pulls === null ? <p className="ade-start-from-note">Loading pull requests…</p> : (
-            <ul className="ade-start-from-list" role="listbox" aria-label="Pull requests">
+            <p className="ade-start-from-note">{t("wsx.ws.noGitHubLinkedPrNote")}</p>
+          ) : pulls === null ? <p className="ade-start-from-note">{t("wsx.ws.loadingPulls")}</p> : (
+            <ul className="ade-start-from-list" role="listbox" aria-label={t("wsx.ws.pullRequestsAria")}>
               {shownPulls.map(pull => (
                 <li key={pull.number}>
                   <button type="button" role="option" aria-selected={value.number === pull.number} className={value.number === pull.number ? "is-selected" : ""} onClick={() => onChange({ mode: "pr", number: pull.number, title: pull.title })}>
                     <GitPullRequest className="size-3.5" />
                     <span className="ade-start-from-name">#{pull.number} {pull.title}</span>
-                    <span className="ade-start-from-meta">{pull.isDraft ? "draft · " : ""}{pull.author}</span>
+                    <span className="ade-start-from-meta">{pull.isDraft ? t("wsx.ws.draftPrefix") : ""}{pull.author}</span>
                   </button>
                 </li>
               ))}
-              {!shownPulls.length ? <li className="ade-start-from-note">No open pull requests match.</li> : null}
+              {!shownPulls.length ? <li className="ade-start-from-note">{t("wsx.ws.noOpenPullsMatch")}</li> : null}
             </ul>
           )}
         </div>

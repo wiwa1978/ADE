@@ -1,4 +1,15 @@
+import { enSettingsExt } from "./en-settings-ext.ts"
+import { enWorkspaceExt } from "./en-workspace-ext.ts"
+import { enProjectsExt } from "./en-projects-ext.ts"
+import { enPanelsExt } from "./en-panels-ext.ts"
+import { enSwarmExt } from "./en-swarm-ext.ts"
+
 export const en = {
+  ...enSettingsExt,
+  ...enWorkspaceExt,
+  ...enProjectsExt,
+  ...enPanelsExt,
+  ...enSwarmExt,
   // --- Common ---
   "common.save": "Save",
   "common.saving": "Saving…",

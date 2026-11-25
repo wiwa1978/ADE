@@ -1,11 +1,12 @@
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { hostname, networkInterfaces } from "node:os";
-import { extname, join, resolve } from "node:path";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 import { badRequest, HttpError, httpError, notFound } from "./http-error.ts";
 import { logger } from "./log.ts";
 import type { Router } from "./router.ts";
@@ -58,6 +59,26 @@ export type MobilePairingStatus = {
 	} | null;
 	devices: PublicPairedDevice[];
 };
+
+const PairedDeviceSchema = z.object({
+	id: z.string(),
+	name: z.string(),
+	platform: z.enum(["ios", "android", "web"]),
+	tokenHash: z.string(),
+	pairedAt: z.number(),
+	lastSeenAt: z.number(),
+	lastIp: z.string(),
+	userAgent: z.string(),
+	revokedAt: z.number().nullable(),
+});
+
+const PersistedPairingStateSchema = z.object({
+	enabled: z.boolean().optional(),
+	port: z.number().int().min(0).max(65535).optional(),
+	mode: z.enum(["lan", "tailscale", "tunnel", "custom"]).optional(),
+	customUrl: z.string().optional(),
+	devices: z.array(PairedDeviceSchema).optional(),
+});
 
 type PersistedPairingState = {
 	enabled: boolean;
@@ -252,30 +273,38 @@ function sendJson(response: ServerResponse, status: number, value: unknown, extr
 	response.end(JSON.stringify(value));
 }
 
+function isLoopbackSocket(request: IncomingMessage): boolean {
+	const addr = request.socket?.remoteAddress?.replace(/^::ffff:/, "") ?? "";
+	return addr === "127.0.0.1" || addr === "::1";
+}
+
 function clientIp(request: IncomingMessage): string {
-	const forwarded = request.headers["x-forwarded-for"];
-	if (typeof forwarded === "string" && forwarded.trim()) {
-		return forwarded.split(",")[0].trim();
+	if (isLoopbackSocket(request)) {
+		const forwarded = request.headers["x-forwarded-for"];
+		if (typeof forwarded === "string" && forwarded.trim()) {
+			return forwarded.split(",")[0].trim();
+		}
 	}
 	return request.socket?.remoteAddress?.replace(/^::ffff:/, "") ?? "unknown";
 }
 
 function isSecureRequest(request: IncomingMessage): boolean {
+	if (!isLoopbackSocket(request)) return false;
 	const proto = request.headers["x-forwarded-proto"];
 	if (typeof proto === "string" && proto.toLowerCase().includes("https")) return true;
 	return false;
 }
 
-function isDesktopAdminRoute(pathname: string): boolean {
-	if (pathname === "/api/mobile/session" || pathname === "/api/mobile/claim" || pathname === "/api/mobile/logout") {
+export function isDesktopAdminRoute(pathname: string): boolean {
+	const normalized = pathname.toLowerCase();
+	if (normalized === "/api/mobile/session" || normalized === "/api/mobile/claim" || normalized === "/api/mobile/logout") {
 		return false;
 	}
-	return pathname.startsWith("/api/mobile/");
+	return normalized === "/api/mobile" || normalized.startsWith("/api/mobile/");
 }
 
 export class MobilePairingManager {
 	readonly #storePath: string | null;
-	readonly #uiPort: number;
 	readonly #distDir: string;
 	#state: PersistedPairingState;
 	#challenge: ActivePairingChallenge | null = null;
@@ -296,7 +325,6 @@ export class MobilePairingManager {
 		distDir?: string;
 	} = {}) {
 		this.#storePath = opts.stateDirectory ? join(opts.stateDirectory, "mobile-pairing.json") : null;
-		this.#uiPort = opts.uiPort ?? Number(process.env.ADE_UI_PORT ?? 1420);
 		this.#distDir = opts.distDir ?? join(REPO_ROOT, "dist");
 		this.#state = this.#load(opts.defaultPort ?? Number(process.env.ADE_MOBILE_PORT ?? 4320));
 	}
@@ -321,17 +349,14 @@ export class MobilePairingManager {
 		};
 		if (!this.#storePath || !existsSync(this.#storePath)) return fallback;
 		try {
-			const raw = JSON.parse(readFileSync(this.#storePath, "utf8")) as Partial<PersistedPairingState>;
-			const port = typeof raw.port === "number" && raw.port >= 0 && raw.port <= 65535 ? raw.port : defaultPort;
-			const mode: MobileAddressMode =
-				raw.mode === "tailscale" || raw.mode === "tunnel" || raw.mode === "custom" ? raw.mode : "lan";
-			const devices = Array.isArray(raw.devices) ? raw.devices.filter(d => d && typeof d.id === "string" && typeof d.tokenHash === "string") : [];
+			const parsed = PersistedPairingStateSchema.safeParse(JSON.parse(readFileSync(this.#storePath, "utf8")));
+			if (!parsed.success) return fallback;
 			return {
-				enabled: Boolean(raw.enabled),
-				port,
-				mode,
-				customUrl: typeof raw.customUrl === "string" ? raw.customUrl : "",
-				devices,
+				enabled: Boolean(parsed.data.enabled),
+				port: parsed.data.port ?? defaultPort,
+				mode: parsed.data.mode ?? "lan",
+				customUrl: parsed.data.customUrl ?? "",
+				devices: parsed.data.devices ?? [],
 			};
 		} catch (error) {
 			logger.warn("Could not read mobile-pairing.json; starting with defaults", { error });
@@ -343,7 +368,7 @@ export class MobilePairingManager {
 		if (!this.#storePath) return;
 		try {
 			mkdirSync(resolve(this.#storePath, ".."), { recursive: true });
-			const tmp = `${this.#storePath}.tmp.${process.pid}`;
+			const tmp = `${this.#storePath}.${randomUUID()}.tmp`;
 			writeFileSync(tmp, JSON.stringify(this.#state, null, 2), { mode: 0o600 });
 			renameSync(tmp, this.#storePath);
 		} catch (error) {
@@ -606,16 +631,20 @@ export class MobilePairingManager {
 		return `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
 	}
 
-	#isAllowedBridgeOrigin(request: IncomingMessage): boolean {
+	#isAllowedBridgeOrigin(request: IncomingMessage, { requireOrigin = false }: { requireOrigin?: boolean } = {}): boolean {
 		const origin = request.headers.origin;
-		if (!origin) return true;
+		if (!origin) return !requireOrigin;
 		let parsedOrigin: URL;
 		try {
 			parsedOrigin = new URL(origin);
 		} catch {
 			return false;
 		}
-		const hostHeader = (request.headers["x-forwarded-host"] as string | undefined) || request.headers.host;
+		// Only trust X-Forwarded-Host when the request arrived from a local loopback proxy (e.g. cloudflared).
+		const forwardedHost = isLoopbackSocket(request)
+			? (request.headers["x-forwarded-host"] as string | undefined)?.split(",")[0]?.trim()
+			: undefined;
+		const hostHeader = forwardedHost || request.headers.host;
 		if (hostHeader && parsedOrigin.host.toLowerCase() === hostHeader.toLowerCase()) {
 			return true;
 		}
@@ -734,6 +763,7 @@ export class MobilePairingManager {
 			const url = new URL(request.url ?? "/", `http://${hostHeader}`);
 			const method = (request.method ?? "GET").toUpperCase();
 			const ip = clientIp(request);
+			const lowerPath = url.pathname.toLowerCase();
 
 			// 1. One-tap QR landing link: GET /pair?code=...
 			if (method === "GET" && url.pathname === "/pair") {
@@ -761,7 +791,7 @@ export class MobilePairingManager {
 			}
 
 			// 2. Public mobile session status endpoint
-			if (method === "GET" && url.pathname === "/api/mobile/session") {
+			if (method === "GET" && lowerPath === "/api/mobile/session") {
 				const { token } = this.extractRequestToken(request);
 				const device = this.authenticateToken(token, ip);
 				sendJson(response, 200, {
@@ -774,8 +804,8 @@ export class MobilePairingManager {
 			}
 
 			// 3. Manual pairing claim endpoint (QR code or 6-digit code)
-			if (method === "POST" && url.pathname === "/api/mobile/claim") {
-				if (!this.#isAllowedBridgeOrigin(request)) {
+			if (method === "POST" && lowerPath === "/api/mobile/claim") {
+				if (!this.#isAllowedBridgeOrigin(request, { requireOrigin: false })) {
 					sendJson(response, 403, { error: "Cross-origin pairing request is not allowed." });
 					return;
 				}
@@ -802,8 +832,12 @@ export class MobilePairingManager {
 			}
 
 			// 4. Logout / self-revoke endpoint
-			if (method === "POST" && url.pathname === "/api/mobile/logout") {
-				const { token } = this.extractRequestToken(request);
+			if (method === "POST" && lowerPath === "/api/mobile/logout") {
+				const { token, viaBearer } = this.extractRequestToken(request);
+				if (!viaBearer && !this.#isAllowedBridgeOrigin(request, { requireOrigin: true })) {
+					sendJson(response, 403, { error: "Origin header is required for cookie-authenticated logout." });
+					return;
+				}
 				const device = this.authenticateToken(token, ip);
 				if (device) {
 					device.revokedAt = Date.now();
@@ -814,7 +848,7 @@ export class MobilePairingManager {
 			}
 
 			// 5. All other /api/* requests require a valid non-revoked paired device token
-			if (url.pathname.startsWith("/api/")) {
+			if (lowerPath === "/api" || lowerPath.startsWith("/api/")) {
 				if (isDesktopAdminRoute(url.pathname)) {
 					sendJson(response, 403, { error: "Mobile pairing settings can only be changed on the host computer." });
 					return;
@@ -825,8 +859,8 @@ export class MobilePairingManager {
 					sendJson(response, 401, { error: "Device not paired or access revoked.", requiresPairing: true });
 					return;
 				}
-				if (method !== "GET" && !viaBearer && !this.#isAllowedBridgeOrigin(request)) {
-					sendJson(response, 403, { error: "Cross-origin request rejected by mobile bridge." });
+				if (method !== "GET" && method !== "HEAD" && !viaBearer && !this.#isAllowedBridgeOrigin(request, { requireOrigin: true })) {
+					sendJson(response, 403, { error: "Cross-origin or missing-Origin request rejected by mobile bridge." });
 					return;
 				}
 				if (!this.#mainRouter || !this.#readBody || !this.#requireWorkspace) {
@@ -848,8 +882,8 @@ export class MobilePairingManager {
 				return;
 			}
 
-			// 6. Serve UI assets (built dist/ or proxy to Vite dev server)
-			await this.#serveUi(request, response, url);
+			// 6. Serve compiled static UI assets from dist/ only (never proxy to Vite dev server).
+			this.#serveUi(request.url ?? "/", response, url);
 		} catch (error) {
 			if (error instanceof HttpError) {
 				sendJson(response, error.status, { error: error.message });
@@ -860,60 +894,89 @@ export class MobilePairingManager {
 		}
 	}
 
-	async #serveUi(request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> {
-		// In dev mode, try proxying to the local Vite UI server first so HMR & live changes work on phones immediately.
-		const proxied = await this.#tryProxyVite(request, response, url);
-		if (proxied) return;
-
-		// Otherwise serve static assets from dist/ with SPA fallback to index.html.
-		const cleanPath = url.pathname === "/" ? "/index.html" : url.pathname;
-		const resolved = resolve(this.#distDir, `.${cleanPath}`);
-		const insideDist = resolved === this.#distDir || resolved.startsWith(`${this.#distDir}/`);
-		const target = insideDist && existsSync(resolved) && statSync(resolved).isFile()
-			? resolved
-			: join(this.#distDir, "index.html");
-		if (!existsSync(target)) {
-			sendJson(response, 503, { error: "ADE UI bundle not found. Run `npm run dev` or `npm run build`." });
+	#serveUi(rawUrl: string, response: ServerResponse, url: URL): void {
+		const rawPath = rawUrl.split("?", 1)[0];
+		let decodedRawPath: string;
+		let decodedPath: string;
+		try {
+			decodedRawPath = decodeURIComponent(rawPath);
+			decodedPath = decodeURIComponent(url.pathname);
+		} catch {
+			sendJson(response, 400, { error: "Malformed request path." });
 			return;
 		}
+		if (
+			decodedRawPath.includes("\0") ||
+			decodedRawPath.includes("\\") ||
+			decodedRawPath.split("/").includes("..") ||
+			decodedPath.includes("\0") ||
+			decodedPath.includes("\\") ||
+			decodedPath.split("/").includes("..")
+		) {
+			sendJson(response, 400, { error: "Invalid path." });
+			return;
+		}
+		if (decodedPath.split("/").some(seg => seg.startsWith("."))) {
+			sendJson(response, 404, { error: "Not found" });
+			return;
+		}
+		if (!existsSync(this.#distDir)) {
+			sendJson(response, 503, { error: "ADE UI bundle not found. Run `npm run build`." });
+			return;
+		}
+
+		const canonicalDist = realpathSync(this.#distDir);
+		const cleanPath = decodedPath === "/" ? "/index.html" : decodedPath;
+		const ext = extname(cleanPath).toLowerCase();
+
+		// Reject requests for unknown/non-static file extensions (e.g. .ts, .env, .map, /@fs/...)
+		if (ext && !(ext in STATIC_MIME)) {
+			sendJson(response, 404, { error: "Not found" });
+			return;
+		}
+
+		const candidate = resolve(canonicalDist, `.${cleanPath}`);
+		const rel = relative(canonicalDist, candidate);
+		const insideDist = rel !== "" && !isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`);
+
+		let target: string | null = null;
+		if (insideDist && existsSync(candidate)) {
+			try {
+				const st = lstatSync(candidate);
+				if (!st.isSymbolicLink() && st.isFile()) {
+					const realCandidate = realpathSync(candidate);
+					const realRel = relative(canonicalDist, realCandidate);
+					if (realRel !== "" && !isAbsolute(realRel) && realRel !== ".." && !realRel.startsWith(`..${sep}`)) {
+						target = realCandidate;
+					}
+				}
+			} catch {
+				target = null;
+			}
+		}
+
+		if (!target) {
+			// Only fall back to SPA index.html for extensionless routes
+			if (ext) {
+				sendJson(response, 404, { error: "Not found" });
+				return;
+			}
+			const indexFile = join(canonicalDist, "index.html");
+			if (!existsSync(indexFile)) {
+				sendJson(response, 503, { error: "ADE UI bundle not found. Run `npm run build`." });
+				return;
+			}
+			target = indexFile;
+		}
+
 		const body = readFileSync(target);
 		const mime = STATIC_MIME[extname(target).toLowerCase()] ?? "application/octet-stream";
 		response.writeHead(200, {
 			"content-type": mime,
 			"content-length": body.length,
 			"cache-control": target.endsWith("index.html") ? "no-cache" : "public, max-age=3600",
+			"x-content-type-options": "nosniff",
 		});
 		response.end(body);
-	}
-
-	#tryProxyVite(request: IncomingMessage, response: ServerResponse, url: URL): Promise<boolean> {
-		return new Promise<boolean>((resolveProxy) => {
-			const upstream = httpRequest(
-				{
-					hostname: "127.0.0.1",
-					port: this.#uiPort,
-					path: `${url.pathname}${url.search}`,
-					method: request.method ?? "GET",
-					headers: {
-						...request.headers,
-						host: `127.0.0.1:${this.#uiPort}`,
-					},
-					timeout: 1500,
-				},
-				(upstreamRes) => {
-					const headers: Record<string, string | string[] | undefined> = { ...upstreamRes.headers };
-					delete headers["transfer-encoding"];
-					response.writeHead(upstreamRes.statusCode ?? 200, headers);
-					upstreamRes.pipe(response);
-					upstreamRes.once("end", () => resolveProxy(true));
-				},
-			);
-			upstream.once("error", () => resolveProxy(false));
-			upstream.once("timeout", () => {
-				upstream.destroy();
-				resolveProxy(false);
-			});
-			upstream.end();
-		});
 	}
 }

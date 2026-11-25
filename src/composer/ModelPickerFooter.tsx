@@ -1,10 +1,12 @@
 import { Check, ChevronUp, Shield, ShieldAlert, ShieldOff } from "lucide-react"
 import type { ApprovalPolicy } from "../../app-types"
+import { useI18n } from "../i18n/I18nContext"
+import type { TranslationKey } from "../i18n"
 
-const ACCESS_OPTIONS: { value: ApprovalPolicy; label: string; description: string }[] = [
-  { value: "auto-all", label: "Autopilot", description: "Run everything without asking (no merging or force-pushing)" },
-  { value: "auto-safe", label: "Auto-safe", description: "Auto-allow read-only commands" },
-  { value: "ask", label: "Ask every cmd", description: "Require approval for every command" },
+const ACCESS_OPTIONS: { value: ApprovalPolicy; labelKey: TranslationKey; descKey: TranslationKey }[] = [
+  { value: "auto-all", labelKey: "wsx.comp.policyAutoAll", descKey: "wsx.comp.policyAutoAllDesc" },
+  { value: "auto-safe", labelKey: "wsx.comp.policyAutoSafe", descKey: "wsx.comp.policyAutoSafeDesc" },
+  { value: "ask", labelKey: "wsx.comp.policyAsk", descKey: "wsx.comp.policyAskDesc" },
 ]
 
 export function ModelPickerFooter({
@@ -20,6 +22,7 @@ export function ModelPickerFooter({
   onToggleAccessMenu: () => void
   onChangeApprovalPolicy?: (policy: ApprovalPolicy) => void
 }) {
+  const { t } = useI18n()
   const currentAccess = ACCESS_OPTIONS.find(a => a.value === (approvalPolicy ?? "auto-safe")) ?? ACCESS_OPTIONS[1]
   const AccessIcon = currentAccess.value === "auto-all" ? ShieldOff : currentAccess.value === "ask" ? ShieldAlert : Shield
 
@@ -44,8 +47,8 @@ export function ModelPickerFooter({
                   }}
                 >
                   <div>
-                    <strong>{opt.label}</strong>
-                    <small>{opt.description}</small>
+                    <strong>{t(opt.labelKey)}</strong>
+                    <small>{t(opt.descKey)}</small>
                   </div>
                   {currentAccess.value === opt.value ? <Check className="size-3.5 text-[rgb(var(--primary))]" /> : null}
                 </button>
@@ -56,10 +59,10 @@ export function ModelPickerFooter({
             type="button"
             className="ade-mp-access-btn"
             onClick={onToggleAccessMenu}
-            title="Change command execution access level"
+            title={t("wsx.comp.changeAccessLevel")}
           >
             <AccessIcon className="size-3.5 opacity-75" />
-            <span>{currentAccess.label}</span>
+            <span>{t(currentAccess.labelKey)}</span>
             <ChevronUp className="size-3 opacity-60" />
           </button>
         </div>

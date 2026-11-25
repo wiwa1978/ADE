@@ -82,33 +82,82 @@ async function proxyRemoteRequest(
 	response: ServerResponse,
 	target: { localPort: number; remotePort: number },
 ): Promise<void> {
-	let body: string | undefined;
-	if (request.headers["content-length"] || request.headers["transfer-encoding"]) body = JSON.stringify(await readBody(request));
 	const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
+	const isStream = url.pathname === "/api/events" || (request.headers.accept ?? "").includes("text/event-stream");
+	const clientAbort = new AbortController();
+	const onClientAbort = () => {
+		if (!clientAbort.signal.aborted) clientAbort.abort();
+	};
+	request.once("aborted", onClientAbort);
+	response.once("close", () => {
+		if (!response.writableEnded) onClientAbort();
+	});
+	const signal = isStream
+		? clientAbort.signal
+		: AbortSignal.any([AbortSignal.timeout(30_000), clientAbort.signal]);
+
 	return new Promise<void>((resolve, reject) => {
+		let settled = false;
+		const done = (error?: unknown) => {
+			if (settled) return;
+			settled = true;
+			if (error) reject(error);
+			else resolve();
+		};
 		const headers: Record<string, string | number> = {
 			host: `127.0.0.1:${target.remotePort}`,
 			accept: request.headers.accept ?? "application/json",
 			...(request.headers.origin ? { origin: request.headers.origin } : {}),
 			...(request.headers["content-type"] ? { "content-type": request.headers["content-type"] } : {}),
-			...(body ? { "content-length": Buffer.byteLength(body) } : {}),
+			...(request.headers["content-length"] ? { "content-length": request.headers["content-length"] } : {}),
+			...(request.headers["transfer-encoding"] ? { "transfer-encoding": request.headers["transfer-encoding"] } : {}),
 		};
 		const upstream = httpRequest({
-			hostname: "127.0.0.1", port: target.localPort, path: `${url.pathname}${url.search}`,
-			method: request.method, headers,
+			hostname: "127.0.0.1",
+			port: target.localPort,
+			path: `${url.pathname}${url.search}`,
+			method: request.method,
+			headers,
+			signal,
 		}, upstreamResponse => {
-			response.writeHead(upstreamResponse.statusCode ?? 502, {
+			const responseHeaders: Record<string, string | string[]> = {
 				"content-type": upstreamResponse.headers["content-type"] ?? "application/json; charset=utf-8",
 				"cache-control": "no-store",
 				"x-content-type-options": "nosniff",
-				...(upstreamResponse.headers["content-length"] ? { "content-length": upstreamResponse.headers["content-length"] } : {}),
-			});
+			};
+			if (upstreamResponse.headers["content-length"]) {
+				responseHeaders["content-length"] = upstreamResponse.headers["content-length"];
+			}
+			response.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
 			upstreamResponse.pipe(response);
-			upstreamResponse.once("end", () => resolve());
+			upstreamResponse.once("end", () => done());
+			upstreamResponse.once("error", error => {
+				if (clientAbort.signal.aborted) done();
+				else done(badGateway("The selected SSH environment closed the response unexpectedly.", { cause: error }));
+			});
 		});
-		upstream.once("error", error => reject(badGateway("The selected SSH environment could not be reached.", { cause: error })));
-		if (body) upstream.write(body);
-		upstream.end();
+		upstream.once("error", error => {
+			if (clientAbort.signal.aborted) {
+				done();
+				return;
+			}
+			const isTimeout = error instanceof Error && (error.name === "TimeoutError" || (signal.aborted && (signal.reason as Error | undefined)?.name === "TimeoutError"));
+			if (isTimeout) {
+				done(new HttpError(504, "The selected SSH environment timed out.", { cause: error }));
+				return;
+			}
+			done(badGateway("The selected SSH environment could not be reached.", { cause: error }));
+		});
+		request.once("error", error => {
+			upstream.destroy(error);
+			done();
+		});
+		const hasBody = Boolean(request.headers["content-length"] || request.headers["transfer-encoding"]);
+		if (hasBody) {
+			request.pipe(upstream);
+		} else {
+			upstream.end();
+		}
 	});
 }
 
@@ -152,7 +201,7 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 	origins?: readonly (string | undefined)[];
 }) {
 	let githubConnectionRevision = 0;
-	const { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner, integrations, executionTargets, subagentPolicies, subagentKey, limitGuard, usageWaiter, scheduler } = createAgentWorkflow({ host, worktreeManager, sessionGit });
+	const { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner, integrations, executionTargets, subagentPolicies, subagentKey, limitGuard, usageWaiter, scheduler, dispose } = createAgentWorkflow({ host, worktreeManager, sessionGit });
 	/** Close terminals in an archived session's workspace and optionally remove its ADE worktree (keeping the branch). */
 	async function cleanUpArchivedWorkspace(session: { id: string; workspace: string | null; repository: string | null; kind: string | null }, removeWorktreeRequested: boolean) {
 		let terminalsClosed = 0;
@@ -264,8 +313,8 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 			json(response, 500, { error: host.safeErrorMessage?.(error) ?? safeErrorMessage(error) });
 		});
 	});
-	// Dev servers started with Run and Claude Code/Codex processes stop with the runtime.
-	server.on("close", () => { scriptRunner.stopAll(); engines.abortAll(); usage.flush(); automationRunner.stop(); });
+	// Dev servers, external agents, limit guard, usage waiter, scheduler, and automations stop with the runtime.
+	server.on("close", () => { dispose(); });
 	server.on("listening", () => automationRunner.start());
 	return server;
 }

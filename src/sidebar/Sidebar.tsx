@@ -1,11 +1,13 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Archive, ChevronDown, ChevronRight, Folder, FolderGit2, GitBranch, MessageCircle, MessageSquare, Pin, Plus, Server, X } from "lucide-react"
+import { Badge } from "../../components/ui/index.ts"
 import type { Conversation } from "../../app-types"
 import type { Project } from "../../ProjectsView"
-import { sessionStateIcon, sessionStateInfo, type InboxEntry } from "../session-state"
 import type { KeybindingMap } from "../keybindings"
 import type { AddProjectSource } from "../projects/AddProjectWizard"
+import { sessionStateIcon, sessionStateInfo, type InboxEntry } from "../session-state"
 import { ProjectsHeaderControls } from "./ProjectsHeaderControls"
+import { filterProjects, sessionMatchesFilter } from "./sidebar-filtering"
 import { loadSidebarPrefs, saveSidebarPrefs, type SidebarPrefs } from "./sidebar-prefs"
 import { ActiveThreadSpinner } from "./ActiveThreadSpinner"
 import { useI18n } from "../i18n/I18nContext"
@@ -142,7 +144,6 @@ export function Sidebar(props: SidebarProps) {
   const { selection } = props
   const [prefs, setPrefs] = useState<SidebarPrefs>(loadSidebarPrefs)
   const [filterText, setFilterText] = useState("")
-  // Search, Inbox, collapse and Settings live in the activity bar on the far left.
 
   const updatePrefs = (patch: Partial<SidebarPrefs>) => {
     setPrefs(prev => {
@@ -152,46 +153,25 @@ export function Sidebar(props: SidebarProps) {
     })
   }
 
-  const q = filterText.trim().toLowerCase()
-  const sessionMatchesFilter = (session: Conversation): boolean => {
-    const entry = props.inbox[session.id]
-    const isUnread = props.unreadIds.includes(session.id) || Boolean(entry?.needsYou)
-    if (prefs.unreadOnly && !isUnread) return false
-    if (prefs.pinnedOnly && !props.pinnedIds.includes(session.id)) return false
-    if (q && !session.label.toLowerCase().includes(q) && !(session.workspace?.branch ?? "").toLowerCase().includes(q)) return false
-    return true
-  }
-
-  const allCodingSessions = [
-    ...Object.values(props.sessionsByProject).flat(),
-    ...props.ungroupedSessions,
-  ]
+  const filterCtx = useMemo(
+    () => ({ prefs, query: filterText.trim().toLowerCase(), inbox: props.inbox, unreadIds: props.unreadIds, pinnedIds: props.pinnedIds }),
+    [prefs, filterText, props.inbox, props.unreadIds, props.pinnedIds],
+  )
+  const allCodingSessions = useMemo(
+    () => [...Object.values(props.sessionsByProject).flat(), ...props.ungroupedSessions],
+    [props.sessionsByProject, props.ungroupedSessions],
+  )
   const hasUnread = props.unreadIds.length > 0 || props.inboxCount > 0
   const hasCompleted = allCodingSessions.some(s => s.status !== "working")
-
-  const filteredProjects = props.projects.filter(project => {
-    if (prefs.projectFilter && project.id !== prefs.projectFilter) return false
-    if (prefs.pinnedOnly && !props.pinnedIds.includes(`project:${project.id}`)) {
-      const hasPinnedSession = (props.sessionsByProject[project.id] ?? []).some(s => props.pinnedIds.includes(s.id))
-      if (!hasPinnedSession) return false
-    }
-    if (prefs.unreadOnly) {
-      const hasUnreadSession = (props.sessionsByProject[project.id] ?? []).some(s => props.unreadIds.includes(s.id) || Boolean(props.inbox[s.id]?.needsYou))
-      if (!hasUnreadSession) return false
-    }
-    if (q) {
-      const matchesName = project.name.toLowerCase().includes(q)
-      const matchesSession = (props.sessionsByProject[project.id] ?? []).some(sessionMatchesFilter)
-      if (!matchesName && !matchesSession) return false
-    }
-    return true
-  })
-
-  const statusGroups = (() => {
+  const filteredProjects = useMemo(
+    () => filterProjects(props.projects, props.sessionsByProject, filterCtx),
+    [props.projects, props.sessionsByProject, filterCtx],
+  )
+  const statusGroups = useMemo(() => {
     if (prefs.groupBy !== "status") return []
     const relevant = allCodingSessions.filter(s => {
       if (prefs.projectFilter && s.projectId !== prefs.projectFilter) return false
-      return sessionMatchesFilter(s)
+      return sessionMatchesFilter(s, filterCtx)
     })
     const buckets: { id: string; label: string; items: Conversation[] }[] = [
       { id: "attention", label: t("sidebar.needsAttention"), items: [] },
@@ -205,7 +185,7 @@ export function Sidebar(props: SidebarProps) {
       else buckets[2].items.push(s)
     }
     return buckets.filter(b => b.items.length > 0)
-  })()
+  }, [allCodingSessions, filterCtx, prefs.groupBy, prefs.projectFilter, props.inbox, t])
 
   return (
     <aside className={`ade-sidebar ${prefs.compact ? "is-compact" : ""}`} style={{ width: `${props.width}px` }} aria-label={t("sidebar.workspaceNavAria")}>
@@ -259,7 +239,9 @@ export function Sidebar(props: SidebarProps) {
                 statusGroups.map(group => (
                   <div key={group.id} className="mb-1.5">
                     <div className="ade-sidebar-status-label">{group.label} ({group.items.length})</div>
-                    {group.items.map(session => <SessionRow key={session.id} session={session} props={props} child={false} />)}
+                    {group.items.map(session => (
+                      <SessionRow key={session.id} session={session} props={props} child={false} />
+                    ))}
                   </div>
                 ))
               )}
@@ -279,7 +261,7 @@ export function Sidebar(props: SidebarProps) {
                 const showPinnedDivider = pinned && nextProject && !props.pinnedIds.includes(`project:${nextProject.id}`)
                 const expanded = props.expandedProjects.includes(project.id)
                 const rawSessions = props.sessionsByProject[project.id] ?? []
-                const sessions = (prefs.unreadOnly || prefs.pinnedOnly || q) ? rawSessions.filter(sessionMatchesFilter) : rawSessions
+                const sessions = (prefs.unreadOnly || prefs.pinnedOnly || filterCtx.query) ? rawSessions.filter(s => sessionMatchesFilter(s, filterCtx)) : rawSessions
                 const attention = rawSessions.filter(session => props.inbox[session.id]?.needsYou).length
                 const working = rawSessions.filter(session => props.inbox[session.id]?.state === "working" || session.status === "working").length
                 return (
@@ -345,47 +327,47 @@ export function Sidebar(props: SidebarProps) {
                   </div>
                 )
               })}
-              {props.ungroupedSessions.filter(sessionMatchesFilter).map(session => <SessionRow key={session.id} session={session} props={props} child={false} />)}
+              {props.ungroupedSessions.filter(s => sessionMatchesFilter(s, filterCtx)).map(session => <SessionRow key={session.id} session={session} props={props} child={false} />)}
             </div>
           )}
         </div>
 
         {!prefs.hideChats ? (
-        <div>
-          <div className="ade-nav-section-head">
-            <span>{t("sidebar.chats")}</span>
-            <button type="button" className="ade-icon-btn" title={t("sidebar.newChat")} aria-label={t("sidebar.newChat")} onClick={props.onNewChat}>
-              <Plus className="size-3.5" />
-            </button>
+          <div>
+            <div className="ade-nav-section-head">
+              <span>{t("sidebar.chats")}</span>
+              <button type="button" className="ade-icon-btn" title={t("sidebar.newChat")} aria-label={t("sidebar.newChat")} onClick={props.onNewChat}>
+                <Plus className="size-3.5" />
+              </button>
+            </div>
+            <div className="ade-nav-list">
+              {props.chats.map(session => {
+                const entry = props.inbox[session.id]
+                const selected = props.selection.kind === "session" && props.selection.sessionId === session.id
+                const unread = props.unreadIds.includes(session.id)
+                const working = isSessionWorking(session, entry)
+                return (
+                  <div
+                    key={session.id}
+                    role="button"
+                    tabIndex={0}
+                    className={`ade-nav-row ${selected ? "is-selected" : ""}`}
+                    onClick={() => props.onOpenSession(session)}
+                    onKeyDown={event => { if (event.key === "Enter") props.onOpenSession(session) }}
+                    onContextMenu={event => {
+                      event.preventDefault()
+                      props.onContextMenu({ kind: "session", session, x: event.clientX, y: event.clientY })
+                    }}
+                  >
+                    {session.mode === "personal" ? <MessageCircle className="size-3.5 shrink-0 opacity-70" /> : <MessageSquare className="size-3.5 shrink-0 opacity-70" />}
+                    <RowLabel session={session} props={props} unread={unread} />
+                    {props.pinnedIds.includes(session.id) ? <Pin className="size-3 shrink-0 opacity-55" aria-label={t("common.pinned")} /> : null}
+                    {working ? <ActiveThreadSpinner className="ade-row-icon is-running" title={`${sessionStateInfo.working.label} — ${sessionStateInfo.working.hint}`} /> : null}
+                  </div>
+                )
+              })}
+            </div>
           </div>
-          <div className="ade-nav-list">
-            {props.chats.map(session => {
-              const entry = props.inbox[session.id]
-              const selected = props.selection.kind === "session" && props.selection.sessionId === session.id
-              const unread = props.unreadIds.includes(session.id)
-              const working = isSessionWorking(session, entry)
-              return (
-                <div
-                  key={session.id}
-                  role="button"
-                  tabIndex={0}
-                  className={`ade-nav-row ${selected ? "is-selected" : ""}`}
-                  onClick={() => props.onOpenSession(session)}
-                  onKeyDown={event => { if (event.key === "Enter") props.onOpenSession(session) }}
-                  onContextMenu={event => {
-                    event.preventDefault()
-                    props.onContextMenu({ kind: "session", session, x: event.clientX, y: event.clientY })
-                  }}
-                >
-                  {session.mode === "personal" ? <MessageCircle className="size-3.5 shrink-0 opacity-70" /> : <MessageSquare className="size-3.5 shrink-0 opacity-70" />}
-                  <RowLabel session={session} props={props} unread={unread} />
-                  {props.pinnedIds.includes(session.id) ? <Pin className="size-3 shrink-0 opacity-55" aria-label={t("common.pinned")} /> : null}
-                  {working ? <ActiveThreadSpinner className="ade-row-icon is-running" title={`${sessionStateInfo.working.label} — ${sessionStateInfo.working.hint}`} /> : null}
-                </div>
-              )
-            })}
-          </div>
-        </div>
         ) : null}
 
         {props.archivedProjects.length + props.archivedSessions.length > 0 ? (
@@ -435,7 +417,7 @@ export function Sidebar(props: SidebarProps) {
           <span className={`ade-state-dot is-${props.runtimeOnline ? "ok" : "waiting"}`} />
           <Server className="size-3 shrink-0" />
           <span className="ade-truncate flex-1">{props.environmentName}</span>
-          {props.live ? <span className="ade-pill ade-pill-ok !text-[9.5px] !py-0">{t("sidebar.live")}</span> : null}
+          {props.live ? <Badge tone="ok" className="!text-[9.5px]">{t("sidebar.live")}</Badge> : null}
         </button>
       </div>
     </aside>

@@ -7,18 +7,22 @@ import type { Conversation, SessionTaskItem, SubagentInfo, TimelineItem } from "
 import { requestJson } from "../../api"
 import type { TeamTask, TeamView } from "./team-types"
 import { ago, buildEvents, linksOf, partsOf, summarizePart, LIVE_MS, type FlowEvent, type Part, type Party, type RunInput } from "./run-model"
+import { useI18n } from "../i18n/I18nContext"
+import type { TranslationKey, TranslationVars } from "../i18n/index"
 
-const PART_INFO: Record<Part, { name: string; color: string; icon: typeof Bot; hint: string }> = {
-  brief: { name: "Brief", color: "#a78bfa", icon: FileText, hint: "What you asked for, and the blueprint it follows." },
-  handouts: { name: "Handouts", color: "#60a5fa", icon: Send, hint: "Work the main agent handed to subagents." },
-  stages: { name: "Stages", color: "#c084fc", icon: Workflow, hint: "The blueprint's stages, and your approvals." },
-  tasks: { name: "Task board", color: "#38bdf8", icon: ListChecks, hint: "The agent's task list and where each task is." },
-  plans: { name: "Plan approval", color: "#f5b941", icon: ClipboardList, hint: "Members show their plan for a task before they work on it; the lead or you approve it or send it back." },
-  board: { name: "Team board", color: "#2dd4bf", icon: MessagesSquare, hint: "Questions, findings and answers the agents (and you) post for each other." },
-  claims: { name: "File claims", color: "#f472b6", icon: FileLock2, hint: "Files an agent claimed before editing; others are refused until it releases them." },
-  changes: { name: "Changes", color: "#fb923c", icon: FileDiff, hint: "Files each agent wrote or edited." },
-  reports: { name: "Reports", color: "#34d399", icon: ClipboardCheck, hint: "What subagents reported back to the main agent." },
-  summary: { name: "Summary", color: "#facc15", icon: MessageSquareText, hint: "The main agent's answer to you." },
+type TranslateFn = (key: TranslationKey, vars?: TranslationVars) => string
+
+const PART_INFO: Record<Part, { nameKey: TranslationKey; color: string; icon: typeof Bot; hintKey: TranslationKey }> = {
+  brief: { nameKey: "swx.flow.part.brief.name", color: "#a78bfa", icon: FileText, hintKey: "swx.flow.part.brief.hint" },
+  handouts: { nameKey: "swx.flow.part.handouts.name", color: "#60a5fa", icon: Send, hintKey: "swx.flow.part.handouts.hint" },
+  stages: { nameKey: "swx.flow.part.stages.name", color: "#c084fc", icon: Workflow, hintKey: "swx.flow.part.stages.hint" },
+  tasks: { nameKey: "swx.flow.part.tasks.name", color: "#38bdf8", icon: ListChecks, hintKey: "swx.flow.part.tasks.hint" },
+  plans: { nameKey: "swx.flow.part.plans.name", color: "#f5b941", icon: ClipboardList, hintKey: "swx.flow.part.plans.hint" },
+  board: { nameKey: "swx.flow.part.board.name", color: "#2dd4bf", icon: MessagesSquare, hintKey: "swx.flow.part.board.hint" },
+  claims: { nameKey: "swx.flow.part.claims.name", color: "#f472b6", icon: FileLock2, hintKey: "swx.flow.part.claims.hint" },
+  changes: { nameKey: "swx.flow.part.changes.name", color: "#fb923c", icon: FileDiff, hintKey: "swx.flow.part.changes.hint" },
+  reports: { nameKey: "swx.flow.part.reports.name", color: "#34d399", icon: ClipboardCheck, hintKey: "swx.flow.part.reports.hint" },
+  summary: { nameKey: "swx.flow.part.summary.name", color: "#facc15", icon: MessageSquareText, hintKey: "swx.flow.part.summary.hint" },
 }
 
 const HARNESS: Record<string, { name: string; mark: string; color: string }> = {
@@ -49,13 +53,14 @@ export type FlowViewProps = {
   onTeamChanged?: () => void
 }
 
-function memberTone(sub: SubagentInfo, busy: boolean, queued: boolean): { tone: MemberTone; text: string } {
-  if (queued) return { tone: "queued", text: "queued" }
-  if (busy || sub.status === "running") return { tone: "working", text: "working" }
-  if (sub.status === "waiting") return { tone: "attention", text: "waiting" }
-  if (sub.status === "completed") return { tone: "done", text: "done" }
-  if (sub.status === "failed" || sub.status === "blocked") return { tone: "failed", text: sub.status }
-  return { tone: "idle", text: "idle" }
+function memberTone(sub: SubagentInfo, busy: boolean, queued: boolean, t: TranslateFn): { tone: MemberTone; text: string } {
+  if (queued) return { tone: "queued", text: t("swx.flow.state.queued") }
+  if (busy || sub.status === "running") return { tone: "working", text: t("swx.flow.state.working") }
+  if (sub.status === "waiting") return { tone: "attention", text: t("swx.flow.state.waiting") }
+  if (sub.status === "completed") return { tone: "done", text: t("swx.flow.state.done") }
+  if (sub.status === "failed") return { tone: "failed", text: t("swx.flow.state.failed") }
+  if (sub.status === "blocked") return { tone: "failed", text: t("swx.flow.state.blocked") }
+  return { tone: "idle", text: t("swx.flow.state.idle") }
 }
 
 function Avatar({ harness, size = 28 }: { harness?: string; size?: number }) {
@@ -87,6 +92,7 @@ function useWidth(ref: React.RefObject<HTMLElement | null>) {
 }
 
 export function FlowView(props: FlowViewProps) {
+  const { t } = useI18n()
   const { session, leadBusy, leadItems, subagents, subagentTimelines, tasks, stageHistory, blueprintName } = props
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
@@ -113,7 +119,7 @@ export function FlowView(props: FlowViewProps) {
   const first = events[0]?.at ?? session.createdAt ?? null
   const last = events.at(-1)?.at ?? session.updatedAt ?? null
   const needsYou = (props.waitingStage ? 1 : 0) + subagents.filter(sub => sub.status === "failed").length
-  const mode = subagents.length ? "Team" : "Solo"
+  const mode = subagents.length ? t("swx.flow.modeTeam") : t("swx.flow.modeSolo")
 
   return (
     <div className="ade-flow">
@@ -122,42 +128,42 @@ export function FlowView(props: FlowViewProps) {
         <div className="min-w-0">
           <h2 className="ade-truncate">{session.label}</h2>
           <div className="ade-flow-chips">
-            <span className="ade-flow-chip is-mode">{blueprintName ? `${blueprintName} · ${mode}` : `${mode} · Vibe coding`}</span>
-            <span className={`ade-flow-chip ${working ? "is-active" : ""}`}><span className="ade-flow-dot" />{working ? "Active" : "Idle"}</span>
-            {props.waitingStage ? <span className="ade-flow-chip is-warn"><ClipboardCheck className="size-3" /> {props.waitingStage} needs your approval</span> : null}
-            {needsYou && !props.waitingStage ? <span className="ade-flow-chip is-warn">{needsYou} need you</span> : null}
+            <span className="ade-flow-chip is-mode">{blueprintName ? `${blueprintName} · ${mode}` : `${mode} · ${t("swx.flow.vibeCoding")}`}</span>
+            <span className={`ade-flow-chip ${working ? "is-active" : ""}`}><span className="ade-flow-dot" />{working ? t("swx.flow.active") : t("swx.flow.idle")}</span>
+            {props.waitingStage ? <span className="ade-flow-chip is-warn"><ClipboardCheck className="size-3" /> {t("swx.flow.stageNeedsApproval", { stage: props.waitingStage })}</span> : null}
+            {needsYou && !props.waitingStage ? <span className="ade-flow-chip is-warn">{t("swx.flow.needYou", { count: needsYou })}</span> : null}
           </div>
         </div>
       </header>
 
       <dl className="ade-flow-stats">
-        <div><dt>Lead</dt><dd><span className="ade-flow-dot" style={{ background: "#8b5cf6" }} />Main agent</dd></div>
-        <div><dt>Way of working</dt><dd>{blueprintName ?? "Vibe coding"}</dd></div>
-        <div><dt>Started</dt><dd>{first ? new Date(first).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}</dd></div>
-        <div><dt>Last change</dt><dd>{last ? ago(last, now) : "—"}</dd></div>
-        <div><dt>Running for</dt><dd>{first && last ? duration((working ? now : last) - first) : "—"}</dd></div>
-        {props.cost ? <div><dt>Cost</dt><dd>${props.cost.toFixed(2)}</dd></div> : null}
+        <div><dt>{t("swx.flow.statLead")}</dt><dd><span className="ade-flow-dot" style={{ background: "#8b5cf6" }} />{t("swx.flow.mainAgent")}</dd></div>
+        <div><dt>{t("swx.flow.statWayOfWorking")}</dt><dd>{blueprintName ?? t("swx.flow.vibeCoding")}</dd></div>
+        <div><dt>{t("swx.flow.statStarted")}</dt><dd>{first ? new Date(first).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}</dd></div>
+        <div><dt>{t("swx.flow.statLastChange")}</dt><dd>{last ? ago(last, now) : "—"}</dd></div>
+        <div><dt>{t("swx.flow.statRunningFor")}</dt><dd>{first && last ? duration((working ? now : last) - first, t) : "—"}</dd></div>
+        {props.cost ? <div><dt>{t("swx.flow.statCost")}</dt><dd>${props.cost.toFixed(2)}</dd></div> : null}
       </dl>
 
-      <section className="ade-flow-members" aria-label="Members">
-        <h3><Users className="size-3.5" /> Members <span>{subagents.length + 1}</span></h3>
+      <section className="ade-flow-members" aria-label={t("swx.flow.members")}>
+        <h3><Users className="size-3.5" /> {t("swx.flow.members")} <span>{subagents.length + 1}</span></h3>
         <div className="ade-flow-member-row">
           <div className="ade-flow-member">
             <Avatar />
             <div className="min-w-0">
-              <strong>Main agent</strong>
-              <span className="ade-mono">lead · Pi Durable</span>
+              <strong>{t("swx.flow.mainAgent")}</strong>
+              <span className="ade-mono">{t("swx.flow.leadRole")} · Pi Durable</span>
             </div>
-            <span className="ade-flow-member-state" style={{ color: leadBusy ? TONE.working : TONE.idle }}>{leadBusy ? "working" : "idle"}</span>
+            <span className="ade-flow-member-state" style={{ color: leadBusy ? TONE.working : TONE.idle }}>{leadBusy ? t("swx.flow.state.working") : t("swx.flow.state.idle")}</span>
           </div>
           {subagents.map(sub => {
-            const state = memberTone(sub, busyOf(sub), props.queued?.includes(sub.id) ?? false)
+            const state = memberTone(sub, busyOf(sub), props.queued?.includes(sub.id) ?? false, t)
             return (
-              <button type="button" key={sub.id} className={`ade-flow-member ${state.tone === "done" ? "is-done" : ""}`} onClick={() => props.onOpenAgent?.(sub.id)} title="Open this agent">
+              <button type="button" key={sub.id} className={`ade-flow-member ${state.tone === "done" ? "is-done" : ""}`} onClick={() => props.onOpenAgent?.(sub.id)} title={t("swx.flow.openAgentTitle")}>
                 <Avatar harness={sub.harness ?? "pi"} />
                 <div className="min-w-0">
-                  <strong className="ade-truncate">{sub.name || "Subagent"}</strong>
-                  <span className="ade-mono ade-truncate">{[sub.role || "member", HARNESS[sub.harness ?? "pi"]?.name, sub.model && sub.model !== HARNESS[sub.harness ?? "pi"]?.name ? sub.model : ""].filter(Boolean).join(" · ")}</span>
+                  <strong className="ade-truncate">{sub.name || t("swx.flow.subagent")}</strong>
+                  <span className="ade-mono ade-truncate">{[sub.role || t("swx.flow.memberRole"), HARNESS[sub.harness ?? "pi"]?.name, sub.model && sub.model !== HARNESS[sub.harness ?? "pi"]?.name ? sub.model : ""].filter(Boolean).join(" · ")}</span>
                 </div>
                 <span className="ade-flow-member-state" style={{ color: TONE[state.tone] }}>{state.text}</span>
               </button>
@@ -181,19 +187,19 @@ export function FlowView(props: FlowViewProps) {
 
       {page ? (
         <section className="ade-flow-page">
-          <nav className="ade-flow-tabs" aria-label="Parts">
+          <nav className="ade-flow-tabs" aria-label={t("swx.flow.partsAria")}>
             {parts.map(part => {
               const info = PART_INFO[part]
               const Icon = info.icon
               const count = events.filter(event => event.part === part && event.direction === "in").length
               return (
                 <button key={part} type="button" className={page === part ? "is-active" : ""} onClick={() => setSelected(part)} style={{ "--part": info.color } as CSSProperties}>
-                  <Icon className="size-3.5" /> {info.name} {count ? <span>{count}</span> : null}
+                  <Icon className="size-3.5" /> {t(info.nameKey)} {count ? <span>{count}</span> : null}
                 </button>
               )
             })}
             <button type="button" className={page === "all" ? "is-active" : ""} onClick={() => setSelected("all")}>
-              <Activity className="size-3.5" /> All flows <span>{events.length}</span>
+              <Activity className="size-3.5" /> {t("swx.flow.allFlows")} <span>{events.length}</span>
             </button>
           </nav>
           {page === "all" ? <FlowList events={[...events].reverse()} subagents={subagents} now={now} />
@@ -204,15 +210,17 @@ export function FlowView(props: FlowViewProps) {
   )
 }
 
-function duration(ms: number) {
+function duration(ms: number, t: TranslateFn) {
   const minutes = Math.max(0, Math.round(ms / 60_000))
-  return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`
+  return minutes < 60
+    ? t("swx.flow.durationMin", { minutes })
+    : t("swx.flow.durationHourMin", { hours: Math.floor(minutes / 60), minutes: minutes % 60 })
 }
 
-function partyName(party: Party, subagents: SubagentInfo[]) {
-  if (party === "user") return "You"
-  if (party === "lead") return "Main agent"
-  return subagents.find(sub => sub.id === party)?.name || "Subagent"
+function partyName(party: Party, subagents: SubagentInfo[], t: TranslateFn) {
+  if (party === "user") return t("swx.flow.you")
+  if (party === "lead") return t("swx.flow.mainAgent")
+  return subagents.find(sub => sub.id === party)?.name || t("swx.flow.subagent")
 }
 
 type Point = { x: number; top: number; bottom: number }
@@ -230,6 +238,7 @@ function FlowDiagram({ events, parts, input, now, leadBusy, subagents, busyOf, s
   onOpen: (part: Part) => void
   aside: ReactNode
 }) {
+  const { t } = useI18n()
   const outer = useRef<HTMLDivElement>(null)
   const width = useWidth(outer)
   const stacked = width > 0 && width < 560
@@ -281,10 +290,10 @@ function FlowDiagram({ events, parts, input, now, leadBusy, subagents, busyOf, s
 
   const stateOf = (party: Party) => {
     if (party === "user") return { color: "#a1a1aa", text: "" }
-    if (party === "lead") return { color: leadBusy ? TONE.working : TONE.idle, text: leadBusy ? "working" : "idle" }
+    if (party === "lead") return { color: leadBusy ? TONE.working : TONE.idle, text: leadBusy ? t("swx.flow.state.working") : t("swx.flow.state.idle") }
     const sub = subagents.find(entry => entry.id === party)
     if (!sub) return { color: TONE.idle, text: "" }
-    const state = memberTone(sub, busyOf(sub), false)
+    const state = memberTone(sub, busyOf(sub), false, t)
     return { color: TONE[state.tone], text: state.text }
   }
 
@@ -304,11 +313,11 @@ function FlowDiagram({ events, parts, input, now, leadBusy, subagents, busyOf, s
         onClick={() => onOpen(part)}
         onMouseEnter={() => setHot(part)}
         onMouseLeave={() => setHot(null)}
-        title={info.hint}
+        title={t(info.hintKey)}
       >
         <span className="ade-flow-card-head">
           <span className="ade-flow-card-icon"><Icon className="size-4" /></span>
-          <strong>{info.name}</strong>
+          <strong>{t(info.nameKey)}</strong>
           {liveParts.has(part) ? <span className="ade-flow-live-dot" /> : null}
           <ChevronRight className="size-4 ml-auto opacity-50" />
         </span>
@@ -338,7 +347,7 @@ function FlowDiagram({ events, parts, input, now, leadBusy, subagents, busyOf, s
         <div className="ade-flow-chiprow">
           {parties.map(party => (
             <span key={party} className="ade-flow-party-chip">
-              <span className="ade-flow-dot" style={{ background: stateOf(party).color }} /> {partyName(party, subagents)}
+              <span className="ade-flow-dot" style={{ background: stateOf(party).color }} /> {partyName(party, subagents, t)}
             </span>
           ))}
         </div>
@@ -393,7 +402,7 @@ function FlowDiagram({ events, parts, input, now, leadBusy, subagents, busyOf, s
               >
                 {party === "user" ? <span className="ade-flow-avatar is-user"><User className="size-3.5" /></span> : party === "lead" ? <Avatar /> : <Avatar harness={sub?.harness ?? "pi"} />}
                 <span className="min-w-0">
-                  <strong className="ade-truncate">{partyName(party, subagents)}</strong>
+                  <strong className="ade-truncate">{partyName(party, subagents, t)}</strong>
                   {state.text ? <span className="ade-flow-party-sub"><span className="ade-flow-dot" style={{ background: state.color }} />{sub?.role ? `${sub.role} · ` : ""}{state.text}</span> : null}
                 </span>
               </div>
@@ -447,15 +456,16 @@ function LatestFlows({ events, subagents, now, onAll }: { events: FlowEvent[]; s
 }
 
 function FlowList({ events, subagents, now }: { events: FlowEvent[]; subagents: SubagentInfo[]; now: number }) {
+  const { t } = useI18n()
   return (
     <ul className="ade-flow-list">
       {events.map(event => {
         const info = PART_INFO[event.part]
-        const who = event.direction === "in" ? partyName(event.from, subagents) : event.to.map(party => partyName(party, subagents)).join(", ")
+        const who = event.direction === "in" ? partyName(event.from, subagents, t) : event.to.map(party => partyName(party, subagents, t)).join(", ")
         return (
           <li key={event.id} style={{ "--part": info.color } as CSSProperties} className={now - event.at < LIVE_MS ? "is-live" : ""}>
             <div className="ade-flow-list-head">
-              <span><strong>{info.name}</strong> · {event.direction === "in" ? who : `to ${who}`}</span>
+              <span><strong>{t(info.nameKey)}</strong> · {event.direction === "in" ? who : `to ${who}`}</span>
               <span className="ade-muted">{ago(event.at, now)}</span>
             </div>
             <p>{event.text}</p>
@@ -474,9 +484,10 @@ const COLUMNS: { status: SessionTaskItem["status"]; name: string; color: string 
 ]
 
 function PartPage({ part, sessionId, input, events, now, onOpenAgent, onOpenPart, onTeamChanged }: { part: Part; sessionId: string; input: RunInput; events: FlowEvent[]; now: number; onOpenAgent?: (id: string) => void; onOpenPart?: (part: Part) => void; onTeamChanged?: () => void }) {
+  const { t } = useI18n()
   const info = PART_INFO[part]
   const of = events.filter(event => event.part === part)
-  const intro = <p className="ade-flow-page-intro" style={{ "--part": info.color } as CSSProperties}>{info.hint}</p>
+  const intro = <p className="ade-flow-page-intro" style={{ "--part": info.color } as CSSProperties}>{t(info.hintKey)}</p>
   const team = input.team
   if (part === "tasks" && team?.tasks.length) return <div>{intro}<SharedTaskBoard team={team} subagents={input.subagents} now={now} /></div>
   if (part === "plans" && team) return <div>{intro}<PlansPage sessionId={sessionId} team={team} subagents={input.subagents} now={now} onChanged={onTeamChanged} /></div>
@@ -486,7 +497,7 @@ function PartPage({ part, sessionId, input, events, now, onOpenAgent, onOpenPart
       <div>
         {intro}
         <ul className="ade-flow-files">
-          {team.claims.map(claim => <li key={`${claim.agent}:${claim.path}`}><code>{claim.path}</code><span className="ade-muted ade-xs">held by {partyName(claim.agent, input.subagents)} · {ago(claim.at, now)}</span></li>)}
+          {team.claims.map(claim => <li key={`${claim.agent}:${claim.path}`}><code>{claim.path}</code><span className="ade-muted ade-xs">held by {partyName(claim.agent, input.subagents, t)} · {ago(claim.at, now)}</span></li>)}
           {!team.claims.length ? <li className="ade-muted">No files are claimed right now.</li> : null}
         </ul>
         <FlowList events={[...of].reverse()} subagents={input.subagents} now={now} />
@@ -557,7 +568,7 @@ function PartPage({ part, sessionId, input, events, now, onOpenAgent, onOpenPart
         {intro}
         <ul className="ade-flow-files">
           {[...files].sort((a, b) => b[1].at - a[1].at).map(([path, entry]) => (
-            <li key={path}><code>{path}</code><span className="ade-muted ade-xs">{[...entry.agents].map(party => partyName(party, input.subagents)).join(", ")} · {ago(entry.at, now)}</span></li>
+            <li key={path}><code>{path}</code><span className="ade-muted ade-xs">{[...entry.agents].map(party => partyName(party, input.subagents, t)).join(", ")} · {ago(entry.at, now)}</span></li>
           ))}
         </ul>
         {onOpenPart ? <button type="button" className="ade-chip-btn" onClick={() => onOpenPart("changes")}>Review the diff</button> : null}
@@ -590,6 +601,7 @@ const TEAM_COLUMNS: { status: TeamTask["status"]; name: string; color: string }[
 
 /** The shared task board as a kanban: owner, what a task waits for, its plan, sent back. */
 function SharedTaskBoard({ team, subagents, now }: { team: TeamView; subagents: SubagentInfo[]; now: number }) {
+  const { t } = useI18n()
   const [filter, setFilter] = useState<string>("all")
   const owners = [...new Set(team.tasks.map(task => task.owner ?? "anyone"))]
   const shown = team.tasks.filter(task => filter === "all" || (task.owner ?? "anyone") === filter)
@@ -603,7 +615,7 @@ function SharedTaskBoard({ team, subagents, now }: { team: TeamView; subagents: 
         <span className="ade-flow-progress" style={{ "--part": "#4ade80" } as CSSProperties}><span style={{ width: `${live.length ? (done / live.length) * 100 : 0}%` }} /></span>
         <span className="flex-1" />
         <div className="ade-flow-filter">
-          {["all", ...owners].map(owner => <button key={owner} type="button" className={filter === owner ? "is-active" : ""} onClick={() => setFilter(owner)}>{owner === "all" ? "All" : owner === "anyone" ? "anyone" : partyName(owner, subagents)}</button>)}
+          {["all", ...owners].map(owner => <button key={owner} type="button" className={filter === owner ? "is-active" : ""} onClick={() => setFilter(owner)}>{owner === "all" ? "All" : owner === "anyone" ? "anyone" : partyName(owner, subagents, t)}</button>)}
         </div>
       </div>
       <div className="ade-flow-board">
@@ -618,7 +630,7 @@ function SharedTaskBoard({ team, subagents, now }: { team: TeamView; subagents: 
                   <div key={task.id} className={`ade-flow-task ${task.status === "dropped" ? "is-dropped" : ""}`} title={task.detail || task.title}>
                     <div className="ade-flow-task-head">
                       <span className="ade-flow-task-id">{task.id}</span>
-                      <span className="ade-flow-task-owner">{task.owner ? partyName(task.owner, subagents) : "anyone"}</span>
+                      <span className="ade-flow-task-owner">{task.owner ? partyName(task.owner, subagents, t) : "anyone"}</span>
                       {task.plan ? <span className={`ade-flow-task-badge is-${task.plan.status}`}>{task.plan.status === "waiting" ? "plan awaiting approval" : task.plan.status === "approved" ? "plan approved" : "plan returned"}</span> : null}
                     </div>
                     <p>{task.title}</p>
@@ -640,6 +652,7 @@ function SharedTaskBoard({ team, subagents, now }: { team: TeamView; subagents: 
 
 /** Plans waiting for a decision; you can approve or return them yourself. */
 function PlansPage({ sessionId, team, subagents, now, onChanged }: { sessionId: string; team: TeamView; subagents: SubagentInfo[]; now: number; onChanged?: () => void }) {
+  const { t } = useI18n()
   const [notes, setNotes] = useState<Record<string, string>>({})
   const [error, setError] = useState("")
   const [busy, setBusy] = useState<string | null>(null)
@@ -674,7 +687,7 @@ function PlansPage({ sessionId, team, subagents, now, onChanged }: { sessionId: 
           <div className="ade-flow-task-head">
             <span className="ade-flow-task-id">{task.id}</span>
             <strong>{task.title}</strong>
-            <span className="ade-muted ade-xs">{task.owner ? partyName(task.owner, subagents) : ""} · {ago(task.plan!.at, now)}</span>
+            <span className="ade-muted ade-xs">{task.owner ? partyName(task.owner, subagents, t) : ""} · {ago(task.plan!.at, now)}</span>
             <span className={`ade-flow-task-badge is-${task.plan!.status}`}>{task.plan!.status === "waiting" ? "waiting" : task.plan!.status}</span>
           </div>
           <p className="ade-flow-plan-text">{task.plan!.text}</p>
@@ -694,6 +707,7 @@ function PlansPage({ sessionId, team, subagents, now, onChanged }: { sessionId: 
 
 /** The team board as a conversation; you can post too (an agent reads it with team_read). */
 function BoardPage({ sessionId, team, subagents, now, onChanged }: { sessionId: string; team: TeamView; subagents: SubagentInfo[]; now: number; onChanged?: () => void }) {
+  const { t } = useI18n()
   const [text, setText] = useState("")
   const [error, setError] = useState("")
   const [sending, setSending] = useState(false)
@@ -718,9 +732,9 @@ function BoardPage({ sessionId, team, subagents, now, onChanged }: { sessionId: 
       {team.posts.map(post => (
         <div key={post.seq} className={`ade-flow-post ${post.author === "user" ? "is-you" : ""}`}>
           <div className="ade-flow-post-head">
-            <strong>{partyName(post.author, subagents)}</strong>
+            <strong>{partyName(post.author, subagents, t)}</strong>
             <span className="ade-flow-post-kind" style={{ color: kindColor[post.kind] }}>{post.kind}</span>
-            <span className="ade-muted ade-xs">#{post.seq}{post.re ? ` · re #${post.re}` : ""}{post.to.length && !post.to.includes("all") ? ` · to ${post.to.map(party => partyName(party, subagents)).join(", ")}` : ""}</span>
+            <span className="ade-muted ade-xs">#{post.seq}{post.re ? ` · re #${post.re}` : ""}{post.to.length && !post.to.includes("all") ? ` · to ${post.to.map(party => partyName(party, subagents, t)).join(", ")}` : ""}</span>
             <span className="ade-muted ade-xs ml-auto">{ago(post.at, now)}</span>
           </div>
           <p>{post.text}</p>

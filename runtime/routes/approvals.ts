@@ -1,6 +1,10 @@
-import { badRequest } from "../http-error.ts";
 import type { Router } from "../router.ts";
-import { validateApprovalPolicy, validateApprovalResolve, validateProcessInput } from "../validators.ts";
+import {
+	validateApprovalPolicy,
+	validateApprovalResolve,
+	validateApprovalRuleCreate,
+	validateProcessInput,
+} from "../validators.ts";
 import type { RouteDeps } from "./context.ts";
 
 export function registerApprovalRoutes(router: Router, { host }: RouteDeps): void {
@@ -35,12 +39,8 @@ export function registerApprovalRoutes(router: Router, { host }: RouteDeps): voi
 	router.post(
 		"/api/approvals/rules",
 		async (ctx) => {
-			const body = await ctx.readBody();
-			const prefix = typeof body.prefix === "string" ? body.prefix.trim() : "";
-			if (!prefix || prefix.length > 300) throw badRequest("Enter a command prefix, like git push or rm -rf.");
-			const effect = body.effect === "deny" ? "deny" : "allow";
-			const toolName = typeof body.toolName === "string" && /^(run_command|mcp_[\w.-]{1,120})$/.test(body.toolName) ? body.toolName : "run_command";
-			host.approvals.addRule(toolName, prefix, effect);
+			const input = validateApprovalRuleCreate(await ctx.readBody());
+			host.approvals.addRule(input.toolName, input.prefix, input.effect);
 			ctx.json(200, { rules: host.approvals.listRules() });
 		},
 		{ originError: "Use ADE to manage approval rules." },

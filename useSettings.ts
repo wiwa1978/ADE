@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react"
-import { isAccentColor, isColorPalette, isTheme, paletteVariables, resolveAccentHex, type ColorPalette, type Theme } from "./appearance-palettes"
+import { useCallback, useEffect, useState } from "react"
+import { z } from "zod"
+import { isAccentColor, paletteVariables, resolveAccentHex, type ColorPalette, type Theme } from "./appearance-palettes"
+import { ReasoningLevelSchema } from "./packages/protocol/index.ts"
 import { ensureGoogleFontLoaded } from "./src/appearance/fonts"
 import {
   DEFAULT_FORMAT_PREFERENCES, DEFAULT_LANGUAGE, getLanguageMeta, isCurrencyCode, isDateFormatPreference, isLanguageCode, isTimeFormatPreference, setCurrentLanguage, t,
   type DateFormatPreference, type LanguageCode, type TimeFormatPreference,
 } from "./src/i18n"
-import { CUSTOM_ACTION_OPTIONS, type CustomKeybinding } from "./src/keybindings"
+import { CUSTOM_ACTION_OPTIONS, type CustomKeybinding, type CustomKeybindingAction } from "./src/keybindings"
 
 export type Settings = {
   /** Interface display language (e.g. "en", "nl"). */
@@ -90,68 +92,93 @@ const defaults: Settings = {
   customKeybindings: [],
 }
 
+const ThemeSchema = z.enum(["light", "dark", "system"])
+const ColorPaletteSchema = z.enum(["graphite", "paseo", "sand", "slate", "nord", "sage", "ash", "amber", "dusk"])
+const PlatformSchema = z.enum(["local", "docker", "cloud-docker", "boat"])
+const ReasoningSettingSchema = z.enum([...ReasoningLevelSchema.options, "none", "xhigh", "max"])
+const HighlightThemeSchema = z.enum(["auto", "github", "monochrome"])
+const WorkspaceKindSchema = z.enum(["worktree", "checkout", "none"])
+
+const customActionIds = CUSTOM_ACTION_OPTIONS.map(o => o.action) as [CustomKeybindingAction, ...CustomKeybindingAction[]]
+const CustomKeybindingSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  action: z.enum(customActionIds),
+  arg: z.string().optional(),
+  chord: z.string(),
+})
+
+const KeybindingsRecordSchema = z
+  .record(z.string(), z.unknown())
+  .transform((entries) => {
+    const cleaned: Record<string, string> = {}
+    for (const [k, v] of Object.entries(entries)) {
+      if (typeof v === "string" && v.length <= 64) cleaned[k] = v
+    }
+    return cleaned
+  })
+  .catch({})
+
+const CustomKeybindingsListSchema = z
+  .array(z.unknown())
+  .transform((items): CustomKeybinding[] => {
+    const valid: CustomKeybinding[] = []
+    for (const item of items) {
+      if (valid.length >= 40) break
+      const parsed = CustomKeybindingSchema.safeParse(item)
+      if (parsed.success) valid.push(parsed.data)
+    }
+    return valid
+  })
+  .catch([])
+
+const PersistedSettingsSchema = z.object({
+  language: z.custom<LanguageCode>(isLanguageCode).catch(defaults.language),
+  dateFormat: z.custom<DateFormatPreference>(isDateFormatPreference).catch(defaults.dateFormat),
+  timeFormat: z.custom<TimeFormatPreference>(isTimeFormatPreference).catch(defaults.timeFormat),
+  currency: z.string().refine(isCurrencyCode).catch(defaults.currency),
+  theme: ThemeSchema.catch(defaults.theme),
+  palette: ColorPaletteSchema.catch(defaults.palette),
+  accentColor: z.string().refine(isAccentColor).catch(defaults.accentColor),
+  model: z.string().catch(defaults.model),
+  provider: z.string().max(64).catch(defaults.provider),
+  platform: PlatformSchema.catch("local"),
+  reasoning: ReasoningSettingSchema.catch("medium"),
+  terminalFontSize: z.number().int().min(10).max(20).catch(defaults.terminalFontSize),
+  terminalScrollback: z.number().int().min(500).max(20_000).catch(defaults.terminalScrollback),
+  interfaceFont: z.string().transform(s => s.slice(0, 200)).catch(defaults.interfaceFont),
+  interfaceSize: z.number().int().min(11).max(20).catch(defaults.interfaceSize),
+  contentSize: z.number().int().min(12).max(22).catch(defaults.contentSize),
+  codeFont: z.string().transform(s => s.slice(0, 200)).catch(defaults.codeFont),
+  codeSize: z.number().int().min(10).max(18).catch(defaults.codeSize),
+  contentWidth: z.number().int().min(640).max(1200).catch(defaults.contentWidth),
+  highlightTheme: HighlightThemeSchema.catch(defaults.highlightTheme),
+  defaultWorkspaceKind: WorkspaceKindSchema.catch(defaults.defaultWorkspaceKind),
+  archiveRemovesWorktree: z.boolean().catch(defaults.archiveRemovesWorktree),
+  terminalAutoStart: z.boolean().catch(defaults.terminalAutoStart),
+  prDraft: z.boolean().catch(defaults.prDraft),
+  notifyOnFinish: z.boolean().catch(defaults.notifyOnFinish),
+  notifyOnApproval: z.boolean().catch(defaults.notifyOnApproval),
+  restoreLastView: z.boolean().catch(defaults.restoreLastView),
+  monthlyBudget: z.number().finite().min(0).max(1_000_000).catch(defaults.monthlyBudget),
+  keybindings: KeybindingsRecordSchema,
+  customKeybindings: CustomKeybindingsListSchema,
+})
+
 function readSettings(): { settings: Settings; error: string } {
   try {
     const raw = localStorage.getItem(storageKey)
     if (!raw) return { settings: defaults, error: "" }
     const saved: unknown = JSON.parse(raw)
-    if (!saved || typeof saved !== "object") throw new Error("Invalid saved settings")
-    const value = saved as Partial<Settings>
-    const language = isLanguageCode(value.language) ? value.language : defaults.language
-    setCurrentLanguage(language)
+    if (!saved || typeof saved !== "object" || Array.isArray(saved)) {
+      throw new Error("Invalid saved settings")
+    }
+    const parsed = PersistedSettingsSchema.parse(saved)
+    setCurrentLanguage(parsed.language)
     return {
       settings: {
-        language,
-        dateFormat: isDateFormatPreference(value.dateFormat) ? value.dateFormat : defaults.dateFormat,
-        timeFormat: isTimeFormatPreference(value.timeFormat) ? value.timeFormat : defaults.timeFormat,
-        currency: isCurrencyCode(value.currency) ? value.currency : defaults.currency,
-        theme: isTheme(value.theme) ? value.theme : defaults.theme,
-        palette: isColorPalette(value.palette) ? value.palette : defaults.palette,
-        accentColor: isAccentColor(value.accentColor) ? value.accentColor : defaults.accentColor,
-        model: typeof value.model === "string" ? value.model : defaults.model,
-        provider: typeof value.provider === "string" && value.provider.length <= 64 ? value.provider : "",
+        ...parsed,
         harness: defaults.harness,
-        platform: ["local", "docker", "cloud-docker", "boat"].includes(value.platform ?? "") ? value.platform! : defaults.platform,
-        reasoning: ["none", "off", "low", "medium", "high", "xhigh", "max"].includes(value.reasoning ?? "") ? value.reasoning! : defaults.reasoning,
-        terminalFontSize: typeof value.terminalFontSize === "number" && Number.isInteger(value.terminalFontSize) && value.terminalFontSize >= 10 && value.terminalFontSize <= 20 ? value.terminalFontSize : defaults.terminalFontSize,
-        terminalScrollback: typeof value.terminalScrollback === "number" && Number.isInteger(value.terminalScrollback) && value.terminalScrollback >= 500 && value.terminalScrollback <= 20_000 ? value.terminalScrollback : defaults.terminalScrollback,
-        interfaceFont: typeof value.interfaceFont === "string" ? value.interfaceFont.slice(0, 200) : defaults.interfaceFont,
-        interfaceSize: typeof value.interfaceSize === "number" && Number.isInteger(value.interfaceSize) && value.interfaceSize >= 11 && value.interfaceSize <= 20 ? value.interfaceSize : defaults.interfaceSize,
-        contentSize: typeof value.contentSize === "number" && Number.isInteger(value.contentSize) && value.contentSize >= 12 && value.contentSize <= 22 ? value.contentSize : defaults.contentSize,
-        codeFont: typeof value.codeFont === "string" ? value.codeFont.slice(0, 200) : defaults.codeFont,
-        codeSize: typeof value.codeSize === "number" && Number.isInteger(value.codeSize) && value.codeSize >= 10 && value.codeSize <= 18 ? value.codeSize : defaults.codeSize,
-        contentWidth: typeof value.contentWidth === "number" && Number.isInteger(value.contentWidth) && value.contentWidth >= 640 && value.contentWidth <= 1200 ? value.contentWidth : defaults.contentWidth,
-        highlightTheme: value.highlightTheme === "github" || value.highlightTheme === "monochrome" ? value.highlightTheme : "auto",
-        defaultWorkspaceKind: value.defaultWorkspaceKind === "checkout" || value.defaultWorkspaceKind === "none" ? value.defaultWorkspaceKind : defaults.defaultWorkspaceKind,
-        archiveRemovesWorktree: typeof value.archiveRemovesWorktree === "boolean" ? value.archiveRemovesWorktree : defaults.archiveRemovesWorktree,
-        terminalAutoStart: typeof value.terminalAutoStart === "boolean" ? value.terminalAutoStart : defaults.terminalAutoStart,
-        prDraft: typeof value.prDraft === "boolean" ? value.prDraft : defaults.prDraft,
-        notifyOnFinish: typeof value.notifyOnFinish === "boolean" ? value.notifyOnFinish : defaults.notifyOnFinish,
-        notifyOnApproval: typeof value.notifyOnApproval === "boolean" ? value.notifyOnApproval : defaults.notifyOnApproval,
-        restoreLastView: typeof value.restoreLastView === "boolean" ? value.restoreLastView : defaults.restoreLastView,
-        monthlyBudget: typeof value.monthlyBudget === "number" && Number.isFinite(value.monthlyBudget) && value.monthlyBudget >= 0 && value.monthlyBudget <= 1_000_000 ? value.monthlyBudget : defaults.monthlyBudget,
-        keybindings: (() => {
-          if (!value.keybindings || typeof value.keybindings !== "object" || Array.isArray(value.keybindings)) return {}
-          const cleaned: Record<string, string> = {}
-          for (const [k, v] of Object.entries(value.keybindings)) {
-            if (typeof k === "string" && typeof v === "string" && v.length <= 64) cleaned[k] = v
-          }
-          return cleaned
-        })(),
-        customKeybindings: (() => {
-          if (!Array.isArray(value.customKeybindings)) return []
-          const allowedActions = new Set(CUSTOM_ACTION_OPTIONS.map(o => o.action))
-          return value.customKeybindings
-            .filter((item): item is CustomKeybinding =>
-              Boolean(item)
-              && typeof item === "object"
-              && typeof item.id === "string"
-              && typeof item.label === "string"
-              && typeof item.chord === "string"
-              && allowedActions.has(item.action),
-            )
-            .slice(0, 40)
-        })(),
       },
       error: "",
     }
@@ -170,9 +197,9 @@ export function useSettings() {
   const resolved = settings.theme === "system" ? (systemDark ? "dark" : "light") : settings.theme
   useEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)")
-    const update = () => setSystemDark(media.matches)
-    media.addEventListener("change", update)
-    return () => media.removeEventListener("change", update)
+    const onChange = () => setSystemDark(media.matches)
+    media.addEventListener("change", onChange)
+    return () => media.removeEventListener("change", onChange)
   }, [])
   useEffect(() => {
     const root = document.documentElement
@@ -211,18 +238,20 @@ export function useSettings() {
     Object.entries(paletteVariables(settings.palette, resolved, settings.accentColor)).forEach(([name, value]) => root.style.setProperty(name, value))
   }, [settings.language, settings.palette, settings.accentColor, resolved, settings.interfaceFont, settings.interfaceSize, settings.contentSize, settings.codeFont, settings.codeSize, settings.contentWidth, settings.highlightTheme])
 
-  function update(patch: Partial<Settings>) {
-    const next = { ...settings, ...patch }
+  const update = useCallback((patch: Partial<Settings>) => {
     if (patch.language) setCurrentLanguage(patch.language)
-    setSettings(next)
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(next))
-      setError("")
-    } catch (cause) {
-      console.warn("Could not save settings", cause)
-      setError(t("settings.error.save"))
-    }
-  }
+    setSettings(prev => {
+      const next = { ...prev, ...patch }
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(next))
+        setError("")
+      } catch (cause) {
+        console.warn("Could not save settings", cause)
+        setError(t("settings.error.save"))
+      }
+      return next
+    })
+  }, [])
 
   return { settings, error, resolved, update }
 }

@@ -164,6 +164,16 @@ function toPullRequest(input: unknown): PullRequestInfo {
 /** gh errors that just mean "there is no GitHub pull request here" (none yet, or the remote is not on GitHub). */
 const NO_PULL_REQUEST = /no pull requests found|could not find|none of the git remotes|not a github|no git remotes/i;
 
+/** Reject git refs/branches starting with "-" or containing control/range characters to prevent option injection. */
+function isSafeGitRef(value: string | null | undefined): value is string {
+	return typeof value === "string" && value.length > 0 && value.length <= 250 && !value.startsWith("-") && !/[\s\0]/.test(value) && !value.includes("..");
+}
+
+function assertSafeGitRef(value: string, label: string): string {
+	if (!isSafeGitRef(value)) throw httpError(400, `Invalid ${label}.`);
+	return value;
+}
+
 export function createSessionGit(run: CommandRunner = defaultRunner) {
 	const git = (cwd: string, ...args: string[]) => run("git", args, cwd);
 	const gh = (cwd: string, ...args: string[]) => run("gh", args, cwd);
@@ -177,16 +187,19 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 
 	async function currentBranch(cwd: string) {
 		const branch = await tryGit(cwd, "rev-parse", "--abbrev-ref", "HEAD");
-		return branch && branch !== "HEAD" ? branch : null;
+		return branch && branch !== "HEAD" && isSafeGitRef(branch) ? branch : null;
 	}
 
 	/** The repository's default branch on origin (e.g. main), used as the PR base. */
 	async function defaultBaseBranch(cwd: string) {
 		const symbolic = await tryGit(cwd, "symbolic-ref", "--short", "refs/remotes/origin/HEAD");
-		if (symbolic) return symbolic.replace(/^origin\//, "");
+		if (symbolic) {
+			const stripped = symbolic.replace(/^origin\//, "");
+			if (isSafeGitRef(stripped)) return stripped;
+		}
 		try {
 			const name = (await gh(cwd, "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name")).trim();
-			if (name) return name;
+			if (isSafeGitRef(name)) return name;
 		} catch {
 			// fall through to common names
 		}
@@ -197,18 +210,18 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 	}
 
 	/** Commit the session's changes are measured against: the session's recorded base, else the merge-base with origin's default branch. */
-	async function resolveBase(cwd: string, recordedBase: string | null) {
-		if (recordedBase && recordedBase !== "HEAD" && await tryGit(cwd, "rev-parse", "--verify", "--quiet", `${recordedBase}^{commit}`)) return recordedBase;
-		const baseBranch = await defaultBaseBranch(cwd);
-		if (baseBranch) return tryGit(cwd, "merge-base", "HEAD", `origin/${baseBranch}`);
+	async function resolveBase(cwd: string, recordedBase: string | null, knownBaseBranch?: string | null) {
+		if (recordedBase && recordedBase !== "HEAD" && isSafeGitRef(recordedBase) && await tryGit(cwd, "rev-parse", "--verify", "--quiet", `${recordedBase}^{commit}`)) return recordedBase;
+		const baseBranch = knownBaseBranch !== undefined ? knownBaseBranch : await defaultBaseBranch(cwd);
+		if (isSafeGitRef(baseBranch)) return tryGit(cwd, "merge-base", "HEAD", `origin/${baseBranch}`);
 		return null;
 	}
 
 	/** Where new base-branch work comes from: origin/<default>, else a local main/master. */
-	async function baseRef(cwd: string) {
-		const baseBranch = await defaultBaseBranch(cwd);
-		if (baseBranch && await tryGit(cwd, "rev-parse", "--verify", "--quiet", `refs/remotes/origin/${baseBranch}`)) return { ref: `origin/${baseBranch}`, branch: baseBranch, remote: true };
-		for (const candidate of [baseBranch, "main", "master"].filter(Boolean) as string[]) {
+	async function baseRef(cwd: string, knownBaseBranch?: string | null) {
+		const baseBranch = knownBaseBranch !== undefined ? knownBaseBranch : await defaultBaseBranch(cwd);
+		if (isSafeGitRef(baseBranch) && await tryGit(cwd, "rev-parse", "--verify", "--quiet", `refs/remotes/origin/${baseBranch}`)) return { ref: `origin/${baseBranch}`, branch: baseBranch, remote: true };
+		for (const candidate of [baseBranch, "main", "master"].filter((item): item is string => isSafeGitRef(item))) {
 			if (await tryGit(cwd, "rev-parse", "--verify", "--quiet", `refs/heads/${candidate}`)) return { ref: candidate, branch: candidate, remote: false };
 		}
 		return null;
@@ -232,23 +245,25 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 
 	return {
 		async status(cwd: string, recordedBase: string | null): Promise<BranchStatus> {
-			const [branch, base, baseBranch, upstream, remotes, porcelain] = await Promise.all([
+			const [branch, baseBranch, upstream, remotes, porcelain] = await Promise.all([
 				currentBranch(cwd),
-				resolveBase(cwd, recordedBase),
 				defaultBaseBranch(cwd),
 				tryGit(cwd, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"),
 				tryGit(cwd, "remote"),
 				tryGit(cwd, "status", "--porcelain"),
 			]);
-			const commitsAhead = base ? Number(await tryGit(cwd, "rev-list", "--count", `${base}..HEAD`) ?? 0) : 0;
-			const target = await baseRef(cwd);
+			const [base, target, mergeInProgress] = await Promise.all([
+				resolveBase(cwd, recordedBase, baseBranch),
+				baseRef(cwd, baseBranch),
+				tryGit(cwd, "rev-parse", "-q", "--verify", "MERGE_HEAD").then(Boolean),
+			]);
+			const commitsAhead = base ? Number(await tryGit(cwd, "rev-list", "--count", `${base}..HEAD`, "--") ?? 0) : 0;
 			const onBase = Boolean(branch && target && branch === target.branch);
-			const behindBase = target && !onBase ? Number(await tryGit(cwd, "rev-list", "--count", `HEAD..${target.ref}`) ?? 0) : 0;
-			const mergeInProgress = Boolean(await tryGit(cwd, "rev-parse", "-q", "--verify", "MERGE_HEAD"));
+			const behindBase = target && !onBase ? Number(await tryGit(cwd, "rev-list", "--count", `HEAD..${target.ref}`, "--") ?? 0) : 0;
 			let unpushed = 0;
 			let behindUpstream = 0;
 			if (upstream) {
-				const counts = await tryGit(cwd, "rev-list", "--left-right", "--count", "@{u}...HEAD");
+				const counts = await tryGit(cwd, "rev-list", "--left-right", "--count", "@{u}...HEAD", "--");
 				if (counts) [behindUpstream, unpushed] = counts.split(/\s+/).map(Number);
 			} else {
 				unpushed = commitsAhead;
@@ -274,7 +289,7 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 		async fetchBase(cwd: string) {
 			const target = await baseRef(cwd);
 			if (!target?.remote) return false;
-			return (await tryGit(cwd, "fetch", "--quiet", "origin", target.branch)) !== null;
+			return (await tryGit(cwd, "fetch", "--quiet", "--", "origin", assertSafeGitRef(target.branch, "base branch"))) !== null;
 		},
 
 		/**
@@ -287,10 +302,12 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 			if (porcelain) throw httpError(409, "Commit or discard the uncommitted changes before updating the branch.");
 			const target = await baseRef(cwd);
 			if (!target) throw httpError(409, "Could not find the base branch to update from.");
+			assertSafeGitRef(target.branch, "base branch");
+			assertSafeGitRef(target.ref, "base ref");
 			const branch = await currentBranch(cwd);
 			if (branch === target.branch) throw httpError(409, `This workspace is on ${branch} itself.`);
-			if (target.remote) await git(cwd, "fetch", "--quiet", "origin", target.branch);
-			const behind = Number(await tryGit(cwd, "rev-list", "--count", `HEAD..${target.ref}`) ?? 0);
+			if (target.remote) await git(cwd, "fetch", "--quiet", "--", "origin", target.branch);
+			const behind = Number(await tryGit(cwd, "rev-list", "--count", `HEAD..${target.ref}`, "--") ?? 0);
 			if (!behind) return { result: "up-to-date", baseRef: target.ref, conflicts: [] };
 			try {
 				await git(cwd, "merge", "--no-edit", "--no-ff", target.ref);
@@ -329,7 +346,7 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 			if (!branch) return null;
 			let raw: { number?: unknown; url?: unknown; reviews?: unknown; comments?: unknown };
 			try {
-				raw = JSON.parse(await gh(cwd, "pr", "view", branch, "--json", "number,url,reviews,comments"));
+				raw = JSON.parse(await gh(cwd, "pr", "view", "--json", "number,url,reviews,comments", "--", branch));
 			} catch (error) {
 				const err = error as { stderr?: unknown; message?: unknown };
 				if (NO_PULL_REQUEST.test(String(err?.stderr ?? err?.message ?? ""))) return null;
@@ -402,8 +419,8 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 			const base = await resolveBase(cwd, recordedBase);
 			if (!base) return { base: null, files: [] };
 			const [numstat, nameStatus] = await Promise.all([
-				git(cwd, "diff", "--numstat", "-M", base),
-				git(cwd, "diff", "--name-status", "-M", base),
+				git(cwd, "diff", "--numstat", "-M", base, "--"),
+				git(cwd, "diff", "--name-status", "-M", base, "--"),
 			]);
 			const statuses = new Map<string, BranchDiffFile["status"]>();
 			for (const line of nameStatus.split("\n").filter(Boolean)) {
@@ -440,7 +457,7 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 		async push(cwd: string) {
 			const branch = await currentBranch(cwd);
 			if (!branch) throw httpError(409, "The workspace is not on a branch, so there is nothing to push.");
-			await git(cwd, "push", "--set-upstream", "origin", branch);
+			await git(cwd, "push", "--set-upstream", "--", "origin", branch);
 			return { branch };
 		},
 
@@ -449,7 +466,7 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 			const branch = await currentBranch(cwd);
 			if (!branch) return null;
 			try {
-				return toPullRequest(JSON.parse(await gh(cwd, "pr", "view", branch, "--json", PR_FIELDS)));
+				return toPullRequest(JSON.parse(await gh(cwd, "pr", "view", "--json", PR_FIELDS, "--", branch)));
 			} catch (error) {
 				const err = error as { stderr?: unknown; message?: unknown };
 				if (NO_PULL_REQUEST.test(String(err?.stderr ?? err?.message ?? ""))) return null;
@@ -463,9 +480,18 @@ export function createSessionGit(run: CommandRunner = defaultRunner) {
 			const body = typeof input.body === "string" ? input.body.slice(0, 60000) : "";
 			const branch = await currentBranch(cwd);
 			if (!branch) throw httpError(409, "The workspace is not on a branch.");
-			const base = typeof input.base === "string" && /^[\w./-]{1,200}$/.test(input.base) ? input.base : await defaultBaseBranch(cwd);
+			let base: string | null;
+			if (typeof input.base === "string" && input.base.trim()) {
+				const requestedBase = input.base.trim();
+				if (requestedBase.startsWith("-") || !/^[A-Za-z0-9._/][A-Za-z0-9._/-]{0,199}$/.test(requestedBase) || requestedBase.includes("..")) {
+					throw httpError(400, "Invalid base branch name.");
+				}
+				base = requestedBase;
+			} else {
+				base = await defaultBaseBranch(cwd);
+			}
 			if (base === branch) throw httpError(409, `This workspace is on ${branch}, the base branch. Start a worktree session to open a pull request.`);
-			await git(cwd, "push", "--set-upstream", "origin", branch);
+			await git(cwd, "push", "--set-upstream", "--", "origin", branch);
 			const args = ["pr", "create", "--head", branch, "--title", title, "--body", body];
 			if (base) args.push("--base", base);
 			if (input.draft === true) args.push("--draft");

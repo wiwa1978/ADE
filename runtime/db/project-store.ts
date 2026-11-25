@@ -1,12 +1,34 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import { lookupGitHubIssue } from "../github-issues.ts";
 import { readLocalGhToken } from "../github-repositories.ts";
 import { badGateway, badRequest, conflict, notFound } from "../http-error.ts";
 import { logger } from "../log.ts";
 import { resolveCheckout } from "../worktrees.ts";
 import { isSessionBlueprint } from "../../packages/blueprints/index.ts";
-import { dbAll, dbGet } from "./schema.ts";
+import { dbAll, dbGet, dbRun, withTransaction } from "./schema.ts";
 import { detectGitHubRemoteFromCheckout, type ProjectRow, type SerializedProject } from "./types.ts";
+
+const StageOverridesSchema = z.record(
+	z.string(),
+	z.object({
+		provider: z.string().min(1),
+		model: z.string().min(1),
+	}),
+);
+
+export type SaveProjectInput = {
+	id?: string;
+	name?: string;
+	githubUrl?: string | null;
+	repository?: string | null;
+	blueprintId?: string;
+	blueprintLocked?: boolean;
+	modelProfile?: string;
+	euOnlyMode?: boolean;
+	cloudActFree?: boolean;
+	stageOverrides?: Record<string, { provider: string; model: string }> | null;
+};
 
 export class ProjectStore {
 	#db: DatabaseSync;
@@ -22,7 +44,14 @@ export class ProjectStore {
 		let stageOverrides: Record<string, { provider: string; model: string }> | undefined;
 		if (typeof row.stageOverridesJson === "string" && row.stageOverridesJson.trim()) {
 			try {
-				stageOverrides = JSON.parse(row.stageOverridesJson) as Record<string, { provider: string; model: string }>;
+				const parsed = StageOverridesSchema.safeParse(JSON.parse(row.stageOverridesJson));
+				if (parsed.success) {
+					stageOverrides = parsed.data;
+				} else {
+					logger.warn("Invalid stageOverridesJson schema on project row", {
+						context: { projectId: row.id, issues: parsed.error.issues.map(i => i.message) },
+					});
+				}
 			} catch (error) {
 				logger.warn("Malformed stageOverridesJson on project row", { error, context: { projectId: row.id } });
 			}
@@ -55,10 +84,10 @@ export class ProjectStore {
 	}
 
 	exists(id: string): boolean {
-		return Boolean(this.#db.prepare("SELECT 1 FROM projects WHERE id=?").get(id));
+		return Boolean(dbGet(this.#db, "SELECT 1 FROM projects WHERE id=?", id));
 	}
 
-	async save(input: Record<string, unknown> | null | undefined, id?: string): Promise<SerializedProject | null> {
+	async save(input: SaveProjectInput | null | undefined, id?: string): Promise<SerializedProject | null> {
 		const projectId = id ?? input?.id;
 		if (typeof projectId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(projectId) ||
 			typeof input?.name !== "string" || !input.name.trim() || input.name.length > 100 ||
@@ -86,15 +115,24 @@ export class ProjectStore {
 		const modelProfile = typeof input.modelProfile === "string" && input.modelProfile.trim() ? input.modelProfile.trim() : undefined;
 		const euOnlyMode = typeof input.euOnlyMode === "boolean" ? (input.euOnlyMode ? 1 : 0) : undefined;
 		const cloudActFree = typeof input.cloudActFree === "boolean" ? (input.cloudActFree ? 1 : 0) : undefined;
-		const stageOverridesJson =
-			input.stageOverrides !== undefined
-				? (input.stageOverrides && Object.keys(input.stageOverrides).length ? JSON.stringify(input.stageOverrides) : null)
-				: undefined;
+		let stageOverridesJson: string | null | undefined;
+		if (input.stageOverrides !== undefined) {
+			if (input.stageOverrides === null) {
+				stageOverridesJson = null;
+			} else {
+				const parsed = StageOverridesSchema.safeParse(input.stageOverrides);
+				if (!parsed.success) {
+					throw badRequest("Invalid stage model overrides.");
+				}
+				stageOverridesJson = Object.keys(parsed.data).length ? JSON.stringify(parsed.data) : null;
+			}
+		}
 
 		const existing = this.get(projectId);
 		if (id) {
 			if (!existing) throw notFound("Project not found.");
-			this.#db.prepare(
+			dbRun(
+				this.#db,
 				`UPDATE projects SET
 					name=?, githubUrl=?, repository=?,
 					blueprintId=COALESCE(?, blueprintId),
@@ -105,7 +143,6 @@ export class ProjectStore {
 					stageOverridesJson=CASE WHEN ? THEN ? ELSE stageOverridesJson END,
 					updatedAt=?
 				WHERE id=?`,
-			).run(
 				name,
 				githubUrl,
 				repository,
@@ -125,9 +162,9 @@ export class ProjectStore {
 			}
 		} else {
 			const now = Date.now();
-			this.#db.prepare(
+			dbRun(
+				this.#db,
 				"INSERT INTO projects (id, name, githubUrl, repository, createdAt, updatedAt, blueprintId, blueprintLocked, modelProfile, euOnlyMode, cloudActFree, stageOverridesJson) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-			).run(
 				projectId,
 				name,
 				githubUrl,
@@ -146,15 +183,17 @@ export class ProjectStore {
 	}
 
 	delete(id: string): { deleted: true; id: string } {
-		const existing = this.get(id);
-		if (!existing) throw notFound("Project not found.");
-		this.#db.prepare("UPDATE coding_tasks SET projectId=NULL WHERE projectId=?").run(id);
-		this.#db.prepare("DELETE FROM projects WHERE id=?").run(id);
-		return { deleted: true, id };
+		return withTransaction(this.#db, () => {
+			const existing = this.get(id);
+			if (!existing) throw notFound("Project not found.");
+			dbRun(this.#db, "UPDATE coding_tasks SET projectId=NULL WHERE projectId=?", id);
+			dbRun(this.#db, "DELETE FROM projects WHERE id=?", id);
+			return { deleted: true, id };
+		});
 	}
 
 	setArchivedTimestamp(id: string, archivedAt: number | null): SerializedProject | null {
-		this.#db.prepare("UPDATE projects SET archivedAt=? WHERE id=?").run(archivedAt, id);
+		dbRun(this.#db, "UPDATE projects SET archivedAt=? WHERE id=?", archivedAt, id);
 		return this.serialize(this.get(id));
 	}
 
@@ -176,14 +215,18 @@ export class ProjectStore {
 		if (previous && previous.toLowerCase() !== login.toLowerCase()) {
 			throw conflict("The GitHub CLI account changed. Disconnect it in Settings before connecting another account.");
 		}
-		this.#db.prepare("INSERT INTO github_connection (id,login) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET login=excluded.login").run(login);
-		this.#db.prepare("INSERT INTO github_connection_preferences (id,auto_connect) VALUES (1,1) ON CONFLICT(id) DO UPDATE SET auto_connect=1").run();
+		withTransaction(this.#db, () => {
+			dbRun(this.#db, "INSERT INTO github_connection (id,login) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET login=excluded.login", login);
+			dbRun(this.#db, "INSERT INTO github_connection_preferences (id,auto_connect) VALUES (1,1) ON CONFLICT(id) DO UPDATE SET auto_connect=1");
+		});
 		return this.githubConnection();
 	}
 
 	disconnectGitHub(): { login: string | null } {
-		this.#db.prepare("DELETE FROM github_connection WHERE id=1").run();
-		this.#db.prepare("INSERT INTO github_connection_preferences (id,auto_connect) VALUES (1,0) ON CONFLICT(id) DO UPDATE SET auto_connect=0").run();
+		withTransaction(this.#db, () => {
+			dbRun(this.#db, "DELETE FROM github_connection WHERE id=1");
+			dbRun(this.#db, "INSERT INTO github_connection_preferences (id,auto_connect) VALUES (1,0) ON CONFLICT(id) DO UPDATE SET auto_connect=0");
+		});
 		return this.githubConnection();
 	}
 

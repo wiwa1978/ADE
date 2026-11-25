@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { ArrowLeft, Plus, Search, Settings2 } from "lucide-react"
 import type { EnvironmentSummary } from "../../app-types"
+import { useI18n } from "../i18n/I18nContext"
 
 export function EnvironmentPalette({
   open,
@@ -19,6 +20,7 @@ export function EnvironmentPalette({
   onAddHost: () => void
   onClose: () => void
 }) {
+  const { t } = useI18n()
   const [query, setQuery] = useState("")
   const [index, setIndex] = useState(0)
   const [prevOpen, setPrevOpen] = useState(open)
@@ -90,21 +92,21 @@ export function EnvironmentPalette({
         }}
       >
         <div className="flex items-center gap-2.5 px-4 py-3 border-b border-[rgb(var(--border)/0.8)]">
-          <button type="button" className="sf-btn-ghost !h-7 !px-1.5" onClick={onClose} aria-label="Back">
+          <button type="button" className="sf-btn-ghost !h-7 !px-1.5" onClick={onClose} aria-label={t("wsx.sb.back")}>
             <ArrowLeft className="size-4" />
           </button>
           <Search className="size-4 opacity-50 shrink-0" />
           <input
             ref={inputRef}
             className="ade-cmd-input"
-            placeholder="Search environments…"
+            placeholder={t("wsx.sb.searchEnvironments")}
             value={query}
             onChange={e => { setQuery(e.target.value); setIndex(0) }}
           />
         </div>
 
         <div className="p-2">
-          <div className="px-2.5 pb-1.5 pt-1 text-[11px] font-semibold opacity-60">Environments</div>
+          <div className="px-2.5 pb-1.5 pt-1 text-[11px] font-semibold opacity-60">{t("wsx.sb.environments")}</div>
           <div className="flex flex-col gap-0.5">
             {filtered.map((env, i) => {
               const highlighted = i === safeIndex
@@ -138,12 +140,12 @@ export function EnvironmentPalette({
                     <span className="text-[12px] opacity-55 font-mono truncate">{hostLabel}</span>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {isActive ? <span className="sf-badge sf-badge-ok">Active</span> : null}
-                    {busyId === env.id ? <span className="text-[11px] opacity-60">Connecting…</span> : null}
+                    {isActive ? <span className="sf-badge sf-badge-ok">{t("wsx.sb.active")}</span> : null}
+                    {busyId === env.id ? <span className="text-[11px] opacity-60">{t("wsx.sb.connecting")}</span> : null}
                     <button
                       type="button"
                       className="ade-icon-btn !w-6 !h-6"
-                      title={`Manage ${env.name}`}
+                      title={t("wsx.sb.manageEnv", { name: env.name })}
                       onClick={e => {
                         e.stopPropagation()
                         onClose()
@@ -159,7 +161,7 @@ export function EnvironmentPalette({
 
             {filtered.length === 0 ? (
               <div className="px-3 py-4 text-center text-[12px] opacity-60">
-                No environments match “{query}”.
+                {t("wsx.sb.noEnvMatch", { query })}
               </div>
             ) : null}
 
@@ -178,16 +180,16 @@ export function EnvironmentPalette({
               }}
             >
               <Plus className="size-4 opacity-75 shrink-0" />
-              <span>Add host</span>
+              <span>{t("wsx.sb.addHost")}</span>
             </button>
           </div>
         </div>
 
         <div className="flex items-center justify-between px-4 py-2.5 border-t border-[rgb(var(--border)/0.7)] bg-[rgb(var(--surface)/0.5)] text-[11px] opacity-75">
           <div className="flex items-center gap-3">
-            <span><kbd className="ade-kbd">↑</kbd> <kbd className="ade-kbd">↓</kbd> Navigate</span>
-            <span><kbd className="ade-kbd">Enter</kbd> Select</span>
-            <span><kbd className="ade-kbd">Esc</kbd> Close</span>
+            <span><kbd className="ade-kbd">↑</kbd> <kbd className="ade-kbd">↓</kbd> {t("wsx.sb.navigate")}</span>
+            <span><kbd className="ade-kbd">Enter</kbd> {t("wsx.sb.select")}</span>
+            <span><kbd className="ade-kbd">Esc</kbd> {t("wsx.sb.close")}</span>
           </div>
           <button
             type="button"
@@ -197,7 +199,7 @@ export function EnvironmentPalette({
               onManageEnvironments()
             }}
           >
-            <Settings2 className="size-3" /> Manage
+            <Settings2 className="size-3" /> {t("wsx.sb.manage")}
           </button>
         </div>
       </div>

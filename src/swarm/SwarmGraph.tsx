@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
 import type { SwarmMember, SwarmOverviewModel, SwarmThreadView } from "./swarm-model"
+import { useI18n } from "../i18n/I18nContext"
 
 type NodePos = { x: number; y: number; w: number; h: number }
 
@@ -32,6 +33,7 @@ export function SwarmGraph({
   onSelectMember: (memberId: string) => void
   onSelectThread?: (threadId: string) => void
 }) {
+  const { t } = useI18n()
   const [hot, setHot] = useState<string | null>(null)
 
   const layout = useMemo(() => {
@@ -244,14 +246,14 @@ export function SwarmGraph({
   return (
     <div className="ade-swarm-graph-wrap">
       <div className="ade-swarm-graph-legend">
-        <span><i style={{ background: "#38bdf8" }} /> Moving / Working</span>
-        <span><i style={{ background: "#4ade80" }} /> Done</span>
-        <span><i style={{ background: "#f5b941" }} /> Waiting</span>
-        <span><i style={{ background: "#f87171" }} /> Blocked / Failed</span>
-        <span className="ml-auto ade-muted">Hover to trace · click a node to inspect</span>
+        <span><i style={{ background: "#38bdf8" }} /> {t("swx.swarm.graph.legendWorking")}</span>
+        <span><i style={{ background: "#4ade80" }} /> {t("swx.swarm.graph.legendDone")}</span>
+        <span><i style={{ background: "#f5b941" }} /> {t("swx.swarm.graph.legendWaiting")}</span>
+        <span><i style={{ background: "#f87171" }} /> {t("swx.swarm.graph.legendBlocked")}</span>
+        <span className="ml-auto ade-muted">{t("swx.swarm.graph.legendHint")}</span>
       </div>
       <div className="ade-swarm-graph-canvas">
-        <svg viewBox={`0 0 ${layout.width} ${layout.height}`} width="100%" height={layout.height} role="img" aria-label="Swarm coordination graph">
+        <svg viewBox={`0 0 ${layout.width} ${layout.height}`} width="100%" height={layout.height} role="img" aria-label={t("swx.swarm.graph.ariaLabel")}>
           {layout.edges.map(edge => {
             const sx = edge.from.x + edge.from.w
             const sy = edge.from.y + edge.from.h / 2

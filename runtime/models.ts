@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { z } from "zod";
 import { createModels, createProvider, type Provider } from "@earendil-works/pi-ai/models";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
@@ -124,11 +126,17 @@ export function createModelConfig(environment: EnvMap = process.env, { hasStored
 }
 
 /** Non-secret provider settings saved on the host (the compatible endpoint URL and model). */
-type ProviderSettings = { compatible?: { url?: string; model?: string } };
+const ProviderSettingsSchema = z.object({
+	compatible: z.object({
+		url: z.string().optional(),
+		model: z.string().optional(),
+	}).optional(),
+});
+type ProviderSettings = z.infer<typeof ProviderSettingsSchema>;
 function readProviderSettings(stateDirectory: string): ProviderSettings {
 	try {
-		const value: unknown = JSON.parse(readFileSync(join(stateDirectory, "provider-settings.json"), "utf8"));
-		return value && typeof value === "object" ? value as ProviderSettings : {};
+		const parsed = ProviderSettingsSchema.safeParse(JSON.parse(readFileSync(join(stateDirectory, "provider-settings.json"), "utf8")));
+		return parsed.success ? parsed.data : {};
 	} catch {
 		return {};
 	}
@@ -199,6 +207,8 @@ export function createRuntimeModels(environment: EnvMap, stateDirectory: string)
 	models.setProvider(githubCopilotProvider());
 	models.setProvider(radiusProvider());
 	let radiusCatalog: Promise<ProviderConfigBase> | undefined;
+	let radiusCatalogFailedAt = 0;
+	const RADIUS_FAILURE_TTL_MS = 10_000;
 	let credentialChange: Promise<void> | undefined;
 	async function radiusConfig(): Promise<ProviderConfigBase> {
 		const provider = "radius";
@@ -207,19 +217,31 @@ export function createRuntimeModels(environment: EnvMap, stateDirectory: string)
 		if (!hasSavedKey && !environment.RADIUS_API_KEY) {
 			return { provider, configured: false, availableModels: [], setupMessage: "Add a Radius API key in Settings → Models." };
 		}
-		radiusCatalog ??= (async () => {
-			try {
-				const result = await models.refresh({ providers: [provider], signal: AbortSignal.timeout(10000) });
-				if (result.aborted || result.errors.has(provider)) throw new Error("Radius catalog refresh failed");
-				const availableModels = (await models.getAvailable(provider)).map(({ id, name }) => ({ id, name }));
-				return {
-					provider, configured: availableModels.length > 0, availableModels,
-					setupMessage: availableModels.length ? "" : "No Radius chat models are enabled for this account.",
-				};
-			} catch {
-				return { provider, configured: false, availableModels: [], setupMessage: "Could not load Radius models. Check the API key and network, then update the connection in Settings." };
-			}
-		})();
+		if (radiusCatalog && radiusCatalogFailedAt > 0 && Date.now() - radiusCatalogFailedAt >= RADIUS_FAILURE_TTL_MS) {
+			radiusCatalog = undefined;
+			radiusCatalogFailedAt = 0;
+		}
+		if (!radiusCatalog) {
+			let pending: Promise<ProviderConfigBase> | undefined;
+			pending = (async () => {
+				try {
+					const result = await models.refresh({ providers: [provider], signal: AbortSignal.timeout(10000) });
+					if (result.aborted || result.errors.has(provider)) throw new Error("Radius catalog refresh failed");
+					const availableModels = (await models.getAvailable(provider)).map(({ id, name }) => ({ id, name }));
+					radiusCatalogFailedAt = 0;
+					return {
+						provider, configured: availableModels.length > 0, availableModels,
+						setupMessage: availableModels.length ? "" : "No Radius chat models are enabled for this account.",
+					};
+				} catch {
+					if (radiusCatalog === pending) {
+						radiusCatalogFailedAt = Date.now();
+					}
+					return { provider, configured: false, availableModels: [], setupMessage: "Could not load Radius models. Check the API key and network, then update the connection in Settings." };
+				}
+			})();
+			radiusCatalog = pending;
+		}
 		return radiusCatalog;
 	}
 	async function credentialStatus() {
@@ -277,8 +299,9 @@ export function createRuntimeModels(environment: EnvMap, stateDirectory: string)
 		if (model.length > 200) throw badRequest("The model name is too long.");
 		providerSettings = { ...providerSettings, compatible: url || model ? { url, model } : undefined };
 		const path = join(stateDirectory, "provider-settings.json");
-		writeFileSync(`${path}.tmp`, JSON.stringify(providerSettings, null, 2), { mode: 0o600 });
-		renameSync(`${path}.tmp`, path);
+		const temp = `${path}.${randomUUID()}.tmp`;
+		writeFileSync(temp, JSON.stringify(providerSettings, null, 2), { mode: 0o600 });
+		renameSync(temp, path);
 		return compatibleStatus();
 	}
 	return {
@@ -333,7 +356,7 @@ export function createRuntimeModels(environment: EnvMap, stateDirectory: string)
 					const compatConfig = createModelConfig({ ...compatibleEnvironment(), ADE_PROVIDER: id, ADE_MODEL: fallback === id ? environment.ADE_MODEL : undefined },
 						{ hasStoredCompatibleKey: hasSaved });
 					const provider = compatConfig.models.getProvider(id);
-					if (provider && !models.getProvider(id)) models.setProvider(provider);
+					if (provider) models.setProvider(provider);
 					if (!provider && models.getProvider(id)) models.deleteProvider(id);
 					config = compatConfig;
 				} catch (error) {

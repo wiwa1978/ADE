@@ -8,14 +8,95 @@ import { dirname, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { arr, obj, opt, str } from "@earendil-works/pi-schema";
+import { z } from "zod";
 import { applyStageApproval, completeStage, createBlueprintRun, planNextStep } from "../packages/captain-core/index.ts";
 import { getBlueprint, isSessionBlueprint, VIBE_BLUEPRINT_ID } from "../packages/blueprints/index.ts";
 import type { BlueprintRunState, BlueprintStage, FactoryBlueprint, ModelRoutingConfig, SessionBlueprintSummary, StageStatus, StageVerdict } from "../packages/protocol/index.ts";
 import { badRequest, conflict, notFound } from "./http-error.ts";
 import { checksLine, failureText, type StageChecks } from "./stage-checks.ts";
-import { dbGet } from "./db/schema.ts";
+import { dbGet, dbRun } from "./db/schema.ts";
 import { allowedStageTools, stageToolBlock } from "./stage-tools.ts";
 import type { RuntimeEventBus } from "./events.ts";
+
+const StageStatusSchema = z.enum(["pending", "awaiting_approval", "running", "completed", "changes_requested", "skipped", "failed"]);
+const StageVerdictSchema = z.object({
+	outcome: z.enum(["pass", "changes_requested", "escalate_human"]),
+	summary: z.string(),
+	findings: z.array(z.object({
+		severity: z.enum(["blocker", "major", "minor"]),
+		file: z.string().optional(),
+		line: z.number().optional(),
+		message: z.string(),
+	})).optional(),
+});
+const StageRunStateSchema = z.object({
+	stageId: z.string(),
+	status: StageStatusSchema,
+	attempt: z.number(),
+	startedAt: z.number().optional(),
+	endedAt: z.number().optional(),
+	resolvedModel: z.unknown().optional(),
+	sandboxAttached: z.boolean(),
+	artifactPaths: z.array(z.string()),
+	verdict: StageVerdictSchema.optional(),
+	error: z.string().optional(),
+});
+const BlueprintRunStateSchema = z.object({
+	runId: z.string(),
+	projectId: z.string(),
+	blueprintId: z.string(),
+	issueRef: z.object({
+		repository: z.string(),
+		number: z.number(),
+		title: z.string(),
+		url: z.string(),
+	}).optional(),
+	status: z.enum(["idle", "running", "awaiting_human", "completed", "failed", "cancelled"]),
+	currentStageIndex: z.number().int().nonnegative(),
+	stages: z.array(StageRunStateSchema),
+	disabledStageIds: z.array(z.string()),
+	maxAuditLoopbacks: z.number(),
+	auditLoopbacksUsed: z.number(),
+	createdAt: z.number(),
+	updatedAt: z.number(),
+});
+const CheckResultSchema = z.object({
+	label: z.string(),
+	command: z.string(),
+	status: z.enum(["passed", "failed", "skipped"]),
+	exitCode: z.number().nullable(),
+	output: z.string(),
+	ms: z.number(),
+});
+const StageChecksSchema = z.object({
+	source: z.enum(["project", "package", "none"]),
+	results: z.array(CheckResultSchema),
+	missing: z.array(z.string()),
+	ok: z.boolean(),
+	at: z.number(),
+});
+const ReviewEvidenceSchema = z.object({
+	subagentId: z.string(),
+	model: z.string().nullable(),
+	independent: z.boolean(),
+	status: z.enum(["running", "completed", "failed"]),
+	report: z.string(),
+	startedAt: z.number(),
+	endedAt: z.number().nullable(),
+});
+const SessionStageRecordSchema = z.object({
+	run: BlueprintRunStateSchema,
+	summaries: z.record(z.string(), z.string()),
+	feedback: z.record(z.string(), z.string()).optional(),
+	checks: z.record(z.string(), StageChecksSchema).optional(),
+	reviews: z.record(z.string(), ReviewEvidenceSchema).optional(),
+	history: z.array(z.object({
+		at: z.number(),
+		stageId: z.string(),
+		event: z.enum(["started", "finished", "approved", "changes_requested", "looped_back", "escalated", "checks_passed", "checks_failed", "review_done"]),
+		note: z.string().optional(),
+	})),
+});
 
 /** What's stored per session, next to the engine's own run state. */
 export type SessionStageRecord = {
@@ -109,19 +190,36 @@ export class SessionBlueprints {
 		return dbGet<TaskRow>(this.#db, "SELECT id, projectId, blueprintId, blueprintRunJson, branch, issueNumber FROM coding_tasks WHERE id=?", sessionId);
 	}
 
-	#record(row: TaskRow): SessionStageRecord | null {
-		// A session created on a blueprint gets its stage state the first time it's needed.
-		if (!row.blueprintRunJson && row.blueprintId && row.blueprintId !== VIBE_BLUEPRINT_ID && getBlueprint(row.blueprintId)) return this.begin(row.id, row.blueprintId);
-		if (!row.blueprintRunJson) return null;
+	#initialRecord(row: Pick<TaskRow, "projectId">, blueprintId: string): SessionStageRecord | null {
+		const blueprint = getBlueprint(blueprintId);
+		if (!blueprint) return null;
+		const now = this.#now();
+		const created = createBlueprintRun({ runId: randomUUID(), projectId: row.projectId ?? "", blueprint, now });
+		const { run } = planNextStep(created, blueprint, MODEL_CONFIG, now);
+		const record: SessionStageRecord = { run, summaries: {}, history: [] };
+		const first = blueprint.stages[run.currentStageIndex];
+		if (first) record.history.push({ at: now, stageId: first.id, event: "started" });
+		return record;
+	}
+
+	#record(row: TaskRow, { persist = false }: { persist?: boolean } = {}): SessionStageRecord | null {
+		if (!row.blueprintRunJson) {
+			if (row.blueprintId && row.blueprintId !== VIBE_BLUEPRINT_ID && getBlueprint(row.blueprintId)) {
+				// Read-only callers compute the initial state in memory without mutating SQLite or emitting SSE events.
+				return persist ? this.begin(row.id, row.blueprintId) : this.#initialRecord(row, row.blueprintId);
+			}
+			return null;
+		}
 		try {
-			return JSON.parse(row.blueprintRunJson) as SessionStageRecord;
+			const parsed = SessionStageRecordSchema.safeParse(JSON.parse(row.blueprintRunJson));
+			return parsed.success ? (parsed.data as SessionStageRecord) : null;
 		} catch {
 			return null;
 		}
 	}
 
 	#save(sessionId: string, blueprintId: string, record: SessionStageRecord | null) {
-		this.#db.prepare("UPDATE coding_tasks SET blueprintId=?, blueprintRunJson=? WHERE id=?").run(blueprintId, record ? JSON.stringify(record) : null, sessionId);
+		dbRun(this.#db, "UPDATE coding_tasks SET blueprintId=?, blueprintRunJson=? WHERE id=?", blueprintId, record ? JSON.stringify(record) : null, sessionId);
 		this.#events?.emit("stages.update", { sessionId, summary: record ? this.#summary(blueprintId, record) : null }, sessionId);
 		this.#events?.emit("sessions.changed", { id: sessionId, reason: "stages" }, sessionId);
 	}
@@ -134,14 +232,8 @@ export class SessionBlueprints {
 			this.#save(sessionId, VIBE_BLUEPRINT_ID, null);
 			return null;
 		}
-		const blueprint = getBlueprint(blueprintId);
-		if (!blueprint) throw badRequest(`Unknown blueprint "${blueprintId}".`);
-		const now = this.#now();
-		const created = createBlueprintRun({ runId: randomUUID(), projectId: row.projectId ?? "", blueprint, now });
-		const { run } = planNextStep(created, blueprint, MODEL_CONFIG, now);
-		const record: SessionStageRecord = { run, summaries: {}, history: [] };
-		const first = blueprint.stages[run.currentStageIndex];
-		if (first) record.history.push({ at: now, stageId: first.id, event: "started" });
+		const record = this.#initialRecord(row, blueprintId);
+		if (!record) throw badRequest(`Unknown blueprint "${blueprintId}".`);
 		this.#save(sessionId, blueprintId, record);
 		return record;
 	}
@@ -432,7 +524,7 @@ export class SessionBlueprints {
 	 */
 	finish(sessionId: string, input: { stageId: string; summary: string; artifacts?: string[]; verdict?: StageVerdict }): { reply: string; waiting: boolean } {
 		const row = this.#row(sessionId);
-		const record = row ? this.#record(row) : null;
+		const record = row ? this.#record(row, { persist: true }) : null;
 		const blueprint = row?.blueprintId ? getBlueprint(row.blueprintId) : undefined;
 		if (!row || !record || !blueprint) return { reply: "This session doesn't follow a blueprint; there are no stages to finish.", waiting: false };
 		const index = record.run.currentStageIndex;
@@ -503,7 +595,7 @@ export class SessionBlueprints {
 	 */
 	decide(sessionId: string, decision: "approve" | "request_changes", feedback = "") {
 		const row = this.#row(sessionId);
-		const record = row ? this.#record(row) : null;
+		const record = row ? this.#record(row, { persist: true }) : null;
 		const blueprint = row?.blueprintId ? getBlueprint(row.blueprintId) : undefined;
 		if (!row || !record || !blueprint) throw conflict("This session doesn't follow a blueprint.");
 		const index = record.run.currentStageIndex;

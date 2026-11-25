@@ -1,9 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { request, requestJson } from "../../api"
-import type { Conversation, GitHubIssue, PendingApproval, StartFrom, TaskStart } from "../../app-types"
-import { clearPendingStart, pendingStarts, storePendingStart } from "../../pending-task-starts"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import type { Conversation } from "../../app-types"
 import type { Project } from "../../ProjectsView"
 import type { Settings } from "../../useSettings"
+import { usePolling } from "./usePolling"
+import { useSessionPreferences } from "./sessions/useSessionPreferences"
+import {
+  abortSessionApi, archiveEntityApi, compactSessionApi, createChatThreadApi, deleteSessionApi,
+  fetchSessionsApi, forkSessionApi, moveSessionApi, openExternalAppApi, postSessionMessageApi,
+  quickStartProjectStreamApi, readAttachedFiles, renameSessionApi, replayPendingStartsApi,
+  startSessionOrAttemptsApi, steerSessionApi, type SessionAttachment, type StartNewSessionInput,
+} from "./sessions/session-actions"
+
+export { useDesktopNotifications } from "./sessions/useDesktopNotifications"
 
 const FALLBACK_SESSION: Conversation = {
   id: "coding",
@@ -13,26 +21,7 @@ const FALLBACK_SESSION: Conversation = {
   messages: [],
 }
 
-function readStoredIds(key: string): string[] {
-  try {
-    const raw = localStorage.getItem(key)
-    const parsed = raw ? JSON.parse(raw) : []
-    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : []
-  } catch {
-    return []
-  }
-}
-
-function writeStoredIds(key: string, ids: string[]) {
-  try {
-    localStorage.setItem(key, JSON.stringify(ids))
-  } catch (err) {
-    // Storage can be unavailable in private mode or quota-exceeded environments.
-    console.warn(`[ADE] Could not persist ${key}:`, err instanceof Error ? err.message : String(err))
-  }
-}
-
-export function useSessions(params: {
+export type UseSessionsParams = {
   activeSessionId: string
   selectedProjectId: string | null
   activeEnvironmentId: string
@@ -52,25 +41,13 @@ export function useSessions(params: {
   onOpenAttempts?: (attemptGroup: string) => void
   onOpenStreamPane: (projectId: string, streamId: string) => void
   onError: (msg: string) => void
-}) {
+}
+
+export function useSessions(params: UseSessionsParams) {
   const {
-    activeSessionId,
-    selectedProjectId,
-    activeEnvironmentId,
-    environmentVersion,
-    projects,
-    settings,
-    effectiveProvider,
-    selectedModel,
-    modelReady,
-    modelSetupMessage,
-    onLoadProjects,
-    onOpenSession,
-    onSessionArchived,
-    onProjectArchived,
-    onExpandProject,
-    onError,
-    onOpenAttempts,
+    activeSessionId, selectedProjectId, activeEnvironmentId, environmentVersion, projects,
+    settings, effectiveProvider, selectedModel, modelReady, modelSetupMessage, onLoadProjects,
+    onOpenSession, onSessionArchived, onProjectArchived, onExpandProject, onError, onOpenAttempts,
   } = params
 
   const [sessions, setSessions] = useState<Conversation[]>([])
@@ -78,9 +55,7 @@ export function useSessions(params: {
   const [launchError, setLaunchError] = useState("")
   const [sending, setSending] = useState(false)
   const [draft, setDraft] = useState("")
-  const [attachments, setAttachments] = useState<{ id: string; name: string; content: string }[]>([])
-  const [pinnedIds, setPinnedIds] = useState<string[]>(() => readStoredIds("ade.pinned-ids"))
-  const [unreadIds, setUnreadIds] = useState<string[]>(() => readStoredIds("ade.unread-ids"))
+  const [attachments, setAttachments] = useState<SessionAttachment[]>([])
 
   const activeSession = useMemo(
     () => sessions.find(s => s.id === activeSessionId) ?? sessions[0] ?? FALLBACK_SESSION,
@@ -91,79 +66,36 @@ export function useSessions(params: {
   )
   const hasWorkspace = Boolean(activeSession.workspace?.path && activeSession.workspace.status === "ready")
 
-  const loadSessions = useCallback(async () => {
+  const loadSessions = useCallback(async (signal?: AbortSignal) => {
     try {
-      const data = await request<{ sessions: Conversation[] }>("/api/sessions")
-      setSessions(data.sessions ?? [])
+      const next = await fetchSessionsApi(signal)
+      if (!signal?.aborted) setSessions(next)
     } catch (err) {
-      // Health polling surfaces connection errors in the UI; log here for diagnostics.
+      if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) return
       console.warn("[ADE] Could not load sessions:", err instanceof Error ? err.message : String(err))
     }
   }, [])
 
   useEffect(() => {
-    let cancelled = false
-    const tick = () => {
-      void request<{ sessions: Conversation[] }>("/api/sessions")
-        .then(data => { if (!cancelled) setSessions(data.sessions ?? []) })
-        .catch(err => {
-          if (!cancelled) console.warn("[ADE] Could not load sessions:", err instanceof Error ? err.message : String(err))
-        })
-    }
-    tick()
-    // Sessions can start in the background (automations); refresh now and then in case an event was missed.
-    const timer = window.setInterval(() => { if (document.visibilityState === "visible") tick() }, 20_000)
-    return () => { cancelled = true; window.clearInterval(timer) }
-  }, [environmentVersion])
+    const controller = new AbortController()
+    void Promise.resolve().then(() => loadSessions(controller.signal))
+    return () => controller.abort()
+  }, [environmentVersion, loadSessions])
 
-  // Replay any pending task starts stored before reload.
+  // Sessions can start in the background (automations); refresh periodically while tab is visible.
+  usePolling(loadSessions, 20_000, { immediate: false })
+
   useEffect(() => {
-    const pending = Object.values(pendingStarts()).filter(s => (s.environmentId ?? "local") === activeEnvironmentId)
-    if (!pending.length) return
-    for (const start of pending) {
-      void requestJson<{ session: Conversation }>("/api/coding-tasks", "POST", start).then(() => {
-        clearPendingStart(start.id)
-        void loadSessions()
-      }).catch(() => {
-        // Leave for manual retry if runtime offline.
-      })
-    }
+    replayPendingStartsApi(activeEnvironmentId, () => { void loadSessions() })
   }, [activeEnvironmentId, loadSessions])
 
-  const togglePin = useCallback((id: string) => {
-    setPinnedIds(prev => {
-      const next = prev.includes(id) ? prev.filter(x => x !== id) : [id, ...prev]
-      writeStoredIds("ade.pinned-ids", next)
-      return next
-    })
-  }, [])
-
-  const toggleUnread = useCallback((id: string) => {
-    setUnreadIds(prev => {
-      const next = prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-      writeStoredIds("ade.unread-ids", next)
-      return next
-    })
-  }, [])
-
-  const clearUnread = useCallback((id: string) => {
-    setUnreadIds(prev => {
-      if (!prev.includes(id)) return prev
-      const next = prev.filter(x => x !== id)
-      writeStoredIds("ade.unread-ids", next)
-      return next
-    })
-  }, [])
-
-  const markAllRead = useCallback(() => {
-    setUnreadIds([])
-    writeStoredIds("ade.unread-ids", [])
-  }, [])
-
-  const archivedIds = [
-    ...sessions.filter(s => s.archivedAt).map(s => s.id),
-    ...projects.filter(p => p.archivedAt).map(p => `project:${p.id}`),
-  ]
+  const prefs = useSessionPreferences({
+    sessions,
+    projects,
+    archiveRemovesWorktree: settings.archiveRemovesWorktree,
+    loadSessions,
+    onLoadProjects,
+  })
 
   const toggleArchive = useCallback(async (id: string, archivedNow?: boolean) => {
     const isProject = id.startsWith("project:")
@@ -172,20 +104,10 @@ export function useSessions(params: {
       ? Boolean(projects.find(p => p.id === targetId)?.archivedAt)
       : Boolean(sessions.find(s => s.id === targetId)?.archivedAt))
     try {
-      const result = await request<{ worktreeError?: string; sessions?: { worktreeError?: string }[] }>(
-        isProject ? `/api/projects/${encodeURIComponent(targetId)}/archive` : `/api/sessions/${encodeURIComponent(targetId)}/archive`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(
-            isProject
-              ? { archived: !currentlyArchived, removeWorktrees: settings.archiveRemovesWorktree }
-              : { archived: !currentlyArchived, removeWorktree: settings.archiveRemovesWorktree },
-          ),
-        },
-      )
-      const kept = [result.worktreeError, ...(result.sessions ?? []).map(s => s.worktreeError)].filter(Boolean)
-      if (kept.length) onError(`Archived, but a worktree was kept: ${kept[0]}`)
+      const { worktreeWarning } = await archiveEntityApi({
+        isProject, targetId, archived: !currentlyArchived, removeWorktree: settings.archiveRemovesWorktree,
+      })
+      if (worktreeWarning) onError(`Archived, but a worktree was kept: ${worktreeWarning}`)
       if (!currentlyArchived && !isProject && activeSessionId === targetId) onSessionArchived(targetId)
       if (!currentlyArchived && isProject && selectedProjectId === targetId) onProjectArchived(targetId)
     } catch (err) {
@@ -193,90 +115,22 @@ export function useSessions(params: {
     } finally {
       await Promise.all([loadSessions(), onLoadProjects()])
     }
-  }, [
-    projects,
-    sessions,
-    settings.archiveRemovesWorktree,
-    activeSessionId,
-    selectedProjectId,
-    loadSessions,
-    onLoadProjects,
-    onSessionArchived,
-    onProjectArchived,
-    onError,
-  ])
-
-  // One-time migration of the old browser-only archive list to the host.
-  useEffect(() => {
-    const legacy = readStoredIds("ade.archived-ids")
-    if (!legacy.length || (!sessions.length && !projects.length)) return
-    localStorage.removeItem("ade.archived-ids")
-    const targets = legacy.filter(id =>
-      id.startsWith("project:")
-        ? projects.some(p => `project:${p.id}` === id && !p.archivedAt)
-        : sessions.some(s => s.id === id && !s.archivedAt && s.id !== "coding" && s.id !== "personal"),
-    )
-    if (!targets.length) return
-    void Promise.all(
-      targets.map(id => {
-        const isProject = id.startsWith("project:")
-        const targetId = isProject ? id.slice("project:".length) : id
-        return request(
-          isProject ? `/api/projects/${encodeURIComponent(targetId)}/archive` : `/api/sessions/${encodeURIComponent(targetId)}/archive`,
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify(
-              isProject
-                ? { archived: true, removeWorktrees: settings.archiveRemovesWorktree }
-                : { archived: true, removeWorktree: settings.archiveRemovesWorktree },
-            ),
-          },
-        ).catch(() => undefined)
-      }),
-    ).then(() => Promise.all([loadSessions(), onLoadProjects()]))
-  }, [sessions, projects, settings.archiveRemovesWorktree, loadSessions, onLoadProjects])
+  }, [projects, sessions, settings.archiveRemovesWorktree, activeSessionId, selectedProjectId, loadSessions, onLoadProjects, onSessionArchived, onProjectArchived, onError])
 
   const attachFiles = useCallback(async (fileList: FileList | null) => {
-    if (!fileList) return
-    const added: { id: string; name: string; content: string }[] = []
-    for (const file of Array.from(fileList).slice(0, 6)) {
-      if (file.size > 64_000) continue
-      try {
-        const text = await file.text()
-        added.push({ id: crypto.randomUUID(), name: file.name, content: text })
-      } catch (err) {
-        console.warn("[ADE] Skipped unreadable attached file:", file.name, err instanceof Error ? err.message : String(err))
-        onError(`Could not read attached file "${file.name}".`)
-      }
-    }
+    const { added, errors } = await readAttachedFiles(fileList)
+    for (const err of errors) onError(err)
     if (added.length) setAttachments(prev => [...prev, ...added])
   }, [onError])
 
-  /** Post a message to the active session's agent. */
   const postMessage = useCallback(async (content: string) => {
-    const payload = {
-      id: crypto.randomUUID(),
-      content: content.slice(0, 8000),
-      provider: effectiveProvider,
-      model: selectedModel,
-      reasoning: settings.reasoning,
-      async: true,
-    }
-    const endpoint = activeSession.chatThread
-      ? `/api/chat-threads/${encodeURIComponent(activeSession.id)}/messages`
-      : isCodingTask
-        ? `/api/coding-tasks/${encodeURIComponent(activeSession.id)}/messages`
-        : `/api/sessions/${activeSession.mode}/messages`
-    await request<{ session: Conversation }>(endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
+    await postSessionMessageApi({
+      session: activeSession, isCodingTask, content,
+      provider: effectiveProvider, model: selectedModel, reasoning: settings.reasoning,
     })
     await loadSessions()
   }, [effectiveProvider, selectedModel, settings.reasoning, activeSession, isCodingTask, loadSessions])
 
-  /** Send a prompt ADE wrote for the user (review feedback, CI logs, conflicts) without touching the composer. */
   const askAgent = useCallback(async (text: string, onAfterSend?: (sessionId: string) => void) => {
     try {
       await postMessage(text)
@@ -291,12 +145,11 @@ export function useSessions(params: {
     const attachmentBlock = attachments.length
       ? `\n\n${attachments.map(a => `--- Attached file: ${a.name} ---\n\`\`\`\n${a.content}\n\`\`\``).join("\n\n")}`
       : ""
-    const content = `${text}${attachmentBlock}`.slice(0, 8000)
     setDraft("")
     setAttachments([])
     setSending(true)
     try {
-      await postMessage(content)
+      await postMessage(`${text}${attachmentBlock}`.slice(0, 8000))
       onAfterSend?.(activeSession.id)
     } catch (err) {
       onError(err instanceof Error ? err.message : "Could not send message.")
@@ -307,127 +160,41 @@ export function useSessions(params: {
 
   const steerSession = useCallback(async (text: string, mode: "steer" | "follow-up") => {
     setDraft("")
-    try {
-      await requestJson(`/api/sessions/${encodeURIComponent(activeSession.id)}/steer`, "POST", { content: text, mode })
-    } catch (err) {
-      onError(err instanceof Error ? err.message : "Could not steer session.")
-    }
+    try { await steerSessionApi(activeSession.id, text, mode) }
+    catch (err) { onError(err instanceof Error ? err.message : "Could not steer session.") }
   }, [activeSession.id, onError])
 
   const abortSession = useCallback(async (targetSessionId?: string) => {
-    const id = targetSessionId ?? activeSession.id
-    try {
-      await requestJson(`/api/sessions/${encodeURIComponent(id)}/abort`, "POST")
-      await loadSessions()
-    } catch (err) {
-      onError(err instanceof Error ? err.message : "Could not stop session.")
-    }
+    try { await abortSessionApi(targetSessionId ?? activeSession.id); await loadSessions() }
+    catch (err) { onError(err instanceof Error ? err.message : "Could not stop session.") }
   }, [activeSession.id, loadSessions, onError])
 
   const compactSession = useCallback(async () => {
-    try {
-      await requestJson(`/api/sessions/${encodeURIComponent(activeSession.id)}/compact`, "POST")
-    } catch (err) {
-      onError(err instanceof Error ? err.message : "Could not compact session.")
-    }
+    try { await compactSessionApi(activeSession.id) }
+    catch (err) { onError(err instanceof Error ? err.message : "Could not compact session.") }
   }, [activeSession.id, onError])
 
-  const startNewSession = useCallback(async (input: {
-    projectId: string | null
-    kind: TaskStart["kind"]
-    repository: string
-    prompt: string
-    githubIssue?: GitHubIssue
-    engine?: "pi" | "claude-code" | "codex"
-    startFrom?: StartFrom
-    /** Session name when there is no prompt to name it after (e.g. "PR #12: Fix login"). */
-    title?: string
-    /** Best of N: one agent per attempt; each gets its own worktree and the same task. */
-    attempts?: Array<"pi" | "claude-code" | "codex">
-    runOn?: "local" | "docker" | "wsl" | "ssh" | "boat"
-    blueprintId?: string
-  }) => {
+  const startNewSession = useCallback(async (input: StartNewSessionInput) => {
     setCreatingSession(true)
     setLaunchError("")
-    const baseTitle = (input.title || input.prompt).replace(/\s+/g, " ").trim().slice(0, 72) || "New session"
-    const attempts = input.attempts && input.attempts.length > 1 && input.kind === "worktree" && !input.startFrom ? input.attempts.slice(0, 4) : null
-    const attemptGroup = attempts ? crypto.randomUUID() : undefined
-
-    /** Create one session, hand it to its agent, and send the task. */
-    const createOne = async (engine: "pi" | "claude-code" | "codex" | undefined, title: string) => {
-      // Claude Code / Codex sessions get their task after the engine is chosen.
-      const external = Boolean(engine && engine !== "pi" && input.kind !== "none")
-      const taskId = crypto.randomUUID()
-      const start: TaskStart = {
-        id: taskId,
-        title,
-        repository: input.repository,
-        kind: input.kind,
-        environmentId: activeEnvironmentId,
-        projectId: input.projectId,
-        githubIssue: input.githubIssue,
-        ...(input.startFrom ? { startFrom: input.startFrom } : {}),
-        ...(attemptGroup ? { attemptGroup } : {}),
-        ...(input.runOn ? { runOn: input.runOn } : {}),
-        ...(input.blueprintId ? { blueprintId: input.blueprintId } : {}),
-        ...(!external && modelReady && input.prompt.trim()
-          ? {
-              initialMessage: {
-                id: crypto.randomUUID(),
-                content: input.prompt,
-                provider: effectiveProvider,
-                model: selectedModel,
-                reasoning: settings.reasoning,
-              },
-            }
-          : {}),
-      }
-      storePendingStart(start)
-      try {
-        const res = await requestJson<{ session: Conversation }>("/api/coding-tasks", "POST", start)
-        clearPendingStart(taskId)
-        if (external) {
-          await requestJson(`/api/sessions/${encodeURIComponent(taskId)}/engine`, "POST", { engine })
-          if (input.prompt.trim()) {
-            // Don't wait for the agent's turn; several attempts run at the same time.
-            void requestJson(`/api/coding-tasks/${encodeURIComponent(taskId)}/messages`, "POST", { content: input.prompt })
-              .catch(err => onError(err instanceof Error ? err.message : "Could not send the task to the agent."))
-          }
-        }
-        return { id: res.session.id, waitingForModel: !external && !start.initialMessage && Boolean(input.prompt.trim()) }
-      } catch (err) {
-        clearPendingStart(taskId)
-        throw err
-      }
-    }
-
     try {
-      if (attempts && attemptGroup) {
-        const letters = "ABCD"
-        // One after another: Git allows one worktree operation per repository at a time. The agents
-        // still work in parallel, because each task is sent without waiting for the agent.
-        const results: PromiseSettledResult<{ id: string; waitingForModel: boolean }>[] = []
-        for (const [index, engine] of attempts.entries()) {
-          results.push(await createOne(engine, `${baseTitle} · ${letters[index]}`).then(
-            value => ({ status: "fulfilled" as const, value }),
-            (reason: unknown) => ({ status: "rejected" as const, reason }),
-          ))
-        }
-        await loadSessions()
-        const failed = results.filter(result => result.status === "rejected")
-        if (failed.length === results.length) throw (failed[0] as PromiseRejectedResult).reason
-        if (failed.length) onError(`${failed.length} of ${results.length} attempts could not start.`)
+      const outcome = await startSessionOrAttemptsApi({
+        input, environmentId: activeEnvironmentId, modelReady,
+        provider: effectiveProvider, model: selectedModel, reasoning: settings.reasoning,
+        onAsyncMessageError: onError,
+      })
+      await loadSessions()
+      if (outcome.kind === "attempts") {
+        if (outcome.failedCount) onError(`${outcome.failedCount} of ${outcome.totalCount} attempts could not start.`)
         if (input.projectId) onExpandProject(input.projectId)
-        onOpenAttempts?.(attemptGroup)
+        onOpenAttempts?.(outcome.attemptGroup)
         return
       }
-      const created = await createOne(input.engine, baseTitle)
-      await loadSessions()
-      if (created.waitingForModel) {
+      if (outcome.waitingForModel) {
         setDraft(input.prompt)
         onError(`${modelSetupMessage} Your message is waiting in the composer.`)
       }
-      onOpenSession(created.id)
+      onOpenSession(outcome.id)
       if (input.projectId) onExpandProject(input.projectId)
     } catch (err) {
       setLaunchError(err instanceof Error ? err.message : "Could not create session.")
@@ -437,205 +204,60 @@ export function useSessions(params: {
   }, [activeEnvironmentId, modelReady, effectiveProvider, selectedModel, settings.reasoning, loadSessions, modelSetupMessage, onError, onOpenSession, onExpandProject, onOpenAttempts])
 
   const quickStartStream = useCallback(async (project: Project, prompt: string) => {
-    const taskId = crypto.randomUUID()
-    const start: TaskStart = {
-      id: taskId,
-      title: prompt.replace(/\s+/g, " ").trim().slice(0, 80) || "New session",
-      repository: project.repository && settings.defaultWorkspaceKind !== "none" ? project.repository : "",
-      kind: project.repository ? settings.defaultWorkspaceKind : "none",
-      environmentId: activeEnvironmentId,
-      projectId: project.id,
-      ...(modelReady
-        ? {
-            initialMessage: {
-              id: crypto.randomUUID(),
-              content: prompt,
-              provider: effectiveProvider,
-              model: selectedModel,
-              reasoning: settings.reasoning,
-            },
-          }
-        : {}),
-    }
-    const res = await requestJson<{ session: Conversation }>("/api/coding-tasks", "POST", start)
+    const { sessionId, sentInitialMessage } = await quickStartProjectStreamApi({
+      project, prompt, defaultWorkspaceKind: settings.defaultWorkspaceKind, environmentId: activeEnvironmentId,
+      modelReady, provider: effectiveProvider, model: selectedModel, reasoning: settings.reasoning,
+    })
     await loadSessions()
-    if (!start.initialMessage) onError(`${modelSetupMessage} The session was created without sending your message.`)
-    // Go straight to the new session, like starting one anywhere else.
-    if (res?.session?.id) {
-      onExpandProject(project.id)
-      onOpenSession(res.session.id)
-    }
+    if (!sentInitialMessage) onError(`${modelSetupMessage} The session was created without sending your message.`)
+    if (sessionId) { onExpandProject(project.id); onOpenSession(sessionId) }
   }, [activeEnvironmentId, modelReady, effectiveProvider, selectedModel, settings.reasoning, settings.defaultWorkspaceKind, loadSessions, modelSetupMessage, onError, onExpandProject, onOpenSession])
 
   const createChatThread = useCallback(async (mode: "coding" | "personal") => {
-    try {
-      const id = crypto.randomUUID()
-      const res = await requestJson<{ session: Conversation }>("/api/chat-threads", "POST", { id, mode })
-      await loadSessions()
-      onOpenSession(res.session.id)
-    } catch (err) {
-      onError(err instanceof Error ? err.message : "Could not create chat.")
-    }
+    try { const created = await createChatThreadApi(mode); await loadSessions(); onOpenSession(created.id) }
+    catch (err) { onError(err instanceof Error ? err.message : "Could not create chat.") }
   }, [loadSessions, onOpenSession, onError])
 
   const renameSession = useCallback(async (session: Conversation, nextTitle: string) => {
     const trimmed = nextTitle.trim()
     if (!trimmed || trimmed === session.label) return
-    const endpoint = session.chatThread
-      ? `/api/chat-threads/${encodeURIComponent(session.id)}`
-      : `/api/coding-tasks/${encodeURIComponent(session.id)}`
-    try {
-      await request(endpoint, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: trimmed }),
-      })
-      await loadSessions()
-    } catch (err) {
-      onError(err instanceof Error ? err.message : "Could not rename session.")
-    }
+    try { await renameSessionApi(session, trimmed); await loadSessions() }
+    catch (err) { onError(err instanceof Error ? err.message : "Could not rename session.") }
   }, [loadSessions, onError])
 
   const forkSession = useCallback(async (sess: Conversation) => {
-    try {
-      const res = await requestJson<{ session: Conversation }>(`/api/sessions/${encodeURIComponent(sess.id)}/fork`, "POST")
-      await loadSessions()
-      if (res?.session?.id) onOpenSession(res.session.id)
-    } catch (err) {
-      onError(err instanceof Error ? err.message : "Could not fork chat.")
-    }
+    try { const nextId = await forkSessionApi(sess.id); await loadSessions(); if (nextId) onOpenSession(nextId) }
+    catch (err) { onError(err instanceof Error ? err.message : "Could not fork chat.") }
   }, [loadSessions, onOpenSession, onError])
 
   const moveSession = useCallback(async (sess: Conversation, opts: { mode?: "coding" | "personal"; projectId?: string | null }) => {
-    try {
-      await requestJson(`/api/sessions/${encodeURIComponent(sess.id)}/move`, "PATCH", opts)
-      await loadSessions()
-      if (opts.projectId) onExpandProject(opts.projectId)
-    } catch (err) {
-      onError(err instanceof Error ? err.message : "Could not move chat.")
-    }
+    try { await moveSessionApi(sess.id, opts); await loadSessions(); if (opts.projectId) onExpandProject(opts.projectId) }
+    catch (err) { onError(err instanceof Error ? err.message : "Could not move chat.") }
   }, [loadSessions, onExpandProject, onError])
 
   const deleteSession = useCallback(async (sess: Conversation) => {
-    const endpoint = sess.chatThread
-      ? `/api/chat-threads/${encodeURIComponent(sess.id)}`
-      : `/api/coding-tasks/${encodeURIComponent(sess.id)}`
-    try {
-      await request(endpoint, { method: "DELETE" })
-      await loadSessions()
-      if (activeSessionId === sess.id) onSessionArchived(sess.id)
-    } catch (err) {
-      onError(err instanceof Error ? err.message : "Could not delete session.")
-    }
+    try { await deleteSessionApi(sess); await loadSessions(); if (activeSessionId === sess.id) onSessionArchived(sess.id) }
+    catch (err) { onError(err instanceof Error ? err.message : "Could not delete session.") }
   }, [activeSessionId, loadSessions, onSessionArchived, onError])
 
   const sendQuickStreamMessage = useCallback(async (sess: Conversation, text: string) => {
-    const payload = {
-      id: crypto.randomUUID(),
-      content: text,
-      provider: effectiveProvider,
-      model: selectedModel,
-      reasoning: settings.reasoning,
-      async: true,
-    }
-    const endpoint = sess.chatThread
-      ? `/api/chat-threads/${encodeURIComponent(sess.id)}/messages`
-      : sess.id !== "coding" && sess.id !== "personal"
-        ? `/api/coding-tasks/${encodeURIComponent(sess.id)}/messages`
-        : `/api/sessions/${sess.mode}/messages`
-    await request(endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
+    await postSessionMessageApi({
+      session: sess, isCodingTask: sess.id !== "coding" && sess.id !== "personal", content: text,
+      provider: effectiveProvider, model: selectedModel, reasoning: settings.reasoning, truncate: false,
     })
     await loadSessions()
   }, [effectiveProvider, selectedModel, settings.reasoning, loadSessions])
 
   const openExternalApp = useCallback(async (app: "cursor" | "vscode" | "windsurf" | "finder", path?: string | null) => {
-    try {
-      await requestJson("/api/system/open-in", "POST", { app, path: path || undefined })
-    } catch (err) {
-      onError(err instanceof Error ? err.message : `Could not open in ${app}.`)
-    }
+    try { await openExternalAppApi(app, path) }
+    catch (err) { onError(err instanceof Error ? err.message : `Could not open in ${app}.`) }
   }, [onError])
 
   return {
-    sessions,
-    activeSession,
-    isCodingTask,
-    hasWorkspace,
-    creatingSession,
-    launchError,
-    sending,
-    draft,
-    setDraft,
-    attachments,
-    setAttachments,
-    pinnedIds,
-    unreadIds,
-    archivedIds,
-    loadSessions,
-    togglePin,
-    toggleUnread,
-    clearUnread,
-    markAllRead,
-    toggleArchive,
-    attachFiles,
-    sendMessage,
-    askAgent,
-    steerSession,
-    abortSession,
-    compactSession,
-    startNewSession,
-    quickStartStream,
-    createChatThread,
-    renameSession,
-    forkSession,
-    moveSession,
-    deleteSession,
-    sendQuickStreamMessage,
-    openExternalApp,
+    sessions, activeSession, isCodingTask, hasWorkspace, creatingSession, launchError, sending,
+    draft, setDraft, attachments, setAttachments, ...prefs, loadSessions, toggleArchive,
+    attachFiles, sendMessage, askAgent, steerSession, abortSession, compactSession,
+    startNewSession, quickStartStream, createChatThread, renameSession, forkSession,
+    moveSession, deleteSession, sendQuickStreamMessage, openExternalApp,
   }
-}
-
-export function useDesktopNotifications(params: {
-  sessions: Conversation[]
-  approvals: PendingApproval[]
-  notifyOnFinish: boolean
-  notifyOnApproval: boolean
-  onOpenSession: (id: string) => void
-}) {
-  const { sessions, approvals, notifyOnFinish, notifyOnApproval, onOpenSession } = params
-  const previousStatuses = useRef<Map<string, string>>(new Map())
-  const notifiedApprovals = useRef<Set<string>>(new Set())
-
-  useEffect(() => {
-    const canNotify = typeof Notification !== "undefined" && Notification.permission === "granted" && !document.hasFocus()
-    for (const sess of sessions) {
-      const before = previousStatuses.current.get(sess.id)
-      if (canNotify && notifyOnFinish && before === "working" && sess.status === "idle") {
-        const last = [...sess.messages].reverse().find(m => m.role !== "user")
-        const notification = new Notification(`${sess.label} finished`, {
-          body: last?.role === "error" ? `Error: ${last.content.slice(0, 140)}` : "The agent is waiting for your next message.",
-          tag: `finish-${sess.id}`,
-        })
-        notification.onclick = () => { window.focus(); onOpenSession(sess.id) }
-      }
-      previousStatuses.current.set(sess.id, sess.status)
-    }
-  }, [sessions, notifyOnFinish, onOpenSession])
-
-  useEffect(() => {
-    for (const approval of approvals) {
-      if (notifiedApprovals.current.has(approval.id)) continue
-      notifiedApprovals.current.add(approval.id)
-      if (!notifyOnApproval || typeof Notification === "undefined" || Notification.permission !== "granted" || document.hasFocus()) continue
-      const label = sessions.find(s => s.id === approval.sessionId)?.label
-      const notification = new Notification(label ? `${label} needs approval` : "An agent needs approval", {
-        body: approval.command ?? approval.summary ?? "Open ADE to allow or deny the request.",
-        tag: `approval-${approval.id}`,
-      })
-      notification.onclick = () => { window.focus(); onOpenSession(approval.sessionId) }
-    }
-  }, [approvals, notifyOnApproval, sessions, onOpenSession])
 }

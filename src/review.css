@@ -1,3 +1,4 @@
+@layer components {
 /* Review loop: diff line numbers and notes, PR feedback, branch updates. */
 .ade-diff-code .ade-diff-line { display: flex; align-items: stretch; padding: 0 12px 0 0; }
 .ade-diff-gutter { flex: none; width: 44px; padding-right: 8px; text-align: right; color: rgb(var(--muted) / 0.7); user-select: none; }
@@ -157,3 +158,4 @@ a.ade-chip-btn { text-decoration: none; }
 /* Runs on (this computer or Docker) */
 .ade-run-on { display: grid; gap: 4px; padding: 8px 12px; border-bottom: 1px solid rgb(var(--border)); }
 .ade-run-on p { margin: 0; }
+}

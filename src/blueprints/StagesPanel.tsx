@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Check, CircleDashed, CircleSlash, Eye, Loader2, PauseCircle, RotateCcw, Users, XCircle } from "lucide-react"
 import { requestJson } from "../../api"
+import { useConfirm } from "../../components/ui/index.ts"
 import "./stage-checks.css"
 import { shortBlueprintName, useBlueprintOptions, VIBE_ID } from "./blueprint-options"
 import { useI18n } from "../i18n/I18nContext"
@@ -145,16 +146,23 @@ export function WayOfWorkingSelect({ sessionId, current, currentName, locked, bu
   onChanged: (next: SessionStages) => void
 }) {
   const { t } = useI18n()
+  const { confirm } = useConfirm()
   const options = useBlueprintOptions()
   const [switching, setSwitching] = useState(false)
   const [error, setError] = useState("")
   const switchTo = async (blueprintId: string) => {
     if (blueprintId === current) return
     const target = options.find(option => option.id === blueprintId)
+    const targetName = target ? shortBlueprintName(target.name) : blueprintId
     const question = blueprintId === VIBE_ID
       ? t("stg.switchVibe")
-      : t("stg.switchTo", { name: target ? shortBlueprintName(target.name) : blueprintId })
-    if (!window.confirm(question)) return
+      : t("stg.switchTo", { name: targetName })
+    const confirmed = await confirm({
+      title: blueprintId === VIBE_ID ? t("stg.wayOfWorking") : targetName,
+      description: question,
+      confirmLabel: t("common.continue"),
+    })
+    if (!confirmed) return
     setSwitching(true)
     setError("")
     try {

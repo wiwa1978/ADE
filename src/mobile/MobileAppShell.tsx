@@ -444,7 +444,7 @@ export function MobileAppShell({
                   {inboxSorted.map(sess => {
                     const entry = inboxEntries[sess.id]
                     const proj = projects.find(p => p.id === sess.projectId)
-                    const isWorking = sess.status === "working" || entry?.state === "working"
+                    const isWorking = entry?.state !== "needs-approval" && (sess.status === "working" || entry?.state === "working")
                     const stateMeta = entry && entry.state !== "idle" ? sessionStateInfo[entry.state] : null
                     return (
                       <button

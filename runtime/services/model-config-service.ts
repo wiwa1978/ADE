@@ -4,10 +4,12 @@ import { copilotId } from "../copilot-auth.ts";
 import { badRequest, conflict, notFound } from "../http-error.ts";
 import { createRuntimeModels, safeErrorMessage } from "../models.ts";
 import { scanProviderTools } from "../provider-tools.ts";
-import { dbAll } from "../db/schema.ts";
+import { dbAll, dbRun } from "../db/schema.ts";
 import type { ModelConfigResult } from "../db/types.ts";
 
 export type ModelConfigFactory = (environment: NodeJS.ProcessEnv, provider?: string) => ModelConfigResult | Promise<ModelConfigResult>;
+
+const PROVIDER_TOOLS_CACHE_TTL_MS = 30_000;
 
 export class ModelConfigService {
 	#db: DatabaseSync;
@@ -16,6 +18,8 @@ export class ModelConfigService {
 	#runtimeModels?: ReturnType<typeof createRuntimeModels>;
 	#credentialChangeBusy = false;
 	#credentialRevision = 0;
+	#scannedToolsCache: { value: Awaited<ReturnType<typeof scanProviderTools>>; expiresAt: number } | null = null;
+	#scannedToolsPending: Promise<Awaited<ReturnType<typeof scanProviderTools>>> | null = null;
 
 	constructor(opts: {
 		db: DatabaseSync;
@@ -176,16 +180,39 @@ export class ModelConfigService {
 		}
 	}
 
+	async #getScannedProviderTools(): Promise<Awaited<ReturnType<typeof scanProviderTools>>> {
+		const now = Date.now();
+		if (this.#scannedToolsCache && now < this.#scannedToolsCache.expiresAt) {
+			return this.#scannedToolsCache.value;
+		}
+		if (!this.#scannedToolsPending) {
+			const pending = scanProviderTools()
+				.then((value) => {
+					this.#scannedToolsCache = { value, expiresAt: Date.now() + PROVIDER_TOOLS_CACHE_TTL_MS };
+					return value;
+				})
+				.finally(() => {
+					if (this.#scannedToolsPending === pending) this.#scannedToolsPending = null;
+				});
+			this.#scannedToolsPending = pending;
+		}
+		return this.#scannedToolsPending;
+	}
+
 	async providerTools(input: { action?: unknown; id?: unknown; enabled?: unknown } | null | undefined) {
 		if (input?.action === "set") {
 			if (typeof input.id !== "string" || typeof input.enabled !== "boolean") {
 				throw badRequest("Provide a provider id and enabled state.");
 			}
-			this.#db
-				.prepare("INSERT INTO provider_preferences(id,enabled) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled")
-				.run(input.id, input.enabled ? 1 : 0);
+			dbRun(
+				this.#db,
+				"INSERT INTO provider_preferences(id,enabled) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled",
+				input.id,
+				input.enabled ? 1 : 0,
+			);
+			this.#scannedToolsCache = null;
 		}
-		const scanned = await scanProviderTools();
+		const scanned = await this.#getScannedProviderTools();
 		const prefRows = dbAll<{ id: string; enabled: number }>(this.#db, "SELECT id,enabled FROM provider_preferences");
 		const preferences = new Map(prefRows.map(item => [item.id, Boolean(item.enabled)]));
 		type ProviderToolEntry = {

@@ -1,6 +1,8 @@
-import { useEffect, useState, type FormEvent } from "react"
+import { useContext, useEffect, useState, type FormEvent } from "react"
 import { KeyRound, X } from "lucide-react"
 import { request, requestJson } from "../../api"
+import { Banner, Button, IconButton, Input } from "@/components/ui"
+import { ConfirmContext } from "@/components/ui/confirm-context"
 import { relativeTime } from "../session-state"
 
 type Secret = { name: string; updatedAt: number }
@@ -10,45 +12,64 @@ type Secret = { name: string; updatedAt: number }
  * (agents, setup/run scripts and terminals). Values are write-only here.
  */
 export function ProjectSecretsSettings({ projectId }: { projectId: string }) {
+  const confirmCtx = useContext(ConfirmContext)
   const [secrets, setSecrets] = useState<Secret[] | null>(null)
   const [name, setName] = useState("")
   const [value, setValue] = useState("")
   const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState("")
+  const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
 
   useEffect(() => {
     let cancelled = false
     void request<{ secrets: Secret[] }>(`/api/projects/${encodeURIComponent(projectId)}/secrets`)
       .then(result => { if (!cancelled) setSecrets(result.secrets) })
-      .catch(err => { if (!cancelled) { setSecrets([]); setMessage(err instanceof Error ? err.message : "Could not read the secrets.") } })
+      .catch(err => {
+        if (!cancelled) {
+          setSecrets([])
+          setMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not read the secrets." })
+        }
+      })
     return () => { cancelled = true }
   }, [projectId])
 
   const save = async (event: FormEvent) => {
     event.preventDefault()
     setBusy(true)
-    setMessage("")
+    setMessage(null)
     try {
-      const replacing = secrets?.some(secret => secret.name === name.trim())
-      const result = await requestJson<{ secrets: Secret[] }>(`/api/projects/${encodeURIComponent(projectId)}/secrets`, "PUT", { name: name.trim(), value })
+      const trimmed = name.trim()
+      const replacing = secrets?.some(secret => secret.name === trimmed)
+      const result = await requestJson<{ secrets: Secret[] }>(`/api/projects/${encodeURIComponent(projectId)}/secrets`, "PUT", { name: trimmed, value })
       setSecrets(result.secrets)
-      setMessage(`${replacing ? "Replaced" : "Saved"} ${name.trim()}. New commands and sessions get it.`)
+      setMessage({ tone: "info", text: `${replacing ? "Replaced" : "Saved"} ${trimmed}. New commands and sessions get it.` })
       setName("")
       setValue("")
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Could not save the secret.")
+      setMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not save the secret." })
     } finally {
       setBusy(false)
     }
   }
 
   const remove = async (secretName: string) => {
-    if (!confirm(`Remove ${secretName}? Sessions won't get it anymore.`)) return
+    const promptText = `Remove ${secretName}? Sessions won't get it anymore.`
+    const ok = confirmCtx
+      ? await confirmCtx.confirm({
+          title: `Remove ${secretName}?`,
+          description: "Sessions won't get it anymore.",
+          confirmLabel: "Remove",
+          destructive: true,
+        })
+      : (typeof window === "undefined" || typeof window.confirm !== "function" ? true : window.confirm(promptText))
+    if (!ok) return
     try {
-      const result = await request<{ secrets: Secret[] }>(`/api/projects/${encodeURIComponent(projectId)}/secrets/${encodeURIComponent(secretName)}`, { method: "DELETE" })
+      const result = await request<{ secrets: Secret[] }>(
+        `/api/projects/${encodeURIComponent(projectId)}/secrets/${encodeURIComponent(secretName)}`,
+        { method: "DELETE" },
+      )
       setSecrets(result.secrets)
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Could not remove the secret.")
+      setMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not remove the secret." })
     }
   }
 
@@ -63,17 +84,37 @@ export function ProjectSecretsSettings({ projectId }: { projectId: string }) {
               <KeyRound className="size-3.5" />
               <code>{secret.name}</code>
               <span className="hint">set {relativeTime(secret.updatedAt)}</span>
-              <button type="button" className="ade-icon-btn" aria-label={`Remove ${secret.name}`} title="Remove" onClick={() => void remove(secret.name)}><X className="size-3" /></button>
+              <IconButton aria-label={`Remove ${secret.name}`} title="Remove" onClick={() => void remove(secret.name)}>
+                <X className="size-3" />
+              </IconButton>
             </li>
           ))}
         </ul>
       ) : secrets ? <p className="hint">No secrets yet.</p> : null}
       <form className="ade-secret-form" onSubmit={event => void save(event)}>
-        <input aria-label="Secret name" placeholder="NAME" value={name} onChange={event => setName(event.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "_"))} spellCheck={false} autoComplete="off" />
-        <input aria-label="Secret value" placeholder="Value" type="password" value={value} onChange={event => setValue(event.target.value)} autoComplete="new-password" />
-        <button type="submit" className="action-button" disabled={busy || !name.trim() || !value}>{busy ? "Saving…" : "Add"}</button>
+        <Input
+          inputSize="sm"
+          aria-label="Secret name"
+          placeholder="NAME"
+          value={name}
+          onChange={event => setName(event.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "_"))}
+          spellCheck={false}
+          autoComplete="off"
+        />
+        <Input
+          inputSize="sm"
+          aria-label="Secret value"
+          placeholder="Value"
+          type="password"
+          value={value}
+          onChange={event => setValue(event.target.value)}
+          autoComplete="new-password"
+        />
+        <Button type="submit" variant="primary" size="sm" loading={busy} disabled={!name.trim() || !value}>
+          {busy ? "Saving…" : "Add"}
+        </Button>
       </form>
-      {message ? <p className="hint" role="status">{message}</p> : null}
+      {message ? <Banner tone={message.tone}>{message.text}</Banner> : null}
     </section>
   )
 }

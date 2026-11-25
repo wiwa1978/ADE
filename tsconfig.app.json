@@ -14,6 +14,8 @@
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
     "noEmit": true,
+    "strict": true,
+    "noImplicitOverride": true,
     "jsx": "react-jsx",
     "paths": {
       "@/*": ["./*"]
@@ -25,5 +27,6 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["*.ts", "*.tsx", "src/**/*.ts", "src/**/*.tsx", "components/**/*.ts", "components/**/*.tsx", "lib/**/*.ts"]
+  "include": ["*.ts", "*.tsx", "src/**/*.ts", "src/**/*.tsx", "components/**/*.ts", "components/**/*.tsx", "lib/**/*.ts"],
+  "exclude": ["vite.config.ts", "**/*.test.ts", "**/*.test.tsx"]
 }

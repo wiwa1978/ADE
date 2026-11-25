@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { Bot, Brain, CheckCircle2, ChevronDown, ChevronRight, Clock, GitMerge, Loader2, Maximize2, Minimize2, PauseCircle, Pin, PinOff, XCircle } from "lucide-react"
 import { request } from "../../api"
+import { usePolling } from "../hooks/usePolling"
 import type { ConversationTimelineSnapshot, SubagentInfo, TimelineItem, TimelineToolCall } from "../../app-types"
 import { SubagentPanel } from "../panels/SubagentPanel"
 import { t as tr } from "../i18n"
@@ -70,18 +71,15 @@ export function AgentsView({
   const work = useAgentsWork(sessionId, refreshKey)
   const [selected, setSelected] = useState<string | null>(null)
   const [pinned, setPinned] = useState<string[]>([])
-  // "Now", for how long working agents have been running; ticks every 30 seconds.
+  // "Now", for how long working agents have been running; ticks every 30 seconds while visible and active.
+  const working = subagents.filter(busyOf).length + (leadBusy ? 1 : 0)
   const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 30_000)
-    return () => clearInterval(timer)
-  }, [])
+  usePolling(() => { setNow(Date.now()) }, 30_000, { enabled: working > 0, immediate: false })
   const firstWorking = subagents.find(busyOf)?.id ?? subagents.at(-1)?.id ?? LEAD
   const focus = selected && (selected === LEAD || subagents.some(sub => sub.id === selected)) ? selected : firstWorking
   const shownIds = pinned.length ? [...pinned, ...(pinned.includes(focus) ? [] : [focus])].slice(0, 3) : [focus]
   const togglePin = (id: string) => setPinned(list => list.includes(id) ? list.filter(item => item !== id) : [...list, id].slice(-3))
 
-  const working = subagents.filter(busyOf).length + (leadBusy ? 1 : 0)
   const done = subagents.filter(sub => sub.status === "completed").length
   const lead = summarize(leadItems, leadBusy, leadLiveTools)
 
@@ -252,7 +250,6 @@ function AgentChangesStrip({ sessionId, sub, changes, busy }: { sessionId: strin
       setDiff(err instanceof Error ? err.message : t("ag.diffError"))
     }
   }
-
 
   return (
     <div className="ade-agent-changes">

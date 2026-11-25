@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react"
 import { History, RotateCcw, Save } from "lucide-react"
 import { request, requestJson } from "../../api"
+import { useI18n } from "../i18n/I18nContext"
 import { relativeTime } from "../session-state"
 import { confirmRestore, restoreCheckpoint, type CheckpointInfo } from "./checkpoint-actions"
 
 /** Every snapshot of the session's workspace, newest first, with one-click rewind. */
 export function CheckpointList({ sessionId, busy, onRestored }: { sessionId: string; busy: boolean; onRestored: () => void }) {
+  const { t } = useI18n()
   const [items, setItems] = useState<CheckpointInfo[] | null>(null)
   const [working, setWorking] = useState<string | null>(null)
   const [error, setError] = useState("")
@@ -17,9 +19,9 @@ export function CheckpointList({ sessionId, busy, onRestored }: { sessionId: str
       setItems(result.checkpoints)
     } catch (cause) {
       setItems([])
-      setError(cause instanceof Error ? cause.message : "Could not load the history.")
+      setError(cause instanceof Error ? cause.message : t("pnlx.cp.errLoad"))
     }
-  }, [sessionId])
+  }, [sessionId, t])
 
   useEffect(() => {
     let cancelled = false
@@ -28,20 +30,20 @@ export function CheckpointList({ sessionId, busy, onRestored }: { sessionId: str
       .catch(cause => {
         if (cancelled) return
         setItems([])
-        setError(cause instanceof Error ? cause.message : "Could not load the history.")
+        setError(cause instanceof Error ? cause.message : t("pnlx.cp.errLoad"))
       })
     return () => { cancelled = true }
-  }, [sessionId])
+  }, [sessionId, t])
 
   const save = async () => {
     setWorking("save")
     setError("")
     try {
       const result = await requestJson<{ unchanged: boolean }>(`/api/sessions/${encodeURIComponent(sessionId)}/checkpoints`, "POST")
-      setNotice(result.unchanged ? "Nothing changed since the last checkpoint." : "Checkpoint saved.")
+      setNotice(result.unchanged ? t("pnlx.cp.unchanged") : t("pnlx.cp.saved"))
       await load()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save a checkpoint.")
+      setError(cause instanceof Error ? cause.message : t("pnlx.cp.errSave"))
     } finally {
       setWorking(null)
     }
@@ -53,11 +55,11 @@ export function CheckpointList({ sessionId, busy, onRestored }: { sessionId: str
     setError("")
     try {
       await restoreCheckpoint(sessionId, item)
-      setNotice(`Rewound to "${item.label}".`)
+      setNotice(t("pnlx.cp.rewoundTo", { label: item.label }))
       onRestored()
       await load()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not rewind.")
+      setError(cause instanceof Error ? cause.message : t("pnlx.cp.errRewind"))
     } finally {
       setWorking(null)
     }
@@ -66,23 +68,23 @@ export function CheckpointList({ sessionId, busy, onRestored }: { sessionId: str
   return (
     <div className="ade-checkpoints">
       <div className="ade-checkpoints-head">
-        <p className="ade-muted ade-xs">ADE saves the workspace before each message you send. Rewind puts every file (and commits) back to that moment.</p>
-        <button type="button" className="ade-chip-btn" disabled={Boolean(working)} onClick={() => void save()}><Save className="size-3" /> Save now</button>
+        <p className="ade-muted ade-xs">{t("pnlx.cp.intro")}</p>
+        <button type="button" className="ade-chip-btn" disabled={Boolean(working)} onClick={() => void save()}><Save className="size-3" /> {t("pnlx.cp.saveNow")}</button>
       </div>
       {error ? <div className="ade-banner-error" role="alert">{error}</div> : null}
       {notice ? <div className="ade-banner-ok" role="status">{notice}</div> : null}
-      {items === null ? <p className="ade-muted ade-xs">Loading history…</p>
-        : items.length === 0 ? <div className="ade-pane-empty"><History className="size-6 opacity-40" /><p>No checkpoints yet. One is saved each time you send the agent a message.</p></div>
+      {items === null ? <p className="ade-muted ade-xs">{t("pnlx.cp.loading")}</p>
+        : items.length === 0 ? <div className="ade-pane-empty"><History className="size-6 opacity-40" /><p>{t("pnlx.cp.empty")}</p></div>
         : (
           <ul className="ade-checkpoint-rows">
             {items.map(item => (
               <li key={item.id}>
                 <div className="ade-inbox-main">
                   <strong className="ade-truncate" title={item.label}>{item.label}</strong>
-                  <small>{relativeTime(item.createdAt)} · {item.filesChanged === 0 ? "same as now" : `${item.filesChanged} file${item.filesChanged === 1 ? "" : "s"} differ from now`}</small>
+                  <small>{relativeTime(item.createdAt)} · {item.filesChanged === 0 ? t("pnlx.cp.sameAsNow") : item.filesChanged === 1 ? t("pnlx.cp.fileDiffers", { count: item.filesChanged }) : t("pnlx.cp.filesDiffer", { count: item.filesChanged })}</small>
                 </div>
-                <button type="button" className="ade-chip-btn" disabled={busy || Boolean(working) || item.filesChanged === 0} title={busy ? "Stop the agent first" : undefined} onClick={() => void restore(item)}>
-                  <RotateCcw className="size-3" /> {working === item.id ? "Rewinding…" : "Rewind"}
+                <button type="button" className="ade-chip-btn" disabled={busy || Boolean(working) || item.filesChanged === 0} title={busy ? t("pnlx.cp.stopAgentFirst") : undefined} onClick={() => void restore(item)}>
+                  <RotateCcw className="size-3" /> {working === item.id ? t("pnlx.cp.rewinding") : t("pnlx.cp.rewind")}
                 </button>
               </li>
             ))}

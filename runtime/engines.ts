@@ -5,8 +5,10 @@
 // checkpoints, review and pull request tools work the same for every engine.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { rename, writeFile } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import type { RuntimeEventBus } from "./events.ts";
 import { redact, secretEnv } from "./project-secrets.ts";
 import { claudeDenyRules } from "./guardrails.ts";
@@ -35,6 +37,84 @@ export type EngineSession = {
 /** How a run ended, for subagents the coordinator waits on. */
 export type EngineResult = { status: "completed" | "failed"; text: string };
 
+const ToolCallSchema = z.object({
+	callId: z.string(),
+	name: z.string(),
+	arguments: z.record(z.string(), z.unknown()).default({}),
+	status: z.enum(["running", "done", "error"]),
+	output: z.string().default(""),
+	isError: z.boolean().default(false),
+});
+
+const ItemSchema = z.discriminatedUnion("kind", [
+	z.object({ id: z.string(), kind: z.literal("user"), content: z.string(), createdAt: z.number() }),
+	z.object({
+		id: z.string(),
+		kind: z.literal("assistant"),
+		thinking: z.string().default(""),
+		text: z.string().default(""),
+		toolCalls: z.array(ToolCallSchema).default([]),
+		streaming: z.boolean().optional(),
+		createdAt: z.number(),
+	}),
+	z.object({ id: z.string(), kind: z.literal("error"), message: z.string(), createdAt: z.number() }),
+]);
+
+const EngineSessionSchema = z.object({
+	engine: z.enum(["claude-code", "codex"]),
+	externalId: z.string().nullable().default(null),
+	items: z.array(ItemSchema).default([]),
+	usage: z.object({
+		inputTokens: z.number().finite().default(0),
+		outputTokens: z.number().finite().default(0),
+		totalCost: z.number().finite().default(0),
+	}).default({ inputTokens: 0, outputTokens: 0, totalCost: 0 }),
+	lastStatus: z.enum(["completed", "failed"]).nullable().default(null),
+	updatedAt: z.number().default(0),
+	parent: z.object({
+		sessionId: z.string(),
+		conversationId: z.string(),
+		cwd: z.string().optional(),
+	}).nullable().optional(),
+});
+
+const MAX_CACHE_ENTRIES = 100;
+const SAVE_DEBOUNCE_MS = 400;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function asString(value: unknown): string | undefined {
+	return typeof value === "string" ? value : undefined;
+}
+
+function asFiniteNumber(value: unknown): number {
+	if (typeof value === "number" && Number.isFinite(value)) return value;
+	if (typeof value === "string" && value.trim()) {
+		const parsed = Number(value);
+		if (Number.isFinite(parsed)) return parsed;
+	}
+	return 0;
+}
+
+function stringifyToolContent(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (Array.isArray(content)) {
+		return content
+			.map((part) => (isRecord(part) ? (asString(part.text) ?? "") : typeof part === "string" ? part : ""))
+			.join("\n");
+	}
+	if (isRecord(content)) {
+		try {
+			return JSON.stringify(content);
+		} catch {
+			return "";
+		}
+	}
+	return content == null ? "" : String(content);
+}
+
 export const engineInfo: Record<EngineId, { name: string; command: string; description: string }> = {
 	"claude-code": { name: "Claude Code", command: "claude", description: "Anthropic's coding agent, using your Claude Code sign-in." },
 	"codex": { name: "Codex", command: "codex", description: "OpenAI's coding agent, using your Codex sign-in." },
@@ -50,71 +130,117 @@ function commandAvailable(command: string) {
 }
 
 /** Translate one CLI event (JSON line) into timeline changes. Exported for tests. */
-// oxlint-disable-next-line typescript/no-explicit-any -- CLI events are untyped JSON; every field is checked before use.
-export function applyEvent(engine: EngineId, state: EngineSession, turn: { assistant: Item & { kind: "assistant" } }, event: any): void {
+export function applyEvent(engine: EngineId, state: EngineSession, turn: { assistant: Item & { kind: "assistant" } }, event: unknown): void {
+	if (!isRecord(event)) return;
 	const assistant = turn.assistant;
 	const findTool = (id: string) => assistant.toolCalls.find(call => call.callId === id);
+	const eventType = asString(event.type);
 	if (engine === "claude-code") {
-		if (event?.session_id && !state.externalId) state.externalId = String(event.session_id);
-		if (event?.type === "assistant" && Array.isArray(event.message?.content)) {
-			for (const block of event.message.content) {
-				if (block?.type === "text" && block.text) assistant.text += (assistant.text ? "\n\n" : "") + block.text;
-				else if (block?.type === "thinking" && block.thinking) assistant.thinking += block.thinking;
-				else if (block?.type === "tool_use") {
-					assistant.toolCalls.push({ callId: String(block.id ?? randomUUID()), name: String(block.name ?? "tool"), arguments: block.input && typeof block.input === "object" ? block.input : {}, status: "running", output: "", isError: false });
+		const sessionId = asString(event.session_id);
+		if (sessionId && !state.externalId) state.externalId = sessionId;
+		const message = isRecord(event.message) ? event.message : null;
+		const blocks = message && Array.isArray(message.content) ? message.content : null;
+		if (eventType === "assistant" && blocks) {
+			for (const rawBlock of blocks) {
+				if (!isRecord(rawBlock)) continue;
+				const blockType = asString(rawBlock.type);
+				const blockText = asString(rawBlock.text);
+				const blockThinking = asString(rawBlock.thinking);
+				if (blockType === "text" && blockText) {
+					assistant.text += (assistant.text ? "\n\n" : "") + blockText;
+				} else if (blockType === "thinking" && blockThinking) {
+					assistant.thinking += blockThinking;
+				} else if (blockType === "tool_use") {
+					assistant.toolCalls.push({
+						callId: asString(rawBlock.id) ?? randomUUID(),
+						name: asString(rawBlock.name) ?? "tool",
+						arguments: isRecord(rawBlock.input) ? rawBlock.input : {},
+						status: "running",
+						output: "",
+						isError: false,
+					});
 				}
 			}
-		} else if (event?.type === "user" && Array.isArray(event.message?.content)) {
-			for (const block of event.message.content) {
-				if (block?.type !== "tool_result") continue;
-				const call = findTool(String(block.tool_use_id));
+		} else if (eventType === "user" && blocks) {
+			for (const rawBlock of blocks) {
+				if (!isRecord(rawBlock) || asString(rawBlock.type) !== "tool_result") continue;
+				const toolUseId = asString(rawBlock.tool_use_id);
+				if (!toolUseId) continue;
+				const call = findTool(toolUseId);
 				if (!call) continue;
-				const content = Array.isArray(block.content) ? block.content.map((part: { text?: unknown } | null) => String(part?.text ?? "")).join("\n") : String(block.content ?? "");
+				const content = stringifyToolContent(rawBlock.content);
 				call.output = content.slice(0, 20000);
-				call.isError = Boolean(block.is_error);
+				call.isError = Boolean(rawBlock.is_error);
 				call.status = call.isError ? "error" : "done";
 			}
-		} else if (event?.type === "result") {
-			if (event.session_id) state.externalId = String(event.session_id);
-			const usage = event.usage ?? {};
-			state.usage.inputTokens += Number(usage.input_tokens ?? 0) + Number(usage.cache_read_input_tokens ?? 0) + Number(usage.cache_creation_input_tokens ?? 0);
-			state.usage.outputTokens += Number(usage.output_tokens ?? 0);
-			state.usage.totalCost += Number(event.total_cost_usd ?? 0);
-			if (event.is_error) state.lastStatus = "failed";
-			if (!assistant.text && typeof event.result === "string") assistant.text = event.result;
+		} else if (eventType === "result") {
+			if (sessionId) state.externalId = sessionId;
+			const usage = isRecord(event.usage) ? event.usage : {};
+			state.usage.inputTokens +=
+				asFiniteNumber(usage.input_tokens) +
+				asFiniteNumber(usage.cache_read_input_tokens) +
+				asFiniteNumber(usage.cache_creation_input_tokens);
+			state.usage.outputTokens += asFiniteNumber(usage.output_tokens);
+			state.usage.totalCost += asFiniteNumber(event.total_cost_usd);
+			if (event.is_error === true) state.lastStatus = "failed";
+			const resultText = asString(event.result);
+			if (!assistant.text && resultText) assistant.text = resultText;
 		}
 		return;
 	}
 	// Codex
-	if (event?.type === "thread.started" && event.thread_id) state.externalId = String(event.thread_id);
-	const item = event?.item;
-	if ((event?.type === "item.started" || event?.type === "item.updated" || event?.type === "item.completed") && item) {
-		const done = event.type === "item.completed";
-		if (item.type === "agent_message" && done && item.text) assistant.text += (assistant.text ? "\n\n" : "") + item.text;
-		else if (item.type === "reasoning" && done && item.text) assistant.thinking += item.text;
-		else if (item.type === "command_execution" || item.type === "file_change" || item.type === "mcp_tool_call" || item.type === "web_search") {
-			let call = findTool(String(item.id));
+	const threadId = asString(event.thread_id);
+	if (eventType === "thread.started" && threadId) state.externalId = threadId;
+	const item = isRecord(event.item) ? event.item : null;
+	if ((eventType === "item.started" || eventType === "item.updated" || eventType === "item.completed") && item) {
+		const done = eventType === "item.completed";
+		const itemType = asString(item.type);
+		const itemText = asString(item.text);
+		if (itemType === "agent_message" && done && itemText) {
+			assistant.text += (assistant.text ? "\n\n" : "") + itemText;
+		} else if (itemType === "reasoning" && done && itemText) {
+			assistant.thinking += itemText;
+		} else if (itemType === "command_execution" || itemType === "file_change" || itemType === "mcp_tool_call" || itemType === "web_search") {
+			const itemId = asString(item.id) ?? (typeof item.id === "number" ? String(item.id) : randomUUID());
+			let call = findTool(itemId);
 			if (!call) {
-				const name = item.type === "command_execution" ? "run_command" : item.type === "file_change" ? "edit_files" : item.type === "web_search" ? "web_search" : String(item.tool ?? "mcp_tool");
-				const args = item.type === "command_execution" ? { command: item.command } : item.type === "file_change" ? { changes: item.changes } : item.type === "web_search" ? { query: item.query } : { server: item.server, arguments: item.arguments };
-				call = { callId: String(item.id), name, arguments: args, status: "running", output: "", isError: false };
+				const name = itemType === "command_execution"
+					? "run_command"
+					: itemType === "file_change"
+						? "edit_files"
+						: itemType === "web_search"
+							? "web_search"
+							: (asString(item.tool) ?? "mcp_tool");
+				const args: Record<string, unknown> = itemType === "command_execution"
+					? { command: item.command }
+					: itemType === "file_change"
+						? { changes: item.changes }
+						: itemType === "web_search"
+							? { query: item.query }
+							: { server: item.server, arguments: item.arguments };
+				call = { callId: itemId, name, arguments: args, status: "running", output: "", isError: false };
 				assistant.toolCalls.push(call);
 			}
-			if (typeof item.aggregated_output === "string") call.output = item.aggregated_output.slice(-20000);
+			const aggregated = asString(item.aggregated_output);
+			if (aggregated !== undefined) call.output = aggregated.slice(-20000);
 			if (done) {
 				call.isError = item.status === "failed" || (typeof item.exit_code === "number" && item.exit_code !== 0);
 				call.status = call.isError ? "error" : "done";
 			}
-		} else if (item.type === "error" && item.message) {
-			// Codex reports warnings (e.g. unsupported config) as error items; only turn.failed is fatal.
-			assistant.thinking += `${assistant.thinking ? "\n" : ""}Note: ${item.message}`;
+		} else if (itemType === "error") {
+			const itemMessage = asString(item.message);
+			if (itemMessage) {
+				// Codex reports warnings (e.g. unsupported config) as error items; only turn.failed is fatal.
+				assistant.thinking += `${assistant.thinking ? "\n" : ""}Note: ${itemMessage}`;
+			}
 		}
-	} else if (event?.type === "turn.completed" && event.usage) {
-		state.usage.inputTokens += Number(event.usage.input_tokens ?? 0);
-		state.usage.outputTokens += Number(event.usage.output_tokens ?? 0);
-	} else if (event?.type === "turn.failed" || event?.type === "error") {
+	} else if (eventType === "turn.completed" && isRecord(event.usage)) {
+		state.usage.inputTokens += asFiniteNumber(event.usage.input_tokens);
+		state.usage.outputTokens += asFiniteNumber(event.usage.output_tokens);
+	} else if (eventType === "turn.failed" || eventType === "error") {
 		state.lastStatus = "failed";
-		const message = event.error?.message ?? event.message;
+		const errObj = isRecord(event.error) ? event.error : null;
+		const message = asString(errObj?.message) ?? asString(event.message);
 		if (message) assistant.text += `\n\n${message}`;
 	}
 }
@@ -143,7 +269,7 @@ export function engineArgs(engine: EngineId, prompt: string, externalId: string 
 		const args = ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", mode, "--settings", JSON.stringify({ permissions: { deny: claudeDenyRules() } })];
 		if (externalId) args.push("--resume", externalId);
 		if (model) args.push("--model", model);
-		args.push(prompt);
+		args.push("--", prompt);
 		return args;
 	}
 	// In a container, VM or WSL the machine itself is the sandbox, and Codex's own sandbox often
@@ -152,8 +278,8 @@ export function engineArgs(engine: EngineId, prompt: string, externalId: string 
 	const args = ["exec", "--json", "--skip-git-repo-check", ...sandbox];
 	if (policy !== "ask" && policy !== "auto-all") for (const dir of writableDirs) args.push("--add-dir", dir);
 	if (model) args.push("-m", model);
-	if (externalId) args.push("resume", externalId, prompt);
-	else args.push(prompt);
+	if (externalId) args.push("resume", externalId, "--", prompt);
+	else args.push("--", prompt);
 	return args;
 }
 
@@ -172,6 +298,8 @@ export class EngineManager {
 	#waiters = new Map<string, Array<(result: EngineResult) => void>>();
 	#cwd = new Map<string, string>();
 	#cache = new Map<string, EngineSession>();
+	#saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	#saveQueues = new Map<string, Promise<void>>();
 	#available: Record<EngineId, boolean> | null = null;
 	#environment: NodeJS.ProcessEnv;
 
@@ -202,23 +330,83 @@ export class EngineManager {
 		return join(this.#dir, `${sessionId}.json`);
 	}
 
+	#cacheTouch(sessionId: string, value: EngineSession): EngineSession {
+		this.#cache.delete(sessionId);
+		this.#cache.set(sessionId, value);
+		while (this.#cache.size > MAX_CACHE_ENTRIES) {
+			let evicted = false;
+			for (const oldestKey of this.#cache.keys()) {
+				if (!this.#running.has(oldestKey)) {
+					this.#cache.delete(oldestKey);
+					evicted = true;
+					break;
+				}
+			}
+			if (!evicted) break;
+		}
+		return value;
+	}
+
 	get(sessionId: string): EngineSession | null {
-		if (this.#cache.has(sessionId)) return this.#cache.get(sessionId)!;
+		const cached = this.#cache.get(sessionId);
+		if (cached) return this.#cacheTouch(sessionId, cached);
 		try {
-			const value = JSON.parse(readFileSync(this.#path(sessionId), "utf8")) as EngineSession;
-			this.#cache.set(sessionId, value);
-			return value;
+			const parsed = EngineSessionSchema.safeParse(JSON.parse(readFileSync(this.#path(sessionId), "utf8")));
+			if (!parsed.success) return null;
+			return this.#cacheTouch(sessionId, parsed.data);
 		} catch {
 			return null;
 		}
 	}
 
-	#save(sessionId: string, state: EngineSession) {
+	#saveSync(sessionId: string, state: EngineSession) {
 		state.updatedAt = Date.now();
-		this.#cache.set(sessionId, state);
+		this.#cacheTouch(sessionId, state);
 		const path = this.#path(sessionId);
-		writeFileSync(`${path}.tmp`, JSON.stringify(state));
-		renameSync(`${path}.tmp`, path);
+		const temp = `${path}.${randomUUID()}.tmp`;
+		writeFileSync(temp, JSON.stringify(state));
+		renameSync(temp, path);
+	}
+
+	#persistAsync(sessionId: string, state: EngineSession) {
+		state.updatedAt = Date.now();
+		this.#cacheTouch(sessionId, state);
+		const path = this.#path(sessionId);
+		const payload = JSON.stringify(state);
+		const prev = this.#saveQueues.get(sessionId) ?? Promise.resolve();
+		const next = prev
+			.catch(() => undefined)
+			.then(async () => {
+				const temp = `${path}.${randomUUID()}.tmp`;
+				await writeFile(temp, payload, "utf8");
+				await rename(temp, path);
+			})
+			.catch(() => undefined)
+			.finally(() => {
+				if (this.#saveQueues.get(sessionId) === next) this.#saveQueues.delete(sessionId);
+			});
+		this.#saveQueues.set(sessionId, next);
+	}
+
+	#scheduleSave(sessionId: string, state: EngineSession, immediate = false) {
+		state.updatedAt = Date.now();
+		this.#cacheTouch(sessionId, state);
+		const existingTimer = this.#saveTimers.get(sessionId);
+		if (immediate) {
+			if (existingTimer) {
+				clearTimeout(existingTimer);
+				this.#saveTimers.delete(sessionId);
+			}
+			this.#persistAsync(sessionId, state);
+			return;
+		}
+		if (existingTimer) return;
+		const timer = setTimeout(() => {
+			this.#saveTimers.delete(sessionId);
+			this.#persistAsync(sessionId, state);
+		}, SAVE_DEBOUNCE_MS);
+		timer.unref?.();
+		this.#saveTimers.set(sessionId, timer);
 	}
 
 	/** Choose the engine for a session (only before its first message). */
@@ -233,7 +421,7 @@ export class EngineManager {
 			throw Object.assign(new Error("The engine can't change after the conversation has started."), { statusCode: 409 });
 		}
 		const state: EngineSession = { engine, externalId: null, items: [], usage: { inputTokens: 0, outputTokens: 0, totalCost: 0 }, lastStatus: null, updatedAt: Date.now(), parent };
-		this.#save(sessionId, state);
+		this.#saveSync(sessionId, state);
 		return state;
 	}
 
@@ -292,7 +480,7 @@ export class EngineManager {
 		const assistant: Item & { kind: "assistant" } = { id: randomUUID(), kind: "assistant", thinking: "", text: "", toolCalls: [], streaming: true, createdAt: now };
 		state.items.push(assistant);
 		state.lastStatus = null;
-		this.#save(sessionId, state);
+		this.#saveSync(sessionId, state);
 		const command = engineInfo[state.engine].command;
 		const secrets = secretEnv(cwd);
 		// A subagent runs where its ADE session runs.
@@ -326,7 +514,7 @@ export class EngineManager {
 		const flush = (force = false) => {
 			if (!force && Date.now() - lastEmit < 250) return;
 			lastEmit = Date.now();
-			this.#save(sessionId, state);
+			this.#scheduleSave(sessionId, state, force);
 			this.#emit(sessionId);
 		};
 		child.stdout?.on("data", (chunk: Buffer) => {
@@ -345,17 +533,21 @@ export class EngineManager {
 			}
 			flush();
 		});
-		child.stderr?.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString("utf8")).slice(-4000); });
+		child.stderr?.on("data", (chunk: Buffer) => {
+			stderr = redact(stderr + chunk.toString("utf8"), secrets).slice(-4000);
+		});
 		child.on("error", error => {
-			stderr += `\n${error.message}`;
+			stderr = redact(`${stderr}\n${error.message}`, secrets).slice(-4000);
 		});
 		child.on("close", code => {
 			this.#running.delete(sessionId);
+			this.#cwd.delete(sessionId);
 			assistant.streaming = false;
 			for (const call of assistant.toolCalls) if (call.status === "running") call.status = code === 0 ? "done" : "error";
+			const safeStderr = redact(stderr, secrets).trim();
 			if (code !== 0 && code !== null && state.lastStatus !== "failed") state.lastStatus = "failed";
 			if (state.lastStatus === "failed" || (code !== 0 && code !== null)) {
-				state.items.push({ id: randomUUID(), kind: "error", message: `${engineInfo[state.engine].name} stopped with an error.${stderr.trim() ? ` ${stderr.trim().split("\n").slice(-3).join(" ")}` : ""}`, createdAt: Date.now() });
+				state.items.push({ id: randomUUID(), kind: "error", message: `${engineInfo[state.engine].name} stopped with an error.${safeStderr ? ` ${safeStderr.split("\n").slice(-3).join(" ")}` : ""}`, createdAt: Date.now() });
 			} else if (code === null) {
 				state.items.push({ id: randomUUID(), kind: "error", message: "Stopped.", createdAt: Date.now() });
 				state.lastStatus = "failed";
@@ -393,5 +585,7 @@ export class EngineManager {
 
 	abortAll() {
 		for (const id of [...this.#running.keys()]) this.abort(id);
+		for (const timer of this.#saveTimers.values()) clearTimeout(timer);
+		this.#saveTimers.clear();
 	}
 }

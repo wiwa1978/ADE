@@ -10,16 +10,20 @@ import { terminalInvocation } from "./execution-targets.ts";
 const MAX_INPUT_BYTES = 8_192;
 const MAX_OUTPUT_CHARACTERS = 500_000;
 const MAX_ACTIVE_TERMINALS = 8;
+const MAX_EXITED_TERMINALS = 20;
+const EXITED_TERMINAL_TTL_MS = 10 * 60_000;
 
 type TerminalRecord = {
 	id: string;
 	pty: IPty;
 	shell: string;
 	cwd: string;
-	output: string;
+	chunks: string[];
+	outputLength: number;
 	baseCursor: number;
 	exited: boolean;
 	exitCode: number | null;
+	exitedAt: number | null;
 };
 
 function inputError(message: string, statusCode = 400) {
@@ -54,7 +58,28 @@ export class TerminalManager {
 		this.#maxOutputCharacters = maxOutputCharacters;
 	}
 
+	#pruneExited() {
+		const now = Date.now();
+		const exited: TerminalRecord[] = [];
+		for (const [id, terminal] of this.#terminals) {
+			if (!terminal.exited) continue;
+			if (terminal.exitedAt !== null && now - terminal.exitedAt > EXITED_TERMINAL_TTL_MS) {
+				this.#terminals.delete(id);
+			} else {
+				exited.push(terminal);
+			}
+		}
+		if (exited.length > MAX_EXITED_TERMINALS) {
+			exited.sort((a, b) => (a.exitedAt ?? 0) - (b.exitedAt ?? 0));
+			const excess = exited.length - MAX_EXITED_TERMINALS;
+			for (let i = 0; i < excess; i++) {
+				this.#terminals.delete(exited[i].id);
+			}
+		}
+	}
+
 	create(input: { cwd?: unknown; cols?: unknown; rows?: unknown } | null | undefined) {
+		this.#pruneExited();
 		if ([...this.#terminals.values()].filter(terminal => !terminal.exited).length >= MAX_ACTIVE_TERMINALS) {
 			throw inputError(`Close an existing terminal before starting another (limit ${MAX_ACTIVE_TERMINALS}).`, 429);
 		}
@@ -73,7 +98,7 @@ export class TerminalManager {
 		const rows = integerInRange(input?.rows, 5, 200, 24, "Terminal rows");
 		const secrets = secretEnv(cwd);
 		// A terminal in a Docker session's workspace opens a shell inside its container.
-		const docker = terminalInvocation(cwd, [...Object.keys(secrets), "TERM", "COLORTERM"])
+		const docker = terminalInvocation(cwd, [...Object.keys(secrets), "TERM", "COLORTERM"]);
 		const shell = docker?.file ?? terminalShell(this.#environment);
 		let pty: IPty;
 		try {
@@ -85,18 +110,41 @@ export class TerminalManager {
 			throw inputError("Could not start the system shell for this workspace.", 503);
 		}
 		const id = randomUUID();
-		const terminal: TerminalRecord = { id, pty, shell: basename(shell), cwd, output: "", baseCursor: 0, exited: false, exitCode: null };
+		const terminal: TerminalRecord = {
+			id,
+			pty,
+			shell: basename(shell),
+			cwd,
+			chunks: [],
+			outputLength: 0,
+			baseCursor: 0,
+			exited: false,
+			exitCode: null,
+			exitedAt: null,
+		};
 		pty.onData(data => {
-			terminal.output += data;
-			if (terminal.output.length > this.#maxOutputCharacters) {
-				const trim = terminal.output.length - this.#maxOutputCharacters;
-				terminal.output = terminal.output.slice(trim);
-				terminal.baseCursor += trim;
+			if (!data) return;
+			terminal.chunks.push(data);
+			terminal.outputLength += data.length;
+			while (terminal.outputLength > this.#maxOutputCharacters && terminal.chunks.length > 0) {
+				const excess = terminal.outputLength - this.#maxOutputCharacters;
+				const head = terminal.chunks[0];
+				if (head.length <= excess) {
+					terminal.chunks.shift();
+					terminal.outputLength -= head.length;
+					terminal.baseCursor += head.length;
+				} else {
+					terminal.chunks[0] = head.slice(excess);
+					terminal.outputLength -= excess;
+					terminal.baseCursor += excess;
+				}
 			}
 		});
 		pty.onExit(event => {
 			terminal.exited = true;
 			terminal.exitCode = Number.isInteger(event.exitCode) ? event.exitCode : null;
+			terminal.exitedAt = Date.now();
+			this.#pruneExited();
 		});
 		this.#terminals.set(id, terminal);
 		return { id, shell: terminal.shell, cwd, cols, rows };
@@ -108,14 +156,29 @@ export class TerminalManager {
 		return terminal;
 	}
 
+	#sliceOutput(terminal: TerminalRecord, offset: number): string {
+		if (offset >= terminal.outputLength) return "";
+		if (offset <= 0) return terminal.chunks.join("");
+		const parts: string[] = [];
+		let pos = 0;
+		for (const chunk of terminal.chunks) {
+			const end = pos + chunk.length;
+			if (end > offset) {
+				parts.push(pos >= offset ? chunk : chunk.slice(offset - pos));
+			}
+			pos = end;
+		}
+		return parts.join("");
+	}
+
 	read(id: string, cursorValue?: unknown) {
 		const terminal = this.#terminal(id);
 		const cursor = cursorValue === undefined ? 0 : Number(cursorValue);
 		if (!Number.isSafeInteger(cursor) || cursor < 0) throw inputError("Terminal output cursor must be a non-negative integer.");
-		const endCursor = terminal.baseCursor + terminal.output.length;
+		const endCursor = terminal.baseCursor + terminal.outputLength;
 		const startCursor = Math.max(cursor, terminal.baseCursor);
 		return {
-			id, cwd: terminal.cwd, shell: terminal.shell, data: terminal.output.slice(startCursor - terminal.baseCursor),
+			id, cwd: terminal.cwd, shell: terminal.shell, data: this.#sliceOutput(terminal, startCursor - terminal.baseCursor),
 			cursor: endCursor, baseCursor: terminal.baseCursor, truncated: cursor < terminal.baseCursor,
 			exited: terminal.exited, exitCode: terminal.exitCode,
 		};

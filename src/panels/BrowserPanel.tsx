@@ -14,6 +14,7 @@ import {
 } from "lucide-react"
 import { request, requestJson } from "../../api"
 import type { BrowserState, BrowserViewport } from "../../app-types"
+import { useI18n } from "../i18n/I18nContext"
 
 const QUICK_BOOKMARKS = [
   { label: "localhost:3000", url: "http://localhost:3000" },
@@ -21,6 +22,43 @@ const QUICK_BOOKMARKS = [
   { label: "localhost:8080", url: "http://localhost:8080" },
   { label: "GitHub", url: "https://github.com" },
 ]
+
+function parseHttpUrl(raw: string): URL | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)
+  if (hasScheme && !/^https?:\/\//i.test(trimmed)) return null
+  const candidate = hasScheme
+    ? trimmed
+    : trimmed.startsWith("localhost") || trimmed.startsWith("127.0.0.1") || trimmed.startsWith("[::1]")
+      ? `http://${trimmed}`
+      : `https://${trimmed}`
+  try {
+    const parsed = new URL(candidate)
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function isOwnOrigin(parsed: URL): boolean {
+  return typeof window !== "undefined" && Boolean(window.location?.origin) && parsed.origin === window.location.origin
+}
+
+function validateIframeUrl(raw: string): { url: string; errorKey: "pnlx.browser.errInvalidUrl" | "pnlx.browser.errOwnOrigin" | null } {
+  const parsed = parseHttpUrl(raw)
+  if (!parsed) {
+    return { url: "", errorKey: "pnlx.browser.errInvalidUrl" }
+  }
+  if (isOwnOrigin(parsed)) {
+    return {
+      url: "",
+      errorKey: "pnlx.browser.errOwnOrigin",
+    }
+  }
+  return { url: parsed.toString(), errorKey: null }
+}
 
 export function BrowserPanel({
   browserState,
@@ -33,11 +71,26 @@ export function BrowserPanel({
   onStateChange: (state: BrowserState) => void
   onOpenExternal: (url: string) => Promise<void>
 }) {
+  const { t } = useI18n()
   const [mode, setMode] = useState<"cdp" | "iframe">(() => (browserState.available ? "cdp" : "iframe"))
-  const [urlInput, setUrlInput] = useState(initialUrl || (browserState.url !== "about:blank" ? browserState.url : "http://localhost:3000"))
-  const [iframeUrl, setIframeUrl] = useState(initialUrl || "")
+  const [urlInput, setUrlInput] = useState(() => {
+    if (initialUrl) {
+      const parsed = parseHttpUrl(initialUrl)
+      if (parsed) return parsed.toString()
+    }
+    return browserState.url !== "about:blank" ? browserState.url : "http://localhost:3000"
+  })
+  const [iframeUrl, setIframeUrl] = useState(() => {
+    if (!initialUrl) return ""
+    return validateIframeUrl(initialUrl).url
+  })
+  const [iframeNonce, setIframeNonce] = useState(0)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState("")
+  const [error, setError] = useState(() => {
+    if (!initialUrl || browserState.available) return ""
+    const errorKey = validateIframeUrl(initialUrl).errorKey
+    return errorKey ? t(errorKey) : ""
+  })
   const canvasImgRef = useRef<HTMLImageElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
   const lastSentSizeRef = useRef<{ width: number; height: number } | null>(null)
@@ -85,32 +138,39 @@ export function BrowserPanel({
   useEffect(() => {
     if (initialUrl && !didAutoNavigate.current) {
       didAutoNavigate.current = true
-      setUrlInput(initialUrl)
+      const parsed = parseHttpUrl(initialUrl)
+      if (!parsed) {
+        setError(t("pnlx.browser.errInvalidUrl"))
+        return
+      }
+      const normalized = parsed.toString()
+      setUrlInput(normalized)
       if (mode === "cdp" && browserState.available) {
-        void navigateCdp(initialUrl)
+        void navigateCdp(normalized)
       } else {
-        setIframeUrl(initialUrl)
+        const checked = validateIframeUrl(normalized)
+        setError(checked.errorKey ? t(checked.errorKey) : "")
+        setIframeUrl(checked.url)
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialUrl])
 
-  const normalizeUrl = (raw: string) => {
-    const trimmed = raw.trim()
-    if (!trimmed) return ""
-    return /^https?:\/\//i.test(trimmed) ? trimmed : (trimmed.startsWith("localhost") || trimmed.startsWith("127.0.0.1") ? `http://${trimmed}` : `https://${trimmed}`)
-  }
+  const normalizeUrl = (raw: string) => parseHttpUrl(raw)?.toString() ?? ""
 
   const navigateCdp = async (target: string) => {
     const normalized = normalizeUrl(target)
-    if (!normalized) return
+    if (!normalized) {
+      setError(t("pnlx.browser.errInvalidUrl"))
+      return
+    }
     setBusy(true)
     setError("")
     try {
       const next = await requestJson<BrowserState>("/api/browser/navigate", "POST", { url: normalized })
       onStateChange(next)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to navigate built-in Chrome.")
+      setError(err instanceof Error ? err.message : t("pnlx.browser.errNavigate"))
     } finally {
       setBusy(false)
     }
@@ -118,10 +178,16 @@ export function BrowserPanel({
 
   const handleGo = async (target = urlInput) => {
     const normalized = normalizeUrl(target)
-    if (!normalized) return
+    if (!normalized) {
+      setError(t("pnlx.browser.errInvalidUrl"))
+      return
+    }
     setUrlInput(normalized)
     if (mode === "iframe") {
-      setIframeUrl(normalized)
+      const checked = validateIframeUrl(normalized)
+      setError(checked.errorKey ? t(checked.errorKey) : "")
+      setIframeUrl(checked.url)
+      if (checked.url) setIframeNonce(n => n + 1)
       return
     }
     await navigateCdp(normalized)
@@ -138,7 +204,7 @@ export function BrowserPanel({
       })
       if (next && typeof next.url === "string") onStateChange(next)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Browser action failed.")
+      setError(err instanceof Error ? err.message : t("pnlx.browser.errAction"))
     } finally {
       setBusy(false)
     }
@@ -161,7 +227,7 @@ export function BrowserPanel({
       await requestJson("/api/browser/input", "POST", { kind: "mouse", type: "mousePressed", x: pos.x, y: pos.y, button: "left", clickCount: 1 })
       await requestJson("/api/browser/input", "POST", { kind: "mouse", type: "mouseReleased", x: pos.x, y: pos.y, button: "left", clickCount: 1 })
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send browser click.")
+      setError(err instanceof Error ? err.message : t("pnlx.browser.errClick"))
     }
   }
 
@@ -171,7 +237,7 @@ export function BrowserPanel({
     try {
       await requestJson("/api/browser/input", "POST", { kind: "mouse", type: "mouseWheel", x: pos.x, y: pos.y, deltaX: e.deltaX, deltaY: e.deltaY })
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send browser scroll.")
+      setError(err instanceof Error ? err.message : t("pnlx.browser.errScroll"))
     }
   }
 
@@ -186,11 +252,12 @@ export function BrowserPanel({
         await requestJson("/api/browser/input", "POST", { kind: "key", key: e.key })
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send browser key input.")
+      setError(err instanceof Error ? err.message : t("pnlx.browser.errKey"))
     }
   }
 
   const activeUrl = mode === "iframe" ? (iframeUrl || urlInput) : (browserState.url !== "about:blank" ? browserState.url : urlInput)
+  const safeIframeUrl = iframeUrl ? validateIframeUrl(iframeUrl).url : ""
 
   const setViewport = (preset: BrowserViewport["preset"]) => {
     if (preset === "desktop" && stageRef.current) {
@@ -210,20 +277,26 @@ export function BrowserPanel({
     <div className="ade-pane-body">
       <div className="ade-browser-bar">
         <div className="ade-browser-nav">
-          <button type="button" className="ade-icon-btn" disabled={mode !== "cdp" || !browserState.canGoBack} onClick={() => void runAction("/api/browser/back")} title="Back">
+          <button type="button" className="ade-icon-btn" disabled={mode !== "cdp" || !browserState.canGoBack} onClick={() => void runAction("/api/browser/back")} title={t("pnlx.browser.back")}>
             <ArrowLeft className="size-3.5" />
           </button>
-          <button type="button" className="ade-icon-btn" disabled={mode !== "cdp" || !browserState.canGoForward} onClick={() => void runAction("/api/browser/forward")} title="Forward">
+          <button type="button" className="ade-icon-btn" disabled={mode !== "cdp" || !browserState.canGoForward} onClick={() => void runAction("/api/browser/forward")} title={t("pnlx.browser.forward")}>
             <ArrowRight className="size-3.5" />
           </button>
           <button
             type="button"
             className="ade-icon-btn"
             onClick={() => {
-              if (mode === "iframe") setIframeUrl(u => u ? `${u}` : urlInput)
-              else void runAction("/api/browser/reload")
+              if (mode === "iframe") {
+                const checked = validateIframeUrl(iframeUrl || urlInput)
+                setError(checked.errorKey ? t(checked.errorKey) : "")
+                setIframeUrl(checked.url)
+                if (checked.url) setIframeNonce(n => n + 1)
+              } else {
+                void runAction("/api/browser/reload")
+              }
             }}
-            title="Reload"
+            title={t("pnlx.browser.reload")}
           >
             {busy || browserState.loading ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
           </button>
@@ -241,38 +314,38 @@ export function BrowserPanel({
             type="text"
             className="ade-browser-url-input"
             value={urlInput}
-            placeholder="Enter URL (e.g. http://localhost:3000 or https://example.com)"
+            placeholder={t("pnlx.browser.urlPlaceholder")}
             onChange={e => setUrlInput(e.target.value)}
           />
-          <button type="submit" className="ade-chip-btn">Go</button>
+          <button type="submit" className="ade-chip-btn">{t("pnlx.browser.go")}</button>
         </form>
 
         <div className="ade-browser-controls">
           <div className="ade-segmented">
-            <button type="button" className={mode === "cdp" ? "is-active" : ""} onClick={() => setMode("cdp")} title="Interactive Chrome CDP (works on any site + agent automation)">
-              Chrome
+            <button type="button" className={mode === "cdp" ? "is-active" : ""} onClick={() => setMode("cdp")} title={t("pnlx.browser.chromeTitle")}>
+              {t("pnlx.browser.chrome")}
             </button>
-            <button type="button" className={mode === "iframe" ? "is-active" : ""} onClick={() => setMode("iframe")} title="Direct iframe (best for localhost hot-reload)">
-              Iframe
+            <button type="button" className={mode === "iframe" ? "is-active" : ""} onClick={() => setMode("iframe")} title={t("pnlx.browser.iframeTitle")}>
+              {t("pnlx.browser.iframe")}
             </button>
           </div>
 
           {mode === "cdp" ? (
             <div className="ade-segmented">
-              <button type="button" className={browserState.viewport.preset === "desktop" ? "is-active" : ""} onClick={() => setViewport("desktop")} title="Desktop viewport">
+              <button type="button" className={browserState.viewport.preset === "desktop" ? "is-active" : ""} onClick={() => setViewport("desktop")} title={t("pnlx.browser.viewportDesktop")}>
                 <Monitor className="size-3.5" />
               </button>
-              <button type="button" className={browserState.viewport.preset === "tablet" ? "is-active" : ""} onClick={() => setViewport("tablet")} title="Tablet viewport">
+              <button type="button" className={browserState.viewport.preset === "tablet" ? "is-active" : ""} onClick={() => setViewport("tablet")} title={t("pnlx.browser.viewportTablet")}>
                 <Tablet className="size-3.5" />
               </button>
-              <button type="button" className={browserState.viewport.preset === "mobile" ? "is-active" : ""} onClick={() => setViewport("mobile")} title="Mobile viewport">
+              <button type="button" className={browserState.viewport.preset === "mobile" ? "is-active" : ""} onClick={() => setViewport("mobile")} title={t("pnlx.browser.viewportMobile")}>
                 <Smartphone className="size-3.5" />
               </button>
             </div>
           ) : null}
 
           {mode === "cdp" && browserState.running ? (
-            <button type="button" className="ade-icon-btn" onClick={() => void runAction("/api/browser/screenshot")} title="Refresh frame">
+            <button type="button" className="ade-icon-btn" onClick={() => void runAction("/api/browser/screenshot")} title={t("pnlx.browser.refreshFrame")}>
               <Camera className="size-3.5" />
             </button>
           ) : null}
@@ -280,10 +353,17 @@ export function BrowserPanel({
           <button
             type="button"
             className="ade-btn ade-btn-xs"
-            onClick={() => void onOpenExternal(normalizeUrl(activeUrl || "https://example.com"))}
-            title="Open current URL in your external default browser"
+            onClick={() => {
+              const target = normalizeUrl(activeUrl || "https://example.com")
+              if (!target) {
+                setError(t("pnlx.browser.errInvalidOpenUrl"))
+                return
+              }
+              void onOpenExternal(target)
+            }}
+            title={t("pnlx.browser.openExternalTitle")}
           >
-            <ExternalLink className="size-3.5" /> External
+            <ExternalLink className="size-3.5" /> {t("pnlx.browser.external")}
           </button>
         </div>
       </div>
@@ -291,7 +371,7 @@ export function BrowserPanel({
       {browserState.agentDriving ? (
         <div className="ade-browser-driving-banner">
           <Bot className="size-3.5" />
-          <span>Agent is currently operating the built-in browser…</span>
+          <span>{t("pnlx.browser.agentDriving")}</span>
         </div>
       ) : null}
 
@@ -301,19 +381,20 @@ export function BrowserPanel({
 
       <div ref={stageRef} className="ade-browser-stage" tabIndex={0} onKeyDown={handleViewportKeyDown}>
         {mode === "iframe" ? (
-          iframeUrl ? (
+          safeIframeUrl ? (
             <iframe
-              key={iframeUrl}
-              src={iframeUrl}
-              title="ADE Local Preview"
+              key={`${safeIframeUrl}:${iframeNonce}`}
+              src={safeIframeUrl}
+              title={t("pnlx.browser.iframePreviewTitle")}
               className="ade-browser-iframe"
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+              referrerPolicy="no-referrer"
             />
           ) : (
             <div className="ade-browser-empty">
               <Globe className="size-8 opacity-40" />
-              <h4>Built-in Browser (Iframe mode)</h4>
-              <p>Enter a local dev server URL above, switch to Chrome mode for any external site, or click a quick link:</p>
+              <h4>{t("pnlx.browser.emptyIframeTitle")}</h4>
+              <p>{t("pnlx.browser.emptyIframeDesc")}</p>
               <div className="ade-bookmark-row">
                 {QUICK_BOOKMARKS.map(b => (
                   <button key={b.url} type="button" className="ade-chip-btn" onClick={() => void handleGo(b.url)}>{b.label}</button>
@@ -326,7 +407,7 @@ export function BrowserPanel({
             <img
               ref={canvasImgRef}
               src={browserState.lastFrame}
-              alt={browserState.title || "Built-in Browser"}
+              alt={browserState.title || t("pnlx.browser.altFallback")}
               className="ade-browser-canvas"
               draggable={false}
               onClick={handleViewportClick}
@@ -336,11 +417,11 @@ export function BrowserPanel({
         ) : (
           <div className="ade-browser-empty">
             <Globe className="size-8 opacity-40" />
-            <h4>Built-in Interactive Browser</h4>
+            <h4>{t("pnlx.browser.emptyCdpTitle")}</h4>
             <p>
               {browserState.available
-                ? "Powered by local Chrome CDP — works on localhost and external sites, supports clicks, typing, scrolling, and live agent automation."
-                : "Chrome was not auto-detected. Switch to Iframe mode for localhost previews or open links externally."}
+                ? t("pnlx.browser.emptyCdpAvailable")
+                : t("pnlx.browser.emptyCdpUnavailable")}
             </p>
             <div className="ade-bookmark-row">
               {QUICK_BOOKMARKS.map(b => (

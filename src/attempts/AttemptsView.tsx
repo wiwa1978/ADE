@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react"
 import { ArrowLeft, Check, GitBranch, Trophy } from "lucide-react"
 import { request } from "../../api"
+import { useConfirm } from "../../components/ui/index.ts"
 import type { Conversation } from "../../app-types"
 import { sessionStateInfo, relativeTime, type InboxEntry } from "../session-state"
 import { formatUsage, useUsage } from "../usage/usage-data"
+import { useI18n } from "../i18n/I18nContext"
 
 type DiffFile = { path: string; additions: number; deletions: number; status: string }
 type AttemptDetails = { files: DiffFile[] | null; check: string | null; error: string }
@@ -29,6 +31,8 @@ export function AttemptsView({
   onArchive: (sessionId: string) => Promise<void> | void
   onBack: () => void
 }) {
+  const { t } = useI18n()
+  const { confirm } = useConfirm()
   const attempts = sessions.filter(session => session.attemptGroup === group).sort((a, b) => a.label.localeCompare(b.label))
   const { report } = useUsage(attempts.map(item => item.status).join())
   const [details, setDetails] = useState<Record<string, AttemptDetails>>({})
@@ -55,7 +59,16 @@ export function AttemptsView({
 
   const keep = async (winner: Conversation) => {
     const others = attempts.filter(item => item.id !== winner.id && !item.archivedAt)
-    if (others.length && !confirm(`Keep "${winner.label}" and archive the other ${others.length} attempt${others.length === 1 ? "" : "s"}? Their branches are kept. Their worktrees are removed, unless they have uncommitted changes.`)) return
+    if (others.length) {
+      const confirmed = await confirm({
+        title: t("swx.att.keepConfirmTitle", { label: winner.label }),
+        description: others.length === 1
+          ? t("swx.att.keepConfirmDescOne", { count: others.length })
+          : t("swx.att.keepConfirmDescOther", { count: others.length }),
+        confirmLabel: t("swx.att.keepThisOne"),
+      })
+      if (!confirmed) return
+    }
     setKeeping(winner.id)
     try {
       for (const other of others) await onArchive(other.id)
@@ -65,16 +78,23 @@ export function AttemptsView({
     }
   }
 
-  const title = attempts[0]?.label.replace(/ · [A-D]$/, "") ?? "Attempts"
+  const checkStatusText = (status: string) => {
+    if (status === "succeeded") return t("swx.att.checkPassed")
+    if (status === "failed") return t("swx.att.checkFailed")
+    if (status === "running") return t("swx.att.checkRunning")
+    return status
+  }
+
+  const title = attempts[0]?.label.replace(/ · [A-D]$/, "") ?? t("swx.att.defaultTitle")
 
   return (
     <main className="ade-attempts">
       <header className="ade-attempts-head">
-        <button type="button" className="ade-link-btn" onClick={onBack}><ArrowLeft className="size-3.5" /> Back</button>
+        <button type="button" className="ade-link-btn" onClick={onBack}><ArrowLeft className="size-3.5" /> {t("swx.att.back")}</button>
         <h1><Trophy className="size-5" /> {title}</h1>
-        <p>{attempts.length} attempts at the same task, each on its own branch. Open one to review it in full, then keep the best.</p>
+        <p>{t("swx.att.subtitle", { count: attempts.length })}</p>
       </header>
-      {!attempts.length ? <p className="ade-muted">These attempts were deleted.</p> : (
+      {!attempts.length ? <p className="ade-muted">{t("swx.att.deleted")}</p> : (
         <div className="ade-attempts-grid" style={{ gridTemplateColumns: `repeat(${Math.min(attempts.length, 4)}, minmax(0, 1fr))` }}>
           {attempts.map(attempt => {
             const entry = entries[attempt.id]
@@ -85,33 +105,44 @@ export function AttemptsView({
             const deletions = detail?.files?.reduce((sum, file) => sum + file.deletions, 0) ?? 0
             const usage = report?.sessions[attempt.id]
             const archived = Boolean(attempt.archivedAt)
+            const letter = attempt.label.match(/ · ([A-D])$/)?.[1]
             return (
               <section key={attempt.id} className={`ade-attempt-card ${archived ? "is-archived" : ""}`} aria-label={attempt.label}>
                 <header>
-                  <strong>{attempt.label.match(/ · ([A-D])$/)?.[1] ? `Attempt ${attempt.label.match(/ · ([A-D])$/)?.[1]}` : attempt.label}</strong>
-                  <span className="ade-muted ade-xs">{attempt.engine ? engineNames[attempt.engine] : "ADE agent"}</span>
-                  <span className={`ade-row-tag is-${archived ? "idle" : info.tone}`} title={info.hint}>{archived ? "Archived" : info.label}</span>
+                  <strong>{letter ? t("swx.att.attemptLetter", { letter }) : attempt.label}</strong>
+                  <span className="ade-muted ade-xs">{attempt.engine ? engineNames[attempt.engine] : t("swx.att.adeAgent")}</span>
+                  <span className={`ade-row-tag is-${archived ? "idle" : info.tone}`} title={info.hint}>{archived ? t("swx.att.archived") : info.label}</span>
                 </header>
                 <div className="ade-attempt-facts">
                   <span><GitBranch className="inline size-3" /> <code>{attempt.workspace?.branch ?? "—"}</code></span>
-                  <span>{detail?.files ? <><span className="ade-diff-add">+{additions}</span> <span className="ade-diff-del">-{deletions}</span> · {detail.files.length} file{detail.files.length === 1 ? "" : "s"}</> : attempt.workspace?.path ? "Reading changes…" : "No worktree"}</span>
-                  {detail?.check && detail.check !== "idle" ? <span>Check: {detail.check === "succeeded" ? "passed" : detail.check}</span> : null}
-                  <span>{usage ? formatUsage(usage) : "No usage yet"}</span>
-                  <span className="ade-muted">Updated {relativeTime(attempt.updatedAt)}</span>
+                  <span>
+                    {detail?.files ? (
+                      <>
+                        <span className="ade-diff-add">+{additions}</span>{" "}
+                        <span className="ade-diff-del">-{deletions}</span>{" · "}
+                        {detail.files.length === 1
+                          ? t("swx.att.filesOne", { count: detail.files.length })
+                          : t("swx.att.filesOther", { count: detail.files.length })}
+                      </>
+                    ) : attempt.workspace?.path ? t("swx.att.readingChanges") : t("swx.att.noWorktree")}
+                  </span>
+                  {detail?.check && detail.check !== "idle" ? <span>{t("swx.att.checkLabel", { status: checkStatusText(detail.check) })}</span> : null}
+                  <span>{usage ? formatUsage(usage) : t("swx.att.noUsageYet")}</span>
+                  <span className="ade-muted">{t("swx.att.updated", { time: relativeTime(attempt.updatedAt) })}</span>
                 </div>
                 {detail?.files?.length ? (
                   <ul className="ade-attempt-files">
                     {detail.files.slice(0, 12).map(file => (
                       <li key={file.path}><code className="ade-truncate" title={file.path}>{file.path}</code><span className="ade-diff-add">+{file.additions}</span><span className="ade-diff-del">-{file.deletions}</span></li>
                     ))}
-                    {detail.files.length > 12 ? <li className="ade-muted">and {detail.files.length - 12} more</li> : null}
+                    {detail.files.length > 12 ? <li className="ade-muted">{t("swx.att.andMore", { count: detail.files.length - 12 })}</li> : null}
                   </ul>
                 ) : null}
                 <div className="ade-attempt-actions">
-                  <button type="button" className="ade-chip-btn" onClick={() => onOpenSession(attempt)}>Open</button>
+                  <button type="button" className="ade-chip-btn" onClick={() => onOpenSession(attempt)}>{t("swx.att.open")}</button>
                   {!archived ? (
-                    <button type="button" className="ade-btn ade-btn-primary ade-btn-xs" disabled={Boolean(keeping) || attempt.status === "working"} title={attempt.status === "working" ? "Wait for this attempt to finish" : "Keep this attempt and archive the others"} onClick={() => void keep(attempt)}>
-                      <Check className="size-3.5" /> {keeping === attempt.id ? "Archiving others…" : "Keep this one"}
+                    <button type="button" className="ade-btn ade-btn-primary ade-btn-xs" disabled={Boolean(keeping) || attempt.status === "working"} title={attempt.status === "working" ? t("swx.att.waitToFinish") : t("swx.att.keepTitle")} onClick={() => void keep(attempt)}>
+                      <Check className="size-3.5" /> {keeping === attempt.id ? t("swx.att.archivingOthers") : t("swx.att.keepThisOne")}
                     </button>
                   ) : null}
                 </div>

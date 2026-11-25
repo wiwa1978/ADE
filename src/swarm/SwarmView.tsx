@@ -10,6 +10,7 @@ import { GoalCard } from "./GoalCard"
 import { ThreadCard } from "./ThreadCard"
 import { SwarmBoardTab } from "./SwarmBoardTab"
 import { SwarmMembersTab } from "./SwarmMembersTab"
+import { useI18n } from "../i18n/I18nContext"
 
 type SwarmTab = "overview" | "board" | "members" | "graph"
 
@@ -56,6 +57,7 @@ function ProgressRing({ done, total }: { done: number; total: number }) {
 }
 
 export function SwarmView(props: SwarmViewProps) {
+  const { t } = useI18n()
   const { session, leadBusy, leadItems, leadLiveTools, subagents, subagentTimelines, tasks, queued, team, onTeamChanged } = props
   const [tab, setTab] = useState<SwarmTab>("overview")
   const [threadsOpen, setThreadsOpen] = useState(true)
@@ -104,22 +106,22 @@ export function SwarmView(props: SwarmViewProps) {
           <h2 className="ade-truncate" title={model.title}>{model.title}</h2>
           <span className={`ade-swarm-live-pill ${model.live ? "is-live" : allDone ? "is-done" : ""}`}>
             <span className="ade-swarm-live-dot" />
-            {model.live ? "Live" : allDone ? "Done" : "Idle"}
+            {model.live ? t("swx.swarm.view.live") : allDone ? t("swx.swarm.view.done") : t("swx.swarm.view.idle")}
           </span>
         </div>
 
-        <nav className="ade-swarm-tabs" role="tablist" aria-label="Swarm views">
+        <nav className="ade-swarm-tabs" role="tablist" aria-label={t("swx.swarm.view.tabsAria")}>
           <button type="button" role="tab" aria-selected={tab === "overview"} className={tab === "overview" ? "is-active" : ""} onClick={() => setTab("overview")}>
-            Overview
+            {t("swx.swarm.view.tabOverview")}
           </button>
           <button type="button" role="tab" aria-selected={tab === "board"} className={tab === "board" ? "is-active" : ""} onClick={() => setTab("board")}>
-            Board {model.boardBadge > 0 ? <span className="ade-swarm-tab-count">{model.boardBadge}</span> : null}
+            {t("swx.swarm.view.tabBoard")} {model.boardBadge > 0 ? <span className="ade-swarm-tab-count">{model.boardBadge}</span> : null}
           </button>
           <button type="button" role="tab" aria-selected={tab === "members"} className={tab === "members" ? "is-active" : ""} onClick={() => setTab("members")}>
-            Members <span className="ade-swarm-tab-count">{model.members.length}</span>
+            {t("swx.swarm.view.tabMembers")} <span className="ade-swarm-tab-count">{model.members.length}</span>
           </button>
           <button type="button" role="tab" aria-selected={tab === "graph"} className={tab === "graph" ? "is-active" : ""} onClick={() => setTab("graph")}>
-            Graph
+            {t("swx.swarm.view.tabGraph")}
           </button>
         </nav>
       </header>
@@ -138,10 +140,10 @@ export function SwarmView(props: SwarmViewProps) {
             />
 
             {model.running.length > 0 ? (
-              <section className="ade-swarm-card ade-swarm-running" aria-label="Running tasks">
+              <section className="ade-swarm-card ade-swarm-running" aria-label={t("swx.swarm.view.runningAria")}>
                 <div className="ade-swarm-running-head">
                   <span className="ade-swarm-status-dot is-moving" />
-                  <strong>Running</strong>
+                  <strong>{t("swx.swarm.view.running")}</strong>
                   <span className="ade-swarm-count">{model.running.length}</span>
                 </div>
                 <ul className="ade-swarm-running-list">
@@ -163,10 +165,10 @@ export function SwarmView(props: SwarmViewProps) {
               <section className="ade-swarm-card ade-swarm-empty">
                 <div className="ade-swarm-empty-head">
                   <Sparkles className="size-4" />
-                  <strong>Ready to launch a swarm</strong>
+                  <strong>{t("swx.swarm.view.emptyTitle")}</strong>
                 </div>
                 <p className="ade-muted">
-                  Ask the coordinator to split work across parallel workers—or use <code>/swarm</code> in chat—to populate the Goal, live Running tasks, Threads, shared Board, and Graph.
+                  {t("swx.swarm.view.emptyBodyBefore")}<code>/swarm</code>{t("swx.swarm.view.emptyBodyAfter")}
                 </p>
                 {props.onAskAgent ? (
                   <div className="ade-swarm-empty-actions">
@@ -175,10 +177,10 @@ export function SwarmView(props: SwarmViewProps) {
                       className="ade-chip-btn is-primary"
                       onClick={() => void props.onAskAgent?.("/swarm")}
                     >
-                      <Sparkles className="size-3.5" /> Start Swarm in chat
+                      <Sparkles className="size-3.5" /> {t("swx.swarm.view.startInChat")}
                     </button>
                     <button type="button" className="ade-chip-btn" onClick={() => setEditingGoal(true)}>
-                      <Pencil className="size-3.5" /> Set Goal
+                      <Pencil className="size-3.5" /> {t("swx.swarm.view.setGoal")}
                     </button>
                   </div>
                 ) : null}
@@ -194,12 +196,14 @@ export function SwarmView(props: SwarmViewProps) {
               >
                 <span className="ade-swarm-progress-left">
                   <ProgressRing done={model.tasksDone} total={model.tasksTotal} />
-                  <strong>{model.tasksDone} of {model.tasksTotal}</strong>
-                  <span className="ade-muted">tasks done</span>
+                  <strong>{t("swx.swarm.view.tasksOfTotal", { done: model.tasksDone, total: model.tasksTotal })}</strong>
+                  <span className="ade-muted">{t("swx.swarm.view.tasksDone")}</span>
                 </span>
                 <span className="ade-swarm-progress-right">
                   <span className="ade-muted">
-                    {model.openThreads} {model.openThreads === 1 ? "thread" : "threads"} open
+                    {model.openThreads === 1
+                      ? t("swx.swarm.view.openThreadsOne", { count: model.openThreads })
+                      : t("swx.swarm.view.openThreadsOther", { count: model.openThreads })}
                   </span>
                   {threadsOpen ? <ChevronDown className="size-4 ade-muted" /> : <ChevronRight className="size-4 ade-muted" />}
                 </span>
@@ -207,8 +211,8 @@ export function SwarmView(props: SwarmViewProps) {
             ) : null}
 
             {threadsOpen && model.threads.length > 0 ? (
-              <section className="ade-swarm-threads" aria-label="Threads">
-                <h3 className="ade-swarm-section-title">Threads</h3>
+              <section className="ade-swarm-threads" aria-label={t("swx.swarm.view.threads")}>
+                <h3 className="ade-swarm-section-title">{t("swx.swarm.view.threads")}</h3>
                 <div className="ade-swarm-thread-list">
                   {model.threads.map(thread => (
                     <ThreadCard

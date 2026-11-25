@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from "react"
+import { useCallback, useEffect, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from "react"
 import type { GitHubConnection } from "./ProjectsView"
 import type { CopilotSignIn, ModelCredential, ModelCredentialProvider, ProviderTool, RuntimeHealth, Screen } from "./app-types"
 import { request, requestJson } from "./api"
+import { usePolling } from "./src/hooks/usePolling"
 
 const modelCredentialProviders: { id: ModelCredentialProvider; name: string }[] = [
   { id: "openai", name: "OpenAI" },
@@ -9,6 +10,10 @@ const modelCredentialProviders: { id: ModelCredentialProvider; name: string }[] 
   { id: "radius", name: "Radius (Pi)" },
   { id: "compatible", name: "OpenAI-compatible" },
 ]
+
+function isAbortError(cause: unknown, signal?: AbortSignal): boolean {
+  return Boolean(signal?.aborted || (cause instanceof DOMException && cause.name === "AbortError"))
+}
 
 export function useConnections(screen: Screen, setRuntime: Dispatch<SetStateAction<RuntimeHealth | null>>, environmentVersion = 0) {
   const [githubConnection, setGithubConnection] = useState<GitHubConnection | null>(null)
@@ -32,118 +37,131 @@ export function useConnections(screen: Screen, setRuntime: Dispatch<SetStateActi
 
   const [authBusy, setAuthBusy] = useState(false)
 
-  useEffect(() => {
-    if (!["settings", "project"].includes(screen) || githubConnectionBusy) return
-    let active = true
-    let refreshing = false
-    const refresh = async () => {
-      if (refreshing) return
-      refreshing = true
-      const revision = githubConnectionRevision.current
-      try {
-        const connection = await requestJson<GitHubConnection>("/api/github/connection", "POST")
-        if (active && revision === githubConnectionRevision.current) {
-          setGithubConnection(connection)
-          setGithubStatusError("")
-        }
-        if (!connection.login && active && revision === githubConnectionRevision.current) {
-          try {
-            const detected = await requestJson<GitHubConnection>("/api/github/auto-connect", "POST")
-            if (active && revision === githubConnectionRevision.current) {
-              setGithubConnection(detected)
-              setGithubCliError("")
-            }
-          } catch (cause) {
-            if (active && revision === githubConnectionRevision.current) {
-              setGithubCliError(cause instanceof Error ? cause.message : "Could not detect the GitHub CLI account.")
-            }
+  const copilotSignIn = copilotHealth?.copilotSignIn
+  const copilotWaiting = copilotSignIn?.status === "waiting"
+
+  const githubPollingEnabled = ["settings", "project"].includes(screen) && !githubConnectionBusy
+  const copilotCheckEnabled = screen === "settings" && !authBusy
+  const modelCredPollingEnabled = screen === "settings" && !modelCredentialBusy
+  const providerToolsPollingEnabled = screen === "settings" && !providerToolsBusy
+
+  const refreshGitHub = useCallback(async (signal?: AbortSignal) => {
+    const revision = githubConnectionRevision.current
+    try {
+      const connection = await request<GitHubConnection>("/api/github/connection", {
+        method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal,
+      })
+      if (!signal?.aborted && revision === githubConnectionRevision.current) {
+        setGithubConnection(connection)
+        setGithubStatusError("")
+      }
+      if (!connection.login && !signal?.aborted && revision === githubConnectionRevision.current) {
+        try {
+          const detected = await request<GitHubConnection>("/api/github/auto-connect", {
+            method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal,
+          })
+          if (!signal?.aborted && revision === githubConnectionRevision.current) {
+            setGithubConnection(detected)
+            setGithubCliError("")
+          }
+        } catch (cause) {
+          if (!isAbortError(cause, signal) && revision === githubConnectionRevision.current) {
+            setGithubCliError(cause instanceof Error ? cause.message : "Could not detect the GitHub CLI account.")
           }
         }
-      } catch (cause) {
-        if (active && revision === githubConnectionRevision.current) {
-          setGithubStatusError(cause instanceof Error ? cause.message : "Could not read the GitHub connection.")
-        }
-      } finally { refreshing = false }
-    }
-    void refresh()
-    const timer = window.setInterval(() => { void refresh() }, 5000)
-    return () => { active = false; window.clearInterval(timer) }
-  }, [screen, githubConnectionBusy, environmentVersion])
-
-  useEffect(() => {
-    if (screen !== "settings" || authBusy) return
-    let active = true
-    let refreshing = false
-    const refresh = async () => {
-      if (refreshing) return
-      refreshing = true
-      const revision = copilotAuthRevision.current
-      try {
-        const health = await request<RuntimeHealth>("/api/health?provider=github-copilot")
-        if (health.provider !== "github-copilot") throw new Error("Copilot sign-in is unavailable in this runtime.")
-        if (active && revision === copilotAuthRevision.current) {
-          setCopilotHealth(health)
-          setCopilotStatusError("")
-        }
-      } catch (cause) {
-        if (active && revision === copilotAuthRevision.current) {
-          setCopilotStatusError(cause instanceof Error ? cause.message : "Could not read Copilot sign-in status.")
-        }
-      } finally { refreshing = false }
-    }
-    void refresh()
-    const timer = window.setInterval(() => { void refresh() }, 2000)
-    return () => { active = false; window.clearInterval(timer) }
-  }, [screen, authBusy, environmentVersion])
-
-  useEffect(() => {
-    if (screen !== "settings" || modelCredentialBusy) return
-    let active = true
-    let refreshing = false
-    const refresh = async () => {
-      if (refreshing) return
-      refreshing = true
-      const revision = modelCredentialRevision.current
-      try {
-        const result = await requestJson<{ credentials: ModelCredential[] }>("/api/model-credentials", "POST", { action: "status" })
-        if (active && revision === modelCredentialRevision.current) {
-          setModelCredentials(result.credentials)
-          setModelCredentialStatusError("")
-        }
-      } catch (cause) {
-        if (active && revision === modelCredentialRevision.current) {
-          setModelCredentialStatusError(cause instanceof Error ? cause.message : "Could not read model credential status.")
-        }
-      } finally { refreshing = false }
-    }
-    void refresh()
-    const timer = window.setInterval(() => { void refresh() }, 5000)
-    return () => { active = false; window.clearInterval(timer) }
-  }, [screen, modelCredentialBusy, environmentVersion])
-
-  useEffect(() => {
-    if (!["settings", "work"].includes(screen) || providerToolsBusy) return
-    let active = true
-    let refreshing = false
-    const refresh = async () => {
-      if (refreshing) return
-      refreshing = true
-      try {
-        const result = await requestJson<{ providers: ProviderTool[] }>("/api/provider-tools", "POST", { action: "list" })
-        if (active) {
-          setProviderTools(result.providers)
-          setProviderToolsError("")
-        }
-      } catch (cause) {
-        if (active) setProviderToolsError(cause instanceof Error ? cause.message : "Could not scan host providers.")
-      } finally {
-        refreshing = false
+      }
+    } catch (cause) {
+      if (!isAbortError(cause, signal) && revision === githubConnectionRevision.current) {
+        setGithubStatusError(cause instanceof Error ? cause.message : "Could not read the GitHub connection.")
       }
     }
-    void refresh()
-    const timer = window.setInterval(() => { void refresh() }, 10000)
-    return () => { active = false; window.clearInterval(timer) }
-  }, [screen, providerToolsBusy, environmentVersion])
+  }, [])
+
+  useEffect(() => {
+    if (!githubPollingEnabled) return
+    const controller = new AbortController()
+    void Promise.resolve().then(() => refreshGitHub(controller.signal))
+    return () => controller.abort()
+  }, [githubPollingEnabled, environmentVersion, refreshGitHub])
+
+  usePolling(refreshGitHub, 5_000, { enabled: githubPollingEnabled, immediate: false })
+
+  const refreshCopilot = useCallback(async (signal?: AbortSignal) => {
+    const revision = copilotAuthRevision.current
+    try {
+      const health = await request<RuntimeHealth>("/api/health?provider=github-copilot", { signal })
+      if (health.provider !== "github-copilot") throw new Error("Copilot sign-in is unavailable in this runtime.")
+      if (!signal?.aborted && revision === copilotAuthRevision.current) {
+        setCopilotHealth(health)
+        setCopilotStatusError("")
+      }
+    } catch (cause) {
+      if (!isAbortError(cause, signal) && revision === copilotAuthRevision.current) {
+        setCopilotStatusError(cause instanceof Error ? cause.message : "Could not read Copilot sign-in status.")
+      }
+    }
+  }, [])
+
+  // Fetch Copilot status once when entering Settings (or on environment switch); only poll at 2s while waiting for device sign-in.
+  useEffect(() => {
+    if (!copilotCheckEnabled) return
+    const controller = new AbortController()
+    void Promise.resolve().then(() => refreshCopilot(controller.signal))
+    return () => controller.abort()
+  }, [copilotCheckEnabled, environmentVersion, refreshCopilot])
+
+  usePolling(refreshCopilot, 2_000, { enabled: copilotCheckEnabled && copilotWaiting, immediate: false })
+
+  const refreshModelCredentials = useCallback(async (signal?: AbortSignal) => {
+    const revision = modelCredentialRevision.current
+    try {
+      const result = await request<{ credentials: ModelCredential[] }>("/api/model-credentials", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "status" }), signal,
+      })
+      if (!signal?.aborted && revision === modelCredentialRevision.current) {
+        setModelCredentials(result.credentials)
+        setModelCredentialStatusError("")
+      }
+    } catch (cause) {
+      if (!isAbortError(cause, signal) && revision === modelCredentialRevision.current) {
+        setModelCredentialStatusError(cause instanceof Error ? cause.message : "Could not read model credential status.")
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!modelCredPollingEnabled) return
+    const controller = new AbortController()
+    void Promise.resolve().then(() => refreshModelCredentials(controller.signal))
+    return () => controller.abort()
+  }, [modelCredPollingEnabled, environmentVersion, refreshModelCredentials])
+
+  usePolling(refreshModelCredentials, 5_000, { enabled: modelCredPollingEnabled, immediate: false })
+
+  const refreshProviderTools = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const result = await request<{ providers: ProviderTool[] }>("/api/provider-tools", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "status" }), signal,
+      })
+      if (!signal?.aborted) {
+        setProviderTools(result.providers)
+        setProviderToolsError("")
+      }
+    } catch (cause) {
+      if (!isAbortError(cause, signal)) {
+        setProviderToolsError(cause instanceof Error ? cause.message : "Could not scan host providers.")
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!providerToolsPollingEnabled) return
+    const controller = new AbortController()
+    void Promise.resolve().then(() => refreshProviderTools(controller.signal))
+    return () => controller.abort()
+  }, [providerToolsPollingEnabled, environmentVersion, refreshProviderTools])
+
+  usePolling(refreshProviderTools, 10_000, { enabled: providerToolsPollingEnabled, immediate: false })
 
   async function changeGitHubConnection(action: "connect" | "disconnect") {
     if (githubConnectionBusy) return
@@ -247,9 +265,6 @@ export function useConnections(screen: Screen, setRuntime: Dispatch<SetStateActi
     setProviderToolsError("")
     setProviderToolsBusy(null)
   }
-
-  const copilotSignIn = copilotHealth?.copilotSignIn
-  const copilotWaiting = copilotSignIn?.status === "waiting"
 
   return {
     githubConnection, githubStatusError, githubCliError, githubActionError, githubConnectionBusy, changeGitHubConnection,
