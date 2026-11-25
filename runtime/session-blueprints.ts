@@ -179,6 +179,7 @@ export class SessionBlueprints {
 	/** How many times in a row ADE started the same stage for a session (progress to another stage starts the count again). */
 	#nudges = new Map<string, { stageId: string; count: number }>();
 	#checker: ((sessionId: string, stage: BlueprintStage) => Promise<StageChecks | null>) | null = null;
+	#onStageFinished: ((sessionId: string, stageId: string, summary: string) => void) | null = null;
 
 	constructor(db: DatabaseSync, events?: RuntimeEventBus, now: () => number = Date.now) {
 		this.#db = db;
@@ -249,6 +250,10 @@ export class SessionBlueprints {
 
 	setChecker(checker: (sessionId: string, stage: BlueprintStage) => Promise<StageChecks | null>) {
 		this.#checker = checker;
+	}
+
+	setStageFinished(listener: (sessionId: string, stageId: string, summary: string) => void) {
+		this.#onStageFinished = listener;
 	}
 
 	/**
@@ -555,6 +560,7 @@ export class SessionBlueprints {
 		const result = completeStage(record.run, blueprint, { stageId: stage.id, artifactPaths: (input.artifacts ?? []).slice(0, 20), verdict: input.verdict, now });
 		record.run = result.run;
 		record.history.push({ at: now, stageId: stage.id, event: "finished", note: summary.slice(0, 300) });
+		try { this.#onStageFinished?.(sessionId, stage.id, summary); } catch { /* task files are best-effort */ }
 		if (result.loopedBackTo) {
 			record.history.push({ at: now, stageId: result.loopedBackTo, event: "looped_back", note: input.verdict?.summary });
 			return this.#advance(sessionId, row, blueprint, record, `The review asked for changes. Back to stage "${result.loopedBackTo}" with its findings:\n${formatFindings(input.verdict)}`);

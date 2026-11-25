@@ -155,7 +155,7 @@ export function MobileAppShell({
     repository: string
     prompt: string
     title?: string
-  }) => Promise<void>
+  }) => Promise<string | null | void>
   onOpenExternalBrowser: (url: string) => void
 }) {
   const { t, formatDay } = useI18n()

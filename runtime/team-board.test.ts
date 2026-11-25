@@ -156,3 +156,40 @@ test("a runaway agent can't grow the board without limit, and a chosen thread id
 	board.post("s1", "lead", { text: "odd kind", kind: "<script>" as never });
 	assert.equal(board.state("s1").posts.at(-1)?.kind, "update", "an unknown kind becomes a plain update");
 });
+
+test("a stalled claim returns the task to todo and a late write is claim_lost", () => {
+	const dir = mkdtempSync(join(tmpdir(), "ade-lease-"));
+	let now = 1_000_000;
+	const board = new TeamBoard(dir, undefined, () => now);
+	try {
+		const id = board.addTask("s", "lead", { title: "Work" });
+		const claim = board.claimTask("s", "s1", id, 10_000);
+		assert.equal(board.state("s").tasks[0]?.status, "in_progress");
+		assert.equal(board.state("s").tasks[0]?.leaseExpiresAt, now + 10_000);
+		now += 10_001;
+		assert.throws(() => board.finishTask("s", "s1", id, "late", claim.claimToken), /claim_lost/);
+		assert.equal(board.state("s").tasks[0]?.status, "todo");
+		assert.equal(board.state("s").tasks[0]?.owner, null);
+		const again = board.claimTask("s", "s2", id, 10_000);
+		assert.throws(() => board.finishTask("s", "s2", id, "nope", "stale-token"), /claim_lost/);
+		assert.match(board.finishTask("s", "s2", id, "ok", again.claimToken), /Done/);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("project boards are separate from session boards and posts carry a channel", () => {
+	const dir = mkdtempSync(join(tmpdir(), "ade-channel-"));
+	const board = new TeamBoard(dir);
+	try {
+		board.post("s", "lead", { text: "session note", channel: "#General" });
+		board.post("project:alpha", "lead", { text: "project note", channel: "ops" });
+		assert.equal(board.posts("s", "general").length, 1);
+		assert.equal(board.posts("s", "ops").length, 0);
+		assert.equal(board.posts("project:alpha", "ops")[0]?.text, "project note");
+		assert.equal(board.state("s").posts.length, 1);
+		assert.notEqual(board.state("s").title, board.state("project:alpha").posts[0]?.text);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});

@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "bin": {
+    "ade": "scripts/ade.ts"
+  },
   "scripts": {
     "dev": "node scripts/dev.ts",
     "postinstall": "node scripts/fix-node-pty-permissions.ts",

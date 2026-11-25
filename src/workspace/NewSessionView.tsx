@@ -58,7 +58,7 @@ export function NewSessionView({
   onOpenSettings?: () => void
   starting: boolean
   error: string
-  onStart: (input: NewSessionStartInput) => Promise<void>
+  onStart: (input: NewSessionStartInput) => Promise<string | null | void>
   onLookupIssue?: (projectId: string, url: string) => Promise<GitHubIssue>
   /** Opened from an issue: link it and fill in the task. */
   initialIssue?: GitHubIssue | null

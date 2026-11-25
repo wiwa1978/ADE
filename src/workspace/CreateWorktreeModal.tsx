@@ -27,7 +27,7 @@ export interface CreateWorktreeModalProps {
   onClose: () => void
   onAddProject: () => void
   onOpenProviderSettings: () => void
-  onCreate: (input: WorktreeCreatePayload) => Promise<void>
+  onCreate: (input: WorktreeCreatePayload) => Promise<string | null | void>
 }
 
 export function CreateWorktreeModal(props: CreateWorktreeModalProps) {

@@ -3,7 +3,7 @@ import { Sparkles } from "lucide-react"
 import { useViewMode } from "../view-mode"
 import { InboxView } from "../inbox/InboxView"
 import { sessionStateInfo, type InboxEntry } from "../session-state"
-import { requestJson } from "../api"
+import { request, requestJson } from "../api"
 import type { Conversation, EnvironmentDirectory, GitHubIssue, StartFrom, ProviderCatalogEntry, RuntimeHealth, Screen, SessionArtifact, WorkspaceTab } from "../app-types"
 import { ProjectsView, type Project, type ProjectActivity, type ProjectInput } from "../ProjectsView"
 import { SettingsView, type SettingsCategory } from "../SettingsView"
@@ -89,7 +89,7 @@ type AppMainColumnProps = {
   onQuickStartStream: (project: Project, prompt: string) => Promise<void>
   onSendQuickMessage: (sess: Conversation, text: string) => Promise<void>
   onUnarchiveSession: (id: string) => void
-  onStartNewSession: (input: { projectId: string | null; kind: "none" | "checkout" | "worktree"; repository: string; prompt: string; githubIssue?: GitHubIssue; engine?: "pi" | "claude-code" | "codex"; startFrom?: StartFrom; title?: string; attempts?: Array<"pi" | "claude-code" | "codex">; runOn?: "local" | "docker" | "wsl" | "ssh" | "boat"; blueprintId?: string }) => Promise<void>
+  onStartNewSession: (input: { projectId: string | null; kind: "none" | "checkout" | "worktree"; repository: string; prompt: string; githubIssue?: GitHubIssue; engine?: "pi" | "claude-code" | "codex"; startFrom?: StartFrom; title?: string; attempts?: Array<"pi" | "claude-code" | "codex">; runOn?: "local" | "docker" | "wsl" | "ssh" | "boat"; blueprintId?: string }) => Promise<string | null | void>
   onDeleteSession: (sess: Conversation) => void
   onOpenExternalRequest: (tab: WorkspaceTab) => void
   onClearExternalOpenRequest: () => void
@@ -207,6 +207,31 @@ export function AppMainColumn(props: AppMainColumnProps) {
             inboxEntries={props.inboxEntries}
             onSessionContextMenu={props.onSessionContextMenu}
             onOpenExternal={url => void stream.openExternalBrowser(url)}
+            onStartAgentTask={async (task, prompt) => {
+              if (task.claimedSession && codingTasks.some(item => item.id === task.claimedSession)) {
+                props.onOpenSession(task.claimedSession)
+                await request(`/api/projects/${encodeURIComponent(selectedProject.id)}/agent-tasks/claim`, {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ path: task.path, sessionId: task.claimedSession }),
+                })
+                return
+              }
+              const kind = selectedProject.repository ? settings.defaultWorkspaceKind : "none"
+              const sessionId = await props.onStartNewSession({
+                projectId: selectedProject.id,
+                kind,
+                repository: kind === "none" ? "" : selectedProject.repository || "",
+                title: task.title,
+                prompt,
+              })
+              if (!sessionId) throw new Error("The session did not start.")
+              await request(`/api/projects/${encodeURIComponent(selectedProject.id)}/agent-tasks/claim`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ path: task.path, sessionId }),
+              })
+            }}
             onStartSessionFromIssue={async issue => {
               const kind = selectedProject.repository ? settings.defaultWorkspaceKind : "none"
               await props.onStartNewSession({

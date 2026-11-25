@@ -188,7 +188,7 @@ export function useSessions(params: UseSessionsParams) {
         if (outcome.failedCount) onError(`${outcome.failedCount} of ${outcome.totalCount} attempts could not start.`)
         if (input.projectId) onExpandProject(input.projectId)
         onOpenAttempts?.(outcome.attemptGroup)
-        return
+        return null
       }
       if (outcome.waitingForModel) {
         setDraft(input.prompt)
@@ -196,8 +196,10 @@ export function useSessions(params: UseSessionsParams) {
       }
       onOpenSession(outcome.id)
       if (input.projectId) onExpandProject(input.projectId)
+      return outcome.id
     } catch (err) {
       setLaunchError(err instanceof Error ? err.message : "Could not create session.")
+      return null
     } finally {
       setCreatingSession(false)
     }

@@ -1048,6 +1048,7 @@ export const en = {
   "ps.views": "Project views",
   "ps.sessions": "Sessions",
   "ps.issues": "Issues",
+  "ps.tasks": "Tasks",
   "ps.pulls": "Pull requests",
   "ps.agents": "Agents",
   "ps.automations": "Automations",

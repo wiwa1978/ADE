@@ -30,6 +30,8 @@ import { registerCapabilityRoutes } from "./routes/capabilities.ts";
 import { registerSystemRoutes } from "./routes/system.ts";
 import { registerAgentWorkflowRoutes } from "./routes/agent-workflow.ts";
 import { registerMobileRoutes } from "./routes/mobile.ts";
+import { registerBoardRoutes } from "./routes/board.ts";
+import { registerAgentTaskRoutes } from "./routes/agent-tasks.ts";
 import { createAgentWorkflow } from "./agent-workflow.ts";
 import { MobilePairingManager } from "./mobile-pairing.ts";
 
@@ -179,6 +181,8 @@ export function createRuntimeRouters(deps: RouteDeps): { envRouter: Router; main
 	registerEuRoutes(mainRouter, deps);
 	registerCapabilityRoutes(mainRouter, deps);
 	registerMobileRoutes(mainRouter, deps);
+	registerBoardRoutes(mainRouter, deps);
+	registerAgentTaskRoutes(mainRouter, deps);
 
 	return { envRouter, mainRouter };
 }

@@ -1049,6 +1049,7 @@ export const nl: Record<TranslationKey, string> = {
   "ps.views": "Projectweergaven",
   "ps.sessions": "Sessies",
   "ps.issues": "Issues",
+  "ps.tasks": "Taken",
   "ps.pulls": "Pull requests",
   "ps.agents": "Agents",
   "ps.automations": "Automatiseringen",

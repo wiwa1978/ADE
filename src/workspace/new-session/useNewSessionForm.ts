@@ -54,7 +54,7 @@ export function useNewSessionForm({
   selectedProjectId: string | null
   onSelectProject: (id: string | null) => void
   starting: boolean
-  onStart: (input: NewSessionStartInput) => Promise<void>
+  onStart: (input: NewSessionStartInput) => Promise<string | null | void>
   onLookupIssue?: (projectId: string, url: string) => Promise<GitHubIssue>
   initialIssue?: GitHubIssue | null
 }) {

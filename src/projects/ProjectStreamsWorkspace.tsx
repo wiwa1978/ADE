@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useViewMode } from "../view-mode"
 import { useI18n } from "../i18n/I18nContext"
 import {
@@ -25,14 +25,16 @@ import type { FeatureAgent } from "../FeatureAgents"
 import { BUILTIN_BLUEPRINTS } from "../../packages/blueprints/index.ts"
 import type { Project, ProjectActivity } from "../ProjectsView"
 import type { InboxEntry } from "../session-state"
+import { request } from "../api"
 import { LiveSessionPane } from "./LiveSessionPane"
 import { ProjectAutomationsTab } from "./ProjectAutomationsTab"
 import { ProjectIssuesList, type ProjectGitHubIssue } from "./ProjectIssuesList"
+import { ProjectAgentTasks, type AgentTaskItem } from "./ProjectAgentTasks"
 import { ProjectPullRequests } from "./ProjectPullRequests"
 import { ProjectSessionList } from "./ProjectSessionList"
 import { ProjectSubagentsTab } from "./ProjectSubagentsTab"
 
-type ProjectTab = "sessions" | "issues" | "pulls" | "subagents" | "automations"
+type ProjectTab = "sessions" | "issues" | "tasks" | "pulls" | "subagents" | "automations"
 type StreamLayout = "single" | "split" | "grid"
 
 export interface ProjectStreamsWorkspaceProps {
@@ -59,6 +61,7 @@ export interface ProjectStreamsWorkspaceProps {
   onDeleteSession: (session: Conversation) => void
   onOpenAgent: (sessionId: string, agent: FeatureAgent) => void
   onStartSessionFromIssue?: (issue: ProjectGitHubIssue) => Promise<void>
+  onStartAgentTask?: (task: AgentTaskItem, prompt: string) => Promise<void>
   onOpenExternal?: (url: string) => void
   onSessionContextMenu?: (session: Conversation, x: number, y: number) => void
   inboxEntries?: Record<string, InboxEntry>
@@ -84,6 +87,7 @@ export function ProjectStreamsWorkspace({
   onQuickStartStream,
   onSendQuickMessage,
   onUnarchiveSession,
+  onStartAgentTask,
   onDeleteSession,
   onOpenAgent,
   onStartSessionFromIssue,
@@ -92,6 +96,14 @@ export function ProjectStreamsWorkspace({
   inboxEntries = {},
 }: ProjectStreamsWorkspaceProps) {
   const [chosenTab, setActiveTab] = useState<ProjectTab>("sessions")
+  const [hasTasks, setHasTasks] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    void request<{ exists: boolean }>(`/api/projects/${encodeURIComponent(project.id)}/agent-tasks`)
+      .then(res => { if (!cancelled) setHasTasks(res.exists) })
+      .catch(() => { if (!cancelled) setHasTasks(false) })
+    return () => { cancelled = true }
+  }, [project.id])
   // Simple view keeps two tabs: Sessions and Agents. The others come back with Full view.
   const { t } = useI18n()
   const simple = useViewMode() === "simple"
@@ -205,6 +217,12 @@ export function ProjectStreamsWorkspace({
             <button type="button" role="tab" aria-selected={activeTab === "issues"} className={`ade-project-tab ${activeTab === "issues" ? "is-active" : ""}`} onClick={() => setActiveTab("issues")}>
               <ListTodo className="size-3.5" />
               <span>{t("ps.issues")}</span>
+            </button>
+          ) : null}
+          {!simple && hasTasks ? (
+            <button type="button" role="tab" aria-selected={activeTab === "tasks"} className={`ade-project-tab ${activeTab === "tasks" ? "is-active" : ""}`} onClick={() => setActiveTab("tasks")}>
+              <FolderTree className="size-3.5" />
+              <span>{t("ps.tasks")}</span>
             </button>
           ) : null}
           {!simple ? (
@@ -354,6 +372,10 @@ export function ProjectStreamsWorkspace({
             ) : null}
           </section>
         </div>
+      ) : null}
+
+      {activeTab === "tasks" && onStartAgentTask ? (
+        <ProjectAgentTasks project={project} onOpen={onStartAgentTask} />
       ) : null}
 
       {activeTab === "issues" ? (

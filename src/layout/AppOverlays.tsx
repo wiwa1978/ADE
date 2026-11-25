@@ -48,7 +48,7 @@ type AppOverlaysProps = {
     title?: string
     attempts?: Array<"pi" | "claude-code" | "codex">
     runOn?: RunTarget
-  }) => Promise<void>
+  }) => Promise<string | null | void>
   onCloseEnvPalette: () => void
   onCloseContextMenu: () => void
   onSelectProjectFromCommand: (id: string) => void

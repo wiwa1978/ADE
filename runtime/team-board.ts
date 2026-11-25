@@ -3,10 +3,36 @@
 // is logged as a flow event (who wrote into which part, what each part handed to whom), which is
 // what the Team view draws. The model follows Ensemble for Orca's team mode (MIT,
 // github.com/DueGin/orca-ensemble).
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { badRequest, conflict, notFound } from "./http-error.ts";
 import type { RuntimeEventBus } from "./events.ts";
+
+export const DEFAULT_TASK_LEASE_MS = 5 * 60_000;
+export const MIN_TASK_LEASE_MS = 5_000;
+export const MAX_TASK_LEASE_MS = 60 * 60_000;
+export const DEFAULT_CHANNEL = "general";
+
+export function projectBoardId(projectId: string): string {
+	return `project:${projectId}`;
+}
+
+export function normalizeChannel(channel?: string | null): string {
+	const cleaned = String(channel ?? "")
+		.trim()
+		.toLowerCase()
+		.replace(/^#+/, "")
+		.replace(/[^a-z0-9/_-]+/g, "-")
+		.replace(/^[-/]+|[-/]+$/g, "")
+		.slice(0, 48);
+	return cleaned || DEFAULT_CHANNEL;
+}
+
+function clampLeaseMs(leaseMs?: number): number {
+	if (typeof leaseMs !== "number" || !Number.isFinite(leaseMs)) return DEFAULT_TASK_LEASE_MS;
+	return Math.max(MIN_TASK_LEASE_MS, Math.min(MAX_TASK_LEASE_MS, Math.floor(leaseMs)));
+}
 
 /** "lead" (the main agent), "user", or a subagent's conversation id. */
 export type Party = string;
@@ -43,12 +69,26 @@ export type TeamTask = {
 	/** Sent back by a reviewer or the lead: what to fix. */
 	returnedNote: string;
 	result: string;
+	/** When `now >= leaseExpiresAt`, the claim returns to `todo`. */
+	leaseExpiresAt?: number | null;
+	/** Issued on claim. A late or mismatched write fails with `claim_lost`. */
+	claimToken?: string | null;
 	updatedAt: number;
 	history: Array<{ at: number; by: Party; action: string; note?: string }>;
 };
 
 export type PostKind = "question" | "finding" | "answer" | "update";
-export type TeamPost = { seq: number; at: number; author: Party; to: string[]; kind: PostKind; text: string; re: number | null };
+export type TeamPost = { seq: number; at: number; author: Party; to: string[]; kind: PostKind; text: string; re: number | null; channel?: string };
+
+export type TaskClaimReceipt = {
+	taskId: string;
+	owner: Party;
+	claimToken: string;
+	leaseExpiresAt: number;
+	message: string;
+};
+
+export type BoardWaitResult = { matched: boolean; posts: TeamPost[]; lastSeq: number };
 export type FileClaim = { agent: Party; path: string; at: number };
 
 export type TeamPart = "tasks" | "plans" | "board" | "claims";
@@ -94,6 +134,7 @@ export class TeamBoard {
 	#events?: RuntimeEventBus;
 	#now: () => number;
 	#cache = new Map<string, TeamState>();
+	#waiters = new Map<string, Set<() => void>>();
 
 	constructor(stateDirectory: string, events?: RuntimeEventBus, now: () => number = Date.now) {
 		this.#dir = join(stateDirectory, "teams");
@@ -102,13 +143,34 @@ export class TeamBoard {
 	}
 
 	#file(sessionId: string) {
-		if (!/^[\w-]{1,80}$/.test(sessionId)) throw badRequest("Invalid session.");
-		return join(this.#dir, `${sessionId}.json`);
+		if (!/^(?:project:)?[\w-]{1,80}$/.test(sessionId)) throw badRequest("Invalid board or session id.");
+		return join(this.#dir, `${sessionId.replace(/:/g, "__")}.json`);
+	}
+
+	/** Return expired in-progress claims to todo. Returns the task ids that lost their claim. */
+	#reap(state: TeamState): string[] {
+		const now = this.#now();
+		const lost: string[] = [];
+		for (const task of state.tasks) {
+			if (task.status !== "in_progress") continue;
+			if (typeof task.leaseExpiresAt !== "number" || task.leaseExpiresAt > now) continue;
+			task.status = "todo";
+			task.owner = null;
+			task.claimToken = null;
+			task.leaseExpiresAt = null;
+			task.updatedAt = now;
+			task.history.push({ at: now, by: "board", action: "lease_expired" });
+			lost.push(task.id);
+		}
+		return lost;
 	}
 
 	state(sessionId: string): TeamState {
 		const cached = this.#cache.get(sessionId);
-		if (cached) return cached;
+		if (cached) {
+			if (this.#reap(cached).length) this.#save(sessionId, cached);
+			return cached;
+		}
 		let state = empty();
 		const file = this.#file(sessionId);
 		try {
@@ -117,6 +179,7 @@ export class TeamBoard {
 			state = empty();
 		}
 		this.#cache.set(sessionId, state);
+		if (this.#reap(state).length) this.#save(sessionId, state);
 		return state;
 	}
 
@@ -126,7 +189,8 @@ export class TeamBoard {
 		writeFileSync(`${file}.tmp`, JSON.stringify(state));
 		renameSync(`${file}.tmp`, file);
 		this.#cache.set(sessionId, state);
-		this.#events?.emit("team.update", { sessionId, events: state.events.length, tasks: state.tasks.length }, sessionId);
+		if (!sessionId.startsWith("project:")) this.#events?.emit("team.update", { sessionId, events: state.events.length, tasks: state.tasks.length }, sessionId);
+		for (const wake of this.#waiters.get(sessionId) ?? []) wake();
 	}
 
 	#log(state: TeamState, event: Omit<TeamEvent, "seq" | "at" | "count">) {
@@ -155,7 +219,7 @@ export class TeamBoard {
 		return task.dependsOn.every(dep => state.tasks.find(entry => entry.id === dep)?.status === "done");
 	}
 
-	#change(sessionId: string, change: (state: TeamState) => string) {
+	#change<T>(sessionId: string, change: (state: TeamState) => T): T {
 		const state = structuredClone(this.state(sessionId));
 		const result = change(state);
 		this.#save(sessionId, state);
@@ -294,31 +358,47 @@ export class TeamBoard {
 	}
 
 	/** Take a task to work on: only one agent gets it, and only once what it waits for is done. */
-	takeTask(sessionId: string, agent: Party, id: string) {
+	/** Take a task. The message is what agents see; the claim token is on the task. */
+	takeTask(sessionId: string, agent: Party, id: string, leaseMs?: number): string {
+		return this.claimTask(sessionId, agent, id, leaseMs).message;
+	}
+
+	claimTask(sessionId: string, agent: Party, id: string, leaseMs?: number): TaskClaimReceipt {
 		return this.#change(sessionId, state => {
+			this.#reap(state);
 			const task = this.#task(state, id);
-			if (task.status === "in_progress" && task.owner === agent) return `${task.id} is already yours.`;
+			if (task.status === "in_progress" && task.owner === agent && task.claimToken && typeof task.leaseExpiresAt === "number") {
+				return { taskId: task.id, owner: agent, claimToken: task.claimToken, leaseExpiresAt: task.leaseExpiresAt, message: `${task.id} is already yours.` };
+			}
 			if (task.status !== "todo") throw conflict(`${task.id} is ${task.status.replace("_", " ")}${task.owner ? ` (${task.owner === agent ? "yours" : "someone else's"})` : ""}.`);
 			if (task.owner && task.owner !== agent) throw conflict(`${task.id} is assigned to someone else.`);
 			if (!this.#ready(state, task)) throw conflict(`${task.id} waits for ${task.dependsOn.filter(dep => state.tasks.find(entry => entry.id === dep)?.status !== "done").join(", ")}.`);
+			const now = this.#now();
 			task.owner = agent;
 			task.status = "in_progress";
-			task.updatedAt = this.#now();
-			task.history.push({ at: task.updatedAt, by: agent, action: "took" });
+			task.claimToken = randomUUID();
+			task.leaseExpiresAt = now + clampLeaseMs(leaseMs);
+			task.updatedAt = now;
+			task.history.push({ at: now, by: agent, action: "took" });
 			this.#syncThreadFromTasks(state, task.threadId);
 			this.#log(state, { part: "tasks", action: "claim", direction: "in", from: agent, to: [], subject: task.id, text: `took ${task.id}: ${task.title}` });
-			return state.requirePlans ? `You have ${task.id}. Submit your plan with team_plan before you change anything; the lead approves it.` : `You have ${task.id}.`;
-		});
+			const message = state.requirePlans ? `You have ${task.id}. Submit your plan with team_plan before you change anything; the lead approves it.` : `You have ${task.id}.`;
+			return { taskId: task.id, owner: agent, claimToken: task.claimToken, leaseExpiresAt: task.leaseExpiresAt, message };
+		}) as TaskClaimReceipt;
 	}
 
-	finishTask(sessionId: string, agent: Party, id: string, result: string) {
+	finishTask(sessionId: string, agent: Party, id: string, result: string, claimToken?: string | null) {
 		return this.#change(sessionId, state => {
+			const lost = this.#reap(state);
 			const task = this.#task(state, id);
+			if (lost.includes(task.id) || (claimToken && claimToken !== task.claimToken)) throw conflict("claim_lost");
 			if (task.owner !== agent && agent !== "lead") throw conflict(`${task.id} isn't yours.`);
 			if (state.requirePlans && task.plan?.status !== "approved" && agent !== "lead") throw conflict(`${task.id}'s plan isn't approved yet.`);
 			task.status = "done";
 			task.result = clip(result ?? "", 2000);
 			task.returnedNote = "";
+			task.claimToken = null;
+			task.leaseExpiresAt = null;
 			task.updatedAt = this.#now();
 			task.history.push({ at: task.updatedAt, by: agent, action: "done", note: task.result });
 			this.#syncThreadFromTasks(state, task.threadId);
@@ -343,14 +423,20 @@ export class TeamBoard {
 			if (action === "send_back") {
 				if (task.status !== "done") throw conflict(`${task.id} isn't done.`);
 				task.status = "in_progress";
+				task.claimToken = randomUUID();
+				task.leaseExpiresAt = now + DEFAULT_TASK_LEASE_MS;
 				task.returnedNote = clip(note, 1000);
 				this.#log(state, { part: "tasks", action: "return", direction: "out", from: "tasks", to: task.owner ? [task.owner] : [], subject: task.id, text: `${task.id} sent back${note ? `: ${clip(note, 120)}` : ""}` });
 			} else if (action === "drop") {
 				task.status = "dropped";
+				task.claimToken = null;
+				task.leaseExpiresAt = null;
 				this.#log(state, { part: "tasks", action: "drop", direction: "in", from: by, to: [], subject: task.id, text: `dropped ${task.id}${note ? `: ${clip(note, 100)}` : ""}` });
 			} else {
 				task.status = "todo";
 				task.owner = null;
+				task.claimToken = null;
+				task.leaseExpiresAt = null;
 				this.#log(state, { part: "tasks", action: "reopen", direction: "in", from: by, to: [], subject: task.id, text: `reopened ${task.id}` });
 			}
 			task.updatedAt = now;
@@ -364,7 +450,9 @@ export class TeamBoard {
 		const plan = (text ?? "").trim();
 		if (!plan) throw badRequest("Describe the plan.");
 		return this.#change(sessionId, state => {
+			const lost = this.#reap(state);
 			const task = this.#task(state, id);
+			if (lost.includes(task.id)) throw conflict("claim_lost");
 			if (task.owner !== agent) throw conflict(`${task.id} isn't yours; take it first.`);
 			task.plan = { text: plan.slice(0, 4000), status: "waiting", note: "", at: this.#now() };
 			task.history.push({ at: task.plan.at, by: agent, action: "plan" });
@@ -387,14 +475,15 @@ export class TeamBoard {
 		});
 	}
 
-	post(sessionId: string, author: Party, input: { text: string; to?: string[]; kind?: PostKind; re?: number | null }) {
+	post(sessionId: string, author: Party, input: { text: string; to?: string[]; kind?: PostKind; re?: number | null; channel?: string | null }) {
 		const text = (input.text ?? "").trim();
 		if (!text) throw badRequest("Write something to post.");
+		const channel = normalizeChannel(input.channel);
 		return this.#change(sessionId, state => {
 			const seq = (state.posts.at(-1)?.seq ?? 0) + 1;
 			const to = input.to?.length ? input.to.slice(0, 20).map(party => String(party).slice(0, 80)) : ["all"];
 			const kind = input.kind && POST_KINDS.includes(input.kind) ? input.kind : "update";
-			state.posts.push({ seq, at: this.#now(), author, to, kind, text: text.slice(0, 4000), re: input.re ?? null });
+			state.posts.push({ seq, at: this.#now(), author, to, kind, text: text.slice(0, 4000), re: input.re ?? null, channel });
 			if (state.posts.length > MAX_POSTS) state.posts.splice(0, state.posts.length - MAX_POSTS);
 			// Your own post counts as read, but only when nothing before it is still unread.
 			if ((state.readSeq[author] ?? 0) >= seq - 1) state.readSeq[author] = seq;
@@ -404,10 +493,11 @@ export class TeamBoard {
 	}
 
 	/** What's new for this party: posts addressed to it (or to all), and decisions on its plans and tasks. */
-	read(sessionId: string, agent: Party, names: (party: Party) => string = party => party) {
+	read(sessionId: string, agent: Party, names: (party: Party) => string = party => party, channel?: string | null) {
 		const state = this.state(sessionId);
 		const since = state.readSeq[agent] ?? 0;
-		const posts = state.posts.filter(post => post.seq > since && post.author !== agent && (post.to.includes("all") || post.to.includes(agent) || post.to.includes(names(agent))));
+		const only = channel ? normalizeChannel(channel) : null;
+		const posts = state.posts.filter(post => post.seq > since && post.author !== agent && (post.to.includes("all") || post.to.includes(agent) || post.to.includes(names(agent))) && (!only || (post.channel ?? DEFAULT_CHANNEL) === only));
 		const mine = state.tasks.filter(task => task.owner === agent);
 		const lines: string[] = [];
 		for (const post of posts) lines.push(`#${post.seq} ${names(post.author)} (${post.kind}${post.re ? `, re #${post.re}` : ""}): ${post.text}`);
@@ -456,6 +546,39 @@ export class TeamBoard {
 			state.claims = state.claims.filter(claim => !mine.includes(claim));
 			this.#log(state, { part: "claims", action: "release", direction: "in", from: agent, to: [], subject: mine.map(claim => claim.path).join(", "), text: `released ${mine.map(claim => claim.path).join(", ")}` });
 			return `Released ${mine.length} ${mine.length === 1 ? "path" : "paths"}.`;
+		});
+	}
+
+	posts(sessionId: string, channel?: string | null): TeamPost[] {
+		const only = channel ? normalizeChannel(channel) : null;
+		return this.state(sessionId).posts.filter(post => !only || (post.channel ?? DEFAULT_CHANNEL) === only);
+	}
+
+	/** Wait until a post arrives after `afterSeq` on this board (and channel, when set). */
+	waitFor(sessionId: string, options: { afterSeq?: number; channel?: string | null; timeoutMs?: number } = {}): Promise<BoardWaitResult> {
+		const afterSeq = options.afterSeq ?? 0;
+		const channel = options.channel ? normalizeChannel(options.channel) : null;
+		const timeoutMs = Math.max(0, Math.min(options.timeoutMs ?? 30_000, 120_000));
+		const snapshot = (): BoardWaitResult => {
+			const posts = this.posts(sessionId, channel).filter(post => post.seq > afterSeq);
+			const lastSeq = this.state(sessionId).posts.at(-1)?.seq ?? 0;
+			return { matched: posts.length > 0, posts, lastSeq };
+		};
+		const ready = snapshot();
+		if (ready.matched || timeoutMs === 0) return Promise.resolve(ready);
+		return new Promise(resolve => {
+			const waiters = this.#waiters.get(sessionId) ?? new Set();
+			this.#waiters.set(sessionId, waiters);
+			let timer: ReturnType<typeof setTimeout>;
+			const finish = () => {
+				clearTimeout(timer);
+				waiters.delete(wake);
+				resolve(snapshot());
+			};
+			const wake = () => { if (snapshot().matched) finish(); };
+			waiters.add(wake);
+			timer = setTimeout(finish, timeoutMs);
+			timer.unref?.();
 		});
 	}
 

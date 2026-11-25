@@ -1,4 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { ApprovalManager } from "./approvals.ts";
 import { ArtifactManager } from "./artifacts.ts";
 import { BrowserManager } from "./browser.ts";
@@ -27,6 +29,7 @@ import type { ConversationTimelineSnapshot } from "./timeline.ts";
 import type { WorktreeManager } from "./worktrees.ts";
 import { createStartFrom } from "./start-from.ts";
 import { SessionBlueprints } from "./session-blueprints.ts";
+import { syncClaimedAgentTask } from "./agent-tasks.ts";
 import { EuPolicy, hostRegion } from "./eu-policy.ts";
 import { ModelRouting } from "./model-routing.ts";
 import { TeamBoard } from "./team-board.ts";
@@ -86,6 +89,9 @@ export class LocalAgentHost {
 		this.mcp = new McpManager(this.#db, this.events, { capabilities: this.capabilities, home: skillsHome });
 
 		this.blueprints = new SessionBlueprints(this.#db, this.events);
+		this.blueprints.setStageFinished((sessionId, stageId, summary) => {
+			this.#syncClaimedTask(sessionId, "stage", `Stage ${stageId} finished.\n\n${summary}`);
+		});
 		this.approvals.setGate((sessionId, toolName, args, isLead) => this.blueprints.toolBlockReason(sessionId, toolName, args, isLead));
 		this.blueprints.setWorkspace(sessionId => this.#tasks.getWorkspacePath(sessionId));
 		this.team = new TeamBoard(stateDirectory, this.events);
@@ -268,6 +274,7 @@ export class LocalAgentHost {
 		if (!task && !chat) throw notFound("Session not found.");
 		if (archived && this.#turnExecutor.isActiveOrRecovering(id)) await this.abortSession(id).catch(() => ({ ok: false }));
 		if (archived) await this.#sessionManager.evict(id);
+		if (archived) this.#syncClaimedTask(id, "archive", "Session archived.");
 		const archivedAt = archived ? Date.now() : null;
 		if (task) this.#tasks.setArchivedAt(id, archivedAt);
 		else this.#chats.setArchivedAt(id, archivedAt);
@@ -339,7 +346,20 @@ export class LocalAgentHost {
 
 	abortSession(sessionId: string) {
 		this.blueprints.cancelAutoAdvance(sessionId);
-		return this.#sessionManager.abortSession(sessionId);
+		const result = this.#sessionManager.abortSession(sessionId);
+		void Promise.resolve(result).then(() => this.#syncClaimedTask(sessionId, "pause", "Session paused.")).catch(() => undefined);
+		return result;
+	}
+
+	/** Write `.tasks/` state for a session that claimed a repo task. Failures stay off the session path. */
+	#syncClaimedTask(sessionId: string, event: "pause" | "archive" | "stage", note: string) {
+		const task = this.#tasks.get(sessionId);
+		const roots = [task?.workspace, task?.repository].filter((path): path is string => Boolean(path));
+		for (const root of roots) {
+			if (!existsSync(join(root, ".tasks"))) continue;
+			try { syncClaimedAgentTask(root, sessionId, event, note); } catch { /* leave the session change intact */ }
+			return;
+		}
 	}
 
 	compactSession(sessionId: string, instructions?: string) {
