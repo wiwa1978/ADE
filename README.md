@@ -12,7 +12,7 @@ the built-in browser, MCP servers, and skills. From a session you can review
 changes, commit, push, open a pull request, follow its checks, and merge it.
 Projects list their GitHub issues and pull requests; any issue can start a session.
 
-See `docs/DESIGN_REVIEW.md` for the current design review and roadmap.
+See `docs/DESIGN.md` for the product design, `docs/IMPLEMENTATION_PLAN.md` for how it is being built, and `docs/DESIGN_REVIEW.md` for the design review and roadmap.
 
 Use the **+** beside Projects to create a project with an automatic name.
 Creating or selecting a project opens **Project settings** in the right pane,
@@ -56,6 +56,11 @@ selected tile's **Agent details** includes its audit IDs.
 Use Node.js 22.19 or newer. From this directory:
 
 ```powershell
+npm install
+npm run dev
+```
+
+```sh
 npm install
 npm run dev
 ```
@@ -178,6 +183,14 @@ $env:RADIUS_API_KEY = [System.Net.NetworkCredential]::new("", (Read-Host "Radius
 try { npm run dev } finally { Remove-Item Env:\RADIUS_API_KEY -ErrorAction SilentlyContinue }
 ```
 
+```sh
+cd ~/Code/ADE
+read -rs RADIUS_API_KEY
+export ADE_PROVIDER=radius RADIUS_API_KEY
+npm run dev
+unset RADIUS_API_KEY
+```
+
 **OpenAI and Anthropic:** Save the relevant key in **Settings → Models** and select
 the provider. Alternatively, supply keys when launching ADE:
 
@@ -186,6 +199,13 @@ $env:ADE_PROVIDER = "openai"
 $env:ADE_MODEL = "gpt-4.1"
 $env:OPENAI_API_KEY = [System.Net.NetworkCredential]::new("", (Read-Host "OpenAI API key" -AsSecureString)).Password
 npm run dev
+```
+
+```sh
+read -rs OPENAI_API_KEY
+export ADE_PROVIDER=openai ADE_MODEL=gpt-4.1 OPENAI_API_KEY
+npm run dev
+unset OPENAI_API_KEY
 ```
 
 For Anthropic, use `ADE_PROVIDER = "anthropic"`, set `ADE_MODEL` to an available
@@ -200,6 +220,13 @@ $env:ADE_COMPATIBLE_MODEL = "<installed-model-id>"
 npm run dev
 ```
 
+```sh
+export ADE_PROVIDER=compatible
+export ADE_COMPATIBLE_URL=http://127.0.0.1:11434/v1
+export ADE_COMPATIBLE_MODEL=<installed-model-id>
+npm run dev
+```
+
 Compatible non-loopback endpoints must use HTTPS and require a key, either saved
 in **Settings → Models** or supplied as `ADE_COMPATIBLE_KEY`. Saved API keys take
 precedence over launch environment keys; removing one falls back to any
@@ -209,10 +236,13 @@ DPAPI on Windows, and stored in the macOS Keychain or, on Linux, in libsecret
 stored in browser preferences or ADE's turn database. Saving a key does not verify it with the provider.
 Real provider calls send conversation content to that provider and may incur charges.
 
+## Software Factory
+
+From a project, **Start Software Factory Run** starts a staged run on that project's checkout: the agent works through the project's blueprint, and ADE stops at approval gates (Ask) until you allow the next step. Autopilot skips command approvals; stage gates still stop. The run uses the same session tools (files, shell, browser, artifacts, skills, and MCP) as any other coding session.
+
 ## Durable state and current boundaries
 
-State defaults to `%USERPROFILE%\.ade\state`; set `ADE_STATE_DIR` to use a
-different directory. The local host permits one owner per state directory.
+State defaults to `%USERPROFILE%\.ade\state` on Windows and `~/.ade/state` on macOS and Linux. Set `ADE_STATE_DIR` to use a different directory. The local host permits one owner per state directory.
 `coding.sqlite` and `personal.sqlite` are separate Pi Durable sessions;
 each additional chat has its own Pi Durable database file and runtime key;
 `ade-host.sqlite` stores the UI's turn/status projection. Turns use stable
