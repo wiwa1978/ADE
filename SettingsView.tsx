@@ -209,7 +209,7 @@ export function SettingsView({
             onAddApprovalRule={onAddApprovalRule}
           />
         )
-      case "skills": return <SkillsToolsSettings projects={projects} onRefreshMcp={onRefreshMcp} />
+      case "skills": return <SkillsToolsSettings projects={projects} activeEnvironmentName={activeEnvironmentName} onRefreshMcp={onRefreshMcp} />
       case "github": return <GitHubSettings settings={settings} connections={connections} update={update} />
       case "terminal": return <TerminalSettings settings={settings} update={update} />
       case "notifications": return <NotificationsSettings settings={settings} update={update} />

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { Plug, Plus, Trash2, Unplug } from "lucide-react"
+import { Pencil, Plug, Plus, Trash2, Unplug } from "lucide-react"
 import { request, requestJson } from "../../api"
 import { useI18n } from "../i18n/I18nContext"
 import "./skills-tools.css"
@@ -7,32 +7,52 @@ import "./skills-tools.css"
 type State = { active: boolean; global: boolean | null; project: boolean | null }
 type Skill = {
   key: string; name: string; description: string; path: string; dir: string
-  origin: { kind: "project" | "git" | "ade" | "tool"; label: string; sourceId?: string }
+  origin: { kind: "project" | "git" | "ade" | "tool"; label: string; sourceId?: string; ref?: string | null; commit?: string | null }
   tokens: number; extraFiles: number; shadowedBy: string | null; state: State
 }
 type Source = { id: string; url: string; ref: string | null; subpath: string | null; commit: string | null; status: "ready" | "error"; error: string | null }
-type Preview = { previewId: string; url: string; commit: string | null; skills: { name: string; description: string; relPath: string }[] }
+type Preview = { previewId: string; url: string; commit: string | null; skills: { name: string; description: string; relPath: string; extraFiles?: number }[] }
 type Server = {
   id: string; key: string; name: string; transport: "stdio" | "http"; enabled: boolean
-  status: "disconnected" | "connecting" | "connected" | "error"; error: string | null; tools: { name: string }[]
-  origin: { kind: "ade" | "file" | "project"; label: string }
+  command?: string; args?: string[]; env?: Record<string, string>; url?: string; headers?: Record<string, string>
+  status: "disconnected" | "connecting" | "connected" | "error"; error: string | null; tools: { name: string; enabled?: boolean }[]
+  origin: { kind: "ade" | "file" | "project"; label: string; path?: string }
   readOnly: boolean; active: boolean; globalSetting: boolean | null; projectSetting: boolean | null; needsTrust: boolean; shadowedBy: string | null
 }
 type ProjectRef = { id: string; name: string }
+
+function parseKvLines(text: string, sep: "=" | ":"): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line) continue
+    const idx = line.indexOf(sep)
+    if (idx <= 0) continue
+    const key = line.slice(0, idx).trim()
+    const value = line.slice(idx + 1).trim()
+    if (key) out[key] = value
+  }
+  return out
+}
+
+function formatKvLines(map: Record<string, string> | undefined, sep: "=" | ":"): string {
+  return Object.entries(map ?? {}).map(([k, v]) => `${k}${sep === ":" ? ": " : "="}${v}`).join("\n")
+}
 
 /**
  * Skills and tool servers: everything ADE found and where it came from, what is on, for all
  * projects or one. Everything is on unless turned off; a project's setting beats the global one.
  */
-export function SkillsToolsSettings({ projects, onRefreshMcp }: { projects: ProjectRef[]; onRefreshMcp?: () => void }) {
+export function SkillsToolsSettings({ projects, activeEnvironmentName, onRefreshMcp, fixedProjectId }: { projects: ProjectRef[]; activeEnvironmentName?: string; onRefreshMcp?: () => void; fixedProjectId?: string }) {
   const { t } = useI18n()
-  const [projectId, setProjectId] = useState("")
+  const [projectId, setProjectId] = useState(fixedProjectId ?? "")
   const scopeQuery = projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""
   const [skills, setSkills] = useState<Skill[]>([])
   const [sources, setSources] = useState<Source[]>([])
   const [servers, setServers] = useState<Server[]>([])
   const [error, setError] = useState("")
   const [reload, setReload] = useState(0)
+  const [editingServer, setEditingServer] = useState<Server | null>(null)
   const refresh = useCallback(() => setReload(value => value + 1), [])
 
   useEffect(() => {
@@ -56,7 +76,7 @@ export function SkillsToolsSettings({ projects, onRefreshMcp }: { projects: Proj
   }
 
   /** Turn one item on/off in the chosen scope; null goes back to inheriting. */
-  const setCapability = (kind: "skill" | "mcp" | "mcp-trust", key: string, enabled: boolean | null) => attempt(() => requestJson("/api/capabilities", "PUT", { scope: projectId ? "project" : "global", projectId: projectId || undefined, kind, key, enabled }))
+  const setCapability = (kind: "skill" | "mcp" | "mcp-trust" | "mcp-tool", key: string, enabled: boolean | null) => attempt(() => requestJson("/api/capabilities", "PUT", { scope: projectId ? "project" : "global", projectId: projectId || undefined, kind, key, enabled }))
 
   const stateHint = (state: { global: boolean | null; project: boolean | null; active: boolean }) => {
     if (projectId && state.project !== null) return state.project ? t("skills.onHere") : t("skills.offHere")
@@ -69,12 +89,17 @@ export function SkillsToolsSettings({ projects, onRefreshMcp }: { projects: Proj
   return (
     <div className="ade-st-tools">
       <div className="ade-st-scope">
-        <label htmlFor="st-capability-scope">{t("skills.scope")}</label>
-        <select id="st-capability-scope" className="st-select" value={projectId} onChange={event => setProjectId(event.target.value)}>
-          <option value="">{t("skills.scopeGlobal")}</option>
-          {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
-        </select>
-        <span className="st-hint">{t("skills.scopeHint")}</span>
+        {activeEnvironmentName ? <span className="ade-st-env">{t("skills.environment", { name: activeEnvironmentName })}</span> : null}
+        {fixedProjectId ? <span className="st-hint">{t("skills.projectScopeHint")}</span> : (
+          <>
+            <label htmlFor="st-capability-scope">{t("skills.scope")}</label>
+            <select id="st-capability-scope" className="st-select" value={projectId} onChange={event => setProjectId(event.target.value)}>
+              <option value="">{t("skills.scopeGlobal")}</option>
+              {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </select>
+            <span className="st-hint">{t("skills.scopeHint")}</span>
+          </>
+        )}
       </div>
       {error ? <p className="st-banner is-error" role="alert">{error}</p> : null}
 
@@ -102,8 +127,21 @@ export function SkillsToolsSettings({ projects, onRefreshMcp }: { projects: Proj
                 <span className="ade-st-pill">{server.origin.label}</span>
                 <span className="ade-st-pill">{server.transport}</span>
                 <span className="st-hint">{server.status === "connected" ? (server.tools.length === 1 ? t("tools.oneTool") : t("tools.toolCount", { count: server.tools.length })) : server.error || ""}</span>
+                {server.origin.path ? <code className="ade-st-path">{server.origin.path}</code> : null}
                 {server.shadowedBy ? <span className="st-hint">{t("tools.shadowed")}</span> : null}
                 {server.readOnly ? <span className="st-hint">{t("tools.readOnly", { origin: server.origin.label })}</span> : null}
+                {server.tools.length ? (
+                  <ul className="ade-st-tool-switches">
+                    {server.tools.map(tool => (
+                      <li key={tool.name}>
+                        <label>
+                          <input type="checkbox" checked={tool.enabled !== false} onChange={event => void setCapability("mcp-tool", `${server.key}::${tool.name}`, event.target.checked)} />
+                          {tool.name}
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                ) : server.active ? <span className="st-hint">{t("tools.connectForTools")}</span> : null}
               </div>
               <div className="ade-st-actions">
                 {server.readOnly && !server.needsTrust ? <button type="button" className="st-button" onClick={() => void attempt(() => requestJson(`/api/mcp/${encodeURIComponent(server.id)}/adopt${scopeQuery}`, "POST"))}>{t("tools.copyIntoAde")}</button> : null}
@@ -112,13 +150,19 @@ export function SkillsToolsSettings({ projects, onRefreshMcp }: { projects: Proj
                     {server.status === "connected" ? <Unplug className="size-3.5" /> : <Plug className="size-3.5" />}
                   </button>
                 ) : null}
-                {!server.readOnly ? <button type="button" className="st-prov-icon-btn" aria-label={t("skills.remove")} onClick={() => void attempt(() => request(`/api/mcp/${encodeURIComponent(server.id)}`, { method: "DELETE" }))}><Trash2 className="size-3.5" /></button> : null}
+                {!server.readOnly ? (
+                  <>
+                    <button type="button" className="st-prov-icon-btn" aria-label={t("tools.edit")} title={t("tools.edit")} onClick={() => setEditingServer(server)}><Pencil className="size-3.5" /></button>
+                    <button type="button" className="st-prov-icon-btn" aria-label={t("skills.remove")} onClick={() => void attempt(() => request(`/api/mcp/${encodeURIComponent(server.id)}`, { method: "DELETE" }))}><Trash2 className="size-3.5" /></button>
+                  </>
+                ) : null}
                 <Switch label={t("skills.toggle", { name: server.name })} on={projectId ? server.active : (server.globalSetting ?? server.enabled)} onChange={on => void setCapability("mcp", server.key, on)} />
                 {projectId && server.projectSetting !== null ? <button type="button" className="ade-st-link" onClick={() => void setCapability("mcp", server.key, null)}>{t("skills.inherit")}</button> : null}
               </div>
             </li>
           ))}
         </ul>
+        <AddOrEditMcp key={editingServer?.id ?? "new"} editing={editingServer} onDone={() => setEditingServer(null)} attempt={attempt} />
         <ImportMcp attempt={attempt} />
       </section>
     </div>
@@ -141,11 +185,17 @@ function SkillList({ skills, projectId, stateHint, ownSetting, shownActive, setC
 }) {
   const { t } = useI18n()
   const [filter, setFilter] = useState("")
+  const [editingPath, setEditingPath] = useState<string | null>(null)
+  const [editingContent, setEditingContent] = useState("")
   const effective = skills.filter(skill => !skill.shadowedBy)
   const needle = filter.trim().toLowerCase()
-  const shown = needle ? skills.filter(skill => `${skill.name} ${skill.description} ${skill.origin.label}`.toLowerCase().includes(needle)) : skills
+  const shown = needle ? skills.filter(skill => `${skill.name} ${skill.description} ${skill.origin.label} ${skill.path}`.toLowerCase().includes(needle)) : skills
   const activeCount = effective.filter(skill => shownActive(skill.state)).length
-  const originLabel = (skill: Skill) => skill.origin.kind === "tool" ? skill.origin.label : skill.origin.kind === "git" ? skill.origin.label : skill.origin.label
+  const openEdit = (path: string) => void attempt(async () => {
+    const data = await request<{ path: string; content: string }>(`/api/skills/user?path=${encodeURIComponent(path)}`)
+    setEditingPath(data.path)
+    setEditingContent(data.content)
+  })
   return (
     <section className="ade-st-card" aria-label={t("skills.title")}>
       <h3>{t("skills.title")} <span className="st-hint">{t("skills.count", { active: activeCount, total: effective.length })}</span></h3>
@@ -156,14 +206,29 @@ function SkillList({ skills, projectId, stateHint, ownSetting, shownActive, setC
           <li key={skill.key} className={skill.shadowedBy ? "is-dim" : ""}>
             <div className="ade-st-main">
               <strong>{skill.name}</strong>
-              <span className={`ade-st-pill is-${skill.origin.kind}`}>{originLabel(skill)}</span>
+              <span className={`ade-st-pill is-${skill.origin.kind}`}>{skill.origin.label}</span>
+              {skill.origin.commit ? <code>{skill.origin.commit.slice(0, 7)}</code> : null}
               <span className="st-hint">{t("skills.tokens", { count: skill.tokens })}{skill.extraFiles ? ` · ${t("skills.extraFiles", { count: skill.extraFiles })}` : ""}</span>
               <p className="ade-st-desc">{skill.description}</p>
+              <code className="ade-st-path">{skill.path}</code>
               {skill.shadowedBy ? <span className="st-hint">{t("skills.shadowed")}</span> : stateHint(skill.state) ? <span className="st-hint">{stateHint(skill.state)}</span> : null}
+              {editingPath === skill.path ? (
+                <div className="ade-st-editor">
+                  <textarea className="st-input" rows={8} value={editingContent} onChange={event => setEditingContent(event.target.value)} aria-label={t("skills.body")} spellCheck={false} />
+                  <div className="ade-st-actions">
+                    <button type="button" className="st-button is-quiet" onClick={() => setEditingPath(null)}>{t("common.cancel")}</button>
+                    <button type="button" className="st-button is-primary" onClick={() => void attempt(async () => {
+                      await requestJson("/api/skills/user", "PUT", { path: skill.path, content: editingContent })
+                      setEditingPath(null)
+                    })}>{t("skills.save")}</button>
+                  </div>
+                </div>
+              ) : null}
             </div>
             {!skill.shadowedBy ? (
               <div className="ade-st-actions">
                 {skill.origin.kind === "ade" ? <>
+                  <button type="button" className="st-prov-icon-btn" aria-label={t("skills.edit")} title={t("skills.edit")} onClick={() => openEdit(skill.path)}><Pencil className="size-3.5" /></button>
                   <button type="button" className="st-prov-icon-btn" aria-label={t("skills.delete")} onClick={() => { if (window.confirm(t("skills.deleteConfirm", { name: skill.name }))) void attempt(() => request(`/api/skills/user?path=${encodeURIComponent(skill.path)}`, { method: "DELETE" })) }}><Trash2 className="size-3.5" /></button>
                 </> : null}
                 <Switch label={t("skills.toggle", { name: skill.name })} on={shownActive(skill.state)} onChange={on => void setCapability("skill", skill.name, on)} />
@@ -184,6 +249,7 @@ function SourcesCard({ sources, attempt }: { sources: Source[]; attempt: Attempt
   const [subpath, setSubpath] = useState("")
   const [busy, setBusy] = useState("")
   const [preview, setPreview] = useState<Preview | null>(null)
+  const [unticked, setUnticked] = useState<Record<string, boolean>>({})
   const [checks, setChecks] = useState<Record<string, boolean>>({})
   const run = async (name: string, action: () => Promise<unknown>) => {
     setBusy(name)
@@ -199,6 +265,7 @@ function SourcesCard({ sources, attempt }: { sources: Source[]; attempt: Attempt
         void run("preview", async () => {
           const data = await requestJson<{ preview: Preview }>("/api/skills/sources/preview", "POST", { url, ref, subpath })
           setPreview(data.preview)
+          setUnticked({})
         })
       }}>
         <input className="st-input" value={url} onChange={event => setUrl(event.target.value)} placeholder={t("skills.repoPlaceholder")} aria-label={t("skills.sources")} required />
@@ -210,12 +277,29 @@ function SourcesCard({ sources, attempt }: { sources: Source[]; attempt: Attempt
         <div className="ade-st-preview">
           <strong>{t("skills.previewTitle", { count: preview.skills.length, url: preview.url })}</strong>
           {preview.commit ? <span className="st-hint">{t("skills.previewCommit", { commit: preview.commit.slice(0, 7) })}</span> : null}
-          <ul>{preview.skills.map(skill => <li key={skill.relPath}><strong>{skill.name}</strong> <span className="st-hint">{skill.description}</span></li>)}</ul>
+          <span className="st-hint">{t("skills.previewHint")}</span>
+          <ul className="ade-st-preview-list">
+            {preview.skills.map(skill => (
+              <li key={skill.relPath}>
+                <label>
+                  <input type="checkbox" checked={!unticked[skill.name]} onChange={event => setUnticked(cur => ({ ...cur, [skill.name]: !event.target.checked }))} />
+                  <strong>{skill.name}</strong>
+                  {skill.extraFiles ? <span className="ade-st-pill is-warn">{t("skills.scriptsWarning")}</span> : null}
+                  <span className="st-hint">{skill.description}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
           <div className="ade-st-actions">
-            <button type="button" className="st-button is-quiet" onClick={() => { void requestJson("/api/skills/sources/discard", "POST", { previewId: preview.previewId }).catch(() => undefined); setPreview(null) }}>{t("common.cancel")}</button>
+            <button type="button" className="st-button is-quiet" onClick={() => { void requestJson("/api/skills/sources/discard", "POST", { previewId: preview.previewId }).catch(() => undefined); setPreview(null); setUnticked({}) }}>{t("common.cancel")}</button>
             <button type="button" className="st-button is-primary" disabled={busy === "install"} onClick={() => void run("install", async () => {
               await requestJson("/api/skills/sources/confirm", "POST", { previewId: preview.previewId })
-              setPreview(null); setUrl(""); setRef(""); setSubpath("")
+              for (const skill of preview.skills) {
+                if (unticked[skill.name]) {
+                  await requestJson("/api/capabilities", "PUT", { scope: "global", kind: "skill", key: skill.name, enabled: false })
+                }
+              }
+              setPreview(null); setUnticked({}); setUrl(""); setRef(""); setSubpath("")
             })}>{busy === "install" ? t("skills.installing") : t("skills.install")}</button>
           </div>
         </div>
@@ -269,6 +353,64 @@ function WriteSkillCard({ attempt }: { attempt: Attempt }) {
         <div><button className="st-button is-primary" disabled={!name.trim() || !description.trim()}><Plus className="size-3.5 inline mr-1" />{t("skills.create")}</button></div>
       </form>
     </section>
+  )
+}
+
+function AddOrEditMcp({ editing, onDone, attempt }: { editing: Server | null; onDone: () => void; attempt: Attempt }) {
+  const { t } = useI18n()
+  const [open, setOpen] = useState(Boolean(editing))
+  const [name, setName] = useState(editing?.name ?? "")
+  const [transport, setTransport] = useState<"stdio" | "http">(editing?.transport ?? "stdio")
+  const [command, setCommand] = useState(editing?.command ?? "")
+  const [argsText, setArgsText] = useState(editing?.args?.join(" ") ?? "")
+  const [url, setUrl] = useState(editing?.url ?? "")
+  const [kvText, setKvText] = useState(editing ? (editing.transport === "http" ? formatKvLines(editing.headers, ":") : formatKvLines(editing.env, "=")) : "")
+
+  if (!open && !editing) {
+    return <div><button type="button" className="st-button" onClick={() => setOpen(true)}><Plus className="size-3.5 inline mr-1" />{t("tools.add")}</button></div>
+  }
+
+  return (
+    <form className="ade-st-form is-stacked" onSubmit={event => {
+      event.preventDefault()
+      void attempt(async () => {
+        await requestJson("/api/mcp", "POST", {
+          id: editing?.id,
+          name,
+          transport,
+          command: transport === "stdio" ? command : undefined,
+          args: transport === "stdio" && argsText.trim() ? argsText.trim().split(/\s+/) : [],
+          env: transport === "stdio" ? parseKvLines(kvText, "=") : undefined,
+          url: transport === "http" ? url : undefined,
+          headers: transport === "http" ? parseKvLines(kvText, ":") : undefined,
+          enabled: editing ? editing.enabled : true,
+        })
+        setOpen(false)
+        onDone()
+      })
+    }}>
+      <h4>{editing ? `${t("tools.edit")}: ${editing.name}` : t("tools.add")}</h4>
+      <div className="ade-st-form">
+        <input className="st-input" value={name} onChange={event => setName(event.target.value)} placeholder={t("tools.namePlaceholder")} aria-label={t("tools.namePlaceholder")} required />
+        <select className="st-select" value={transport} onChange={event => setTransport(event.target.value as "stdio" | "http")} aria-label="Transport">
+          <option value="stdio">stdio</option>
+          <option value="http">HTTP</option>
+        </select>
+      </div>
+      {transport === "stdio" ? (
+        <div className="ade-st-form">
+          <input className="st-input" value={command} onChange={event => setCommand(event.target.value)} placeholder={t("tools.commandPlaceholder")} aria-label={t("tools.commandPlaceholder")} required />
+          <input className="st-input" value={argsText} onChange={event => setArgsText(event.target.value)} placeholder={t("tools.argsPlaceholder")} aria-label={t("tools.argsPlaceholder")} />
+        </div>
+      ) : (
+        <input className="st-input" value={url} onChange={event => setUrl(event.target.value)} placeholder={t("tools.urlPlaceholder")} aria-label={t("tools.urlPlaceholder")} required />
+      )}
+      <textarea className="st-input" rows={2} value={kvText} onChange={event => setKvText(event.target.value)} placeholder={transport === "stdio" ? t("tools.envPlaceholder") : t("tools.headersPlaceholder")} spellCheck={false} />
+      <div className="ade-st-actions">
+        <button type="button" className="st-button is-quiet" onClick={() => { setOpen(false); onDone() }}>{t("common.cancel")}</button>
+        <button type="submit" className="st-button is-primary" disabled={!name.trim() || (transport === "stdio" ? !command.trim() : !url.trim())}>{editing ? t("tools.saveServer") : t("tools.addServer")}</button>
+      </div>
+    </form>
   )
 }
 

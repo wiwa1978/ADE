@@ -58,6 +58,7 @@ Both flavors run **the same Node runtime** (`runtime/`) and speak **the same HTT
 ### 3.1 The Captain, subagents and the person
 
 - **Captain:** one Pi Durable agent per session. It has the workspace tools, shell, browser, artifacts, skills and the team tools.
+- **Skills and MCP.** Settings → Skills and tools shows every skill and MCP server on that environment (this computer or an SSH host), where it is on disk, and whether it is on. The default is on. A project setting beats the all-projects setting. Skills can be written in ADE, imported from Git (preview first), or found in the project and in other tools' folders. A repository `.mcp.json` is trusted once per project before it runs. A connected MCP server lists its tools, and each tool can be turned off on its own. The ADE agent only receives tools that are on. A Claude Code session is launched with `--mcp-config` and `--strict-mcp-config` for the servers that are on. Active skills are copied into that CLI's skills folder in the workspace (`.claude/skills` or `.codex/skills`); existing folders are left as they are. There is no session-level switch. Codex is not given an MCP config file: the flags above are Claude Code's.
 - **Subagents** run on Pi, Claude Code or Codex (per the person's policy), in read-only, workspace or their own worktree. A runtime **scheduler** (not the model) starts them as CPU/RAM allows; **limits** (cost, time, per day) and **usage-limit handling** (wait for the reset, or fall back to another model) apply to all of them.
 - **The team board** (tasks, plans, posts, file claims) is how the Captain and subagents coordinate. The **Agents view** shows every agent side by side (what it is doing, thinking and changed); the **Team view** shows members, data flow between them and the latest flows.
 - **Permissions:** Ask or Autopilot. Autopilot only skips command approvals; stage gates and hard guardrails (no merge, no force-push, no push to main) always stop.
@@ -176,6 +177,7 @@ Where a session's commands run: this computer, a Docker container, WSL2, an SSH 
 | Simple / Full view, Captain status line, Pause / Take over, inline stage decision | **Built** |
 | Agents view, Team view and team board, activity bar, side panel per session | **Built** |
 | EU-only mode for models, agent CLIs and tool servers | **Built** (see §5 for limits) |
+| Skills and MCP: origins, Git skill import, per-project on/off, per-tool switches, Claude Code `--mcp-config` | **Built** (Codex receives skills only; see §3.1) |
 | Self-hosted server (`scripts/ade-server.ts`), phone web app with pairing | **Built**; Web Push notifications for approvals are not built |
 | Inbox cards for agents' questions | Planned |
 | Failure-loop watchdog, memory/decision log (Scribe), token-saving tool pruning by usage | Planned (pieces exist in `captain-core`, not wired into sessions) |

@@ -8,7 +8,7 @@ import type { Router } from "../router.ts";
 import type { RouteDeps } from "./context.ts";
 import { projectWorkspace } from "./scope.ts";
 
-const KINDS: CapabilityKind[] = ["skill", "mcp", "mcp-trust"];
+const KINDS: CapabilityKind[] = ["skill", "mcp", "mcp-trust", "mcp-tool"];
 
 export function registerCapabilityRoutes(router: Router, { host }: RouteDeps): void {
 	const projectWorkspaceOf = (projectId: string | null) => projectWorkspace(host, projectId);

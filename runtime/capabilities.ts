@@ -7,8 +7,9 @@ import type { DatabaseSync } from "node:sqlite";
  * Skills are keyed by name (lower-case), so a setting follows the skill wherever it lives.
  * MCP servers are keyed by their server id. Project `.mcp.json` files also need trust once
  * (itemKind "mcp-trust", key ".mcp.json"), because they come from the repository.
+ * One tool inside a server is "mcp-tool", keyed `serverKey::toolName`, on unless turned off.
  */
-export type CapabilityKind = "skill" | "mcp" | "mcp-trust";
+export type CapabilityKind = "skill" | "mcp" | "mcp-trust" | "mcp-tool";
 export type CapabilityScope = "global" | "project";
 
 export type CapabilityState = {
@@ -21,6 +22,10 @@ export type CapabilityState = {
 };
 
 type Row = { scopeKind: CapabilityScope; scopeId: string; itemKind: CapabilityKind; itemKey: string; enabled: number };
+
+export function mcpToolKey(serverKey: string, toolName: string): string {
+	return `${serverKey.trim()}::${toolName.trim()}`;
+}
 
 export function normalizeKey(kind: CapabilityKind, key: string): string {
 	return kind === "skill" ? key.trim().toLowerCase() : key.trim();

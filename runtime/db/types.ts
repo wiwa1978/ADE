@@ -121,6 +121,7 @@ export type ModelConfigResult = {
 export type OpenSession = {
 	harness: Harness;
 	root: Awaited<ReturnType<Harness["root"]>>;
+	registry: ReturnType<typeof import("@earendil-works/pi-durable").createRegistry>;
 };
 
 export type WatchHandle = {

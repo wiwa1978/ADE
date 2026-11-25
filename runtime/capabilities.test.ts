@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { createRegistry } from "@earendil-works/pi-durable";
 import { CapabilitySettings } from "./capabilities.ts";
 import { configureSkillCatalog } from "./skill-catalog.ts";
 import { discoverSkillsAndRules } from "./skills.ts";
@@ -153,4 +155,147 @@ test("a session only gets the skills that are on for its project", () => temp(ho
 	caps.set("project", "p2", "skill", "review", true);
 	assert.deepEqual(names("p2"), ["deploy", "review"], "a project can turn it back on");
 	assert.deepEqual(names("p1"), ["deploy"]);
+}));
+
+test("disabled or shadowed MCP servers cannot be connected directly", () => temp(async home => {
+	const db = new DatabaseSync(":memory:");
+	const caps = new CapabilitySettings(db);
+	const mcp = new McpManager(db, { emit() {} } as never, { home, capabilities: caps });
+	const server = mcp.save({ name: "docs", transport: "stdio", command: "node" });
+	caps.set("global", null, "mcp", server.id, false);
+	await assert.rejects(mcp.connect(server.id), /turned off or shadowed/);
+	caps.set("project", "p1", "mcp", server.id, true);
+	assert.equal(mcp.list({ projectId: "p1" }).find(item => item.id === server.id)?.active, true);
+
+	mkdirSync(join(home, ".cursor"), { recursive: true });
+	writeFileSync(join(home, ".cursor", "mcp.json"), JSON.stringify({ mcpServers: { docs: { command: "node" } } }));
+	const shadowed = mcp.list({ projectId: "p1" }).find(item => item.origin.kind === "file")!;
+	await assert.rejects(mcp.connect(shadowed.id, { projectId: "p1" }), /turned off or shadowed/);
+	mcp.close();
+	db.close();
+}));
+
+test("import validates the entire batch and disconnects updated servers", () => temp(async home => {
+	const http = createServer((req, res) => {
+		let body = "";
+		req.on("data", chunk => { body += chunk; });
+		req.on("end", () => {
+			const message = JSON.parse(body) as { id: number; method: string };
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: message.method === "tools/list" ? { tools: [] } : {} }));
+		});
+	});
+	await new Promise<void>(resolve => http.listen(0, "127.0.0.1", resolve));
+	const address = http.address();
+	if (!address || typeof address === "string") throw new Error("Missing test server address");
+	const db = new DatabaseSync(":memory:");
+	const mcp = new McpManager(db, { emit() {} } as never, { home });
+	try {
+		const server = mcp.save({ name: "docs", transport: "http", url: `http://127.0.0.1:${address.port}/` });
+		assert.equal((await mcp.connect(server.id)).status, "connected");
+		assert.throws(() => mcp.importJson(JSON.stringify({ docs: { command: "new" }, broken: {} })), /broken/);
+		assert.equal(mcp.list().find(item => item.id === server.id)?.status, "connected");
+		assert.equal(mcp.list().find(item => item.id === server.id)?.transport, "http");
+		mcp.importJson(JSON.stringify({ docs: { command: "new" } }));
+		const updated = mcp.list().find(item => item.id === server.id)!;
+		assert.equal(updated.transport, "stdio");
+		assert.equal(updated.status, "disconnected");
+	} finally {
+		mcp.close();
+		db.close();
+		await new Promise<void>((resolve, reject) => http.close(error => error ? reject(error) : resolve()));
+	}
+}));
+
+test("existing session registries pick up MCP changes on refresh, respecting project scope", () => temp(async home => {
+	let initializations = 0;
+	const http = createServer((req, res) => {
+		let body = "";
+		req.on("data", chunk => { body += chunk; });
+		req.on("end", () => {
+			const message = JSON.parse(body) as { id: number; method: string };
+			if (message.method === "initialize") initializations++;
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: message.method === "tools/list" ? { tools: [{ name: "search", description: "Search docs" }] } : {} }));
+		});
+	});
+	await new Promise<void>(resolve => http.listen(0, "127.0.0.1", resolve));
+	const address = http.address();
+	if (!address || typeof address === "string") throw new Error("Missing test server address");
+	const db = new DatabaseSync(":memory:");
+	const caps = new CapabilitySettings(db);
+	const mcp = new McpManager(db, { emit() {} } as never, { home, capabilities: caps });
+	const p1 = createRegistry();
+	const p2 = createRegistry();
+	try {
+		await mcp.refreshRegistry(p1, { projectId: "p1" });
+		assert.equal(p1.snapshot().extension("ade-mcp"), undefined);
+		const server = mcp.save({ name: "docs", transport: "http", url: `http://127.0.0.1:${address.port}/` });
+		caps.set("project", "p2", "mcp", server.id, false);
+		await Promise.all([mcp.refreshRegistry(p1, { projectId: "p1" }), mcp.refreshRegistry(p2, { projectId: "p2" }), mcp.connect(server.id)]);
+		assert.equal(initializations, 1, "concurrent refreshes share the connection");
+		assert.deepEqual(p1.snapshot().tools().map(({ tool }) => tool.name), ["mcp_docs_search"]);
+		assert.equal(p2.snapshot().extension("ade-mcp"), undefined);
+		const unchanged = p1.snapshot().extension("ade-mcp");
+		await mcp.refreshRegistry(p1, { projectId: "p1" });
+		assert.equal(p1.snapshot().extension("ade-mcp"), unchanged, "unchanged registries are not republished");
+		caps.set("project", "p1", "mcp", server.id, false);
+		await mcp.refreshRegistry(p1, { projectId: "p1" });
+		assert.equal(p1.snapshot().extension("ade-mcp"), undefined);
+		caps.set("project", "p2", "mcp", server.id, true);
+		await mcp.refreshRegistry(p2, { projectId: "p2" });
+		assert.deepEqual(p2.snapshot().tools().map(({ tool }) => tool.name), ["mcp_docs_search"]);
+		mcp.remove(server.id);
+		await mcp.refreshRegistry(p2, { projectId: "p2" });
+		assert.equal(p2.snapshot().extension("ade-mcp"), undefined);
+	} finally {
+		mcp.close();
+		db.close();
+		await new Promise<void>((resolve, reject) => http.close(error => error ? reject(error) : resolve()));
+	}
+}));
+
+test("registry refresh connects the new configuration when an old connection is still starting", () => temp(async home => {
+	let releaseOld: (() => void) | undefined;
+	let announceOld: (() => void) | undefined;
+	const oldStarted = new Promise<void>(resolve => { announceOld = resolve; });
+	const http = createServer((req, res) => {
+		let body = "";
+		req.on("data", chunk => { body += chunk; });
+		req.on("end", () => {
+			const message = JSON.parse(body) as { id: number; method: string };
+			const respond = () => {
+				res.writeHead(200, { "content-type": "application/json" });
+				res.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: message.method === "tools/list" ? { tools: [{ name: "new_tool" }] } : {} }));
+			};
+			if (req.url === "/old" && message.method === "initialize") {
+				releaseOld = respond;
+				announceOld?.();
+			} else respond();
+		});
+	});
+	await new Promise<void>(resolve => http.listen(0, "127.0.0.1", resolve));
+	const address = http.address();
+	if (!address || typeof address === "string") throw new Error("Missing test server address");
+	const db = new DatabaseSync(":memory:");
+	const mcp = new McpManager(db, { emit() {} } as never, { home });
+	try {
+		const server = mcp.save({ name: "docs", transport: "http", url: `http://127.0.0.1:${address.port}/old` });
+		const oldConnection = assert.rejects(mcp.connect(server.id), /replaced or disconnected/);
+		await oldStarted;
+		mcp.save({ id: server.id, name: "docs", transport: "http", url: `http://127.0.0.1:${address.port}/new` });
+		const registry = createRegistry();
+		await mcp.refreshRegistry(registry, {});
+		assert.deepEqual(registry.snapshot().tools().map(({ tool }) => tool.name), ["mcp_docs_new_tool"]);
+		const release = releaseOld;
+		releaseOld = undefined;
+		release?.();
+		await oldConnection;
+		assert.equal(mcp.list().find(item => item.id === server.id)?.status, "connected");
+	} finally {
+		releaseOld?.();
+		mcp.close();
+		db.close();
+		await new Promise<void>((resolve, reject) => http.close(error => error ? reject(error) : resolve()));
+	}
 }));

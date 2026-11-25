@@ -203,6 +203,7 @@ export class SessionManager {
 		const openSession = this.#sessions.get(key);
 		const thinkingLevel = reasoning as "none" | "off" | "low" | "medium" | "high" | "xhigh" | "max";
 		if (openSession) {
+			await this.#mcp.refreshRegistry(openSession.registry, mcpScope);
 			await openSession.root.configure({
 				model: { provider, modelId: model },
 				thinkingLevel: thinkingLevel as never,
@@ -213,6 +214,7 @@ export class SessionManager {
 		const inFlight = this.#opening.get(key);
 		if (inFlight) {
 			const session = await inFlight;
+			await this.#mcp.refreshRegistry(session.registry, mcpScope);
 			await session.root.configure({
 				model: { provider, modelId: model },
 				thinkingLevel: thinkingLevel as never,
@@ -281,9 +283,7 @@ export class SessionManager {
 			if (task && this.#blueprints) registry.install(this.#blueprints.createExtension(key));
 			registry.install(createSkillsExtension(task?.workspace ?? null, skillOn));
 			// Active servers connect when a session needs them; a server turned off later refuses its calls.
-			await this.#mcp.ensureConnected(mcpScope);
-			const mcpExt = this.#mcp.createExtension(mcpScope);
-			if (mcpExt) registry.install(mcpExt);
+			await this.#mcp.refreshRegistry(registry, mcpScope);
 
 			let harnessRef: Harness | null = null;
 			registry.install(this.#approvals.createExtension(key, () => harnessRef));
@@ -308,7 +308,7 @@ export class SessionManager {
 					thinkingLevel: thinkingLevel as never,
 					instructions,
 				}, context);
-				const session: OpenSession = { harness, root };
+				const session: OpenSession = { harness, root, registry };
 				this.#sessions.set(key, session);
 				harness.resume();
 				await this.watchConversation(key, harness, ROOT_CONVERSATION_ID, false);

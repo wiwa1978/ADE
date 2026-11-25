@@ -256,8 +256,10 @@ Public GitHub issue intake is read-only: ADE checks the issue belongs to the
 project's linked repository, stores its URL and summary with the session, and
 includes the bounded issue description in the initial message as untrusted
 reference data. Private issues are not supported. This does not publish a
-branch or PR, or track CI and review activity. Worktree adoption/removal, MCP, skills,
+branch or PR, or track CI and review activity. Worktree adoption/removal,
 approvals, direct network or pairing/relay hosts, cloud-managed hosts, and mobile clients are not implemented.
+
+Settings → Skills and tools lists every skill and MCP server on that environment, where it lives, and whether it is on. Everything is on until you turn it off. A project's setting beats the all-projects setting. A repository `.mcp.json` needs trust once. Individual tools inside a connected MCP server can be turned off the same way. A Claude Code session is started with `--mcp-config` and `--strict-mcp-config` so it only sees the servers that are on (a server whose tools are all off is left out). Active skills are copied into `.claude/skills` or `.codex/skills` in the workspace when that CLI session starts; a folder that is already there is not overwritten. Codex has no matching MCP-config flag in this version, so it does not receive the server list.
 Do not treat this host as a security boundary for multiple OS users.
 
 `npm run test:runtime` exercises the Pi Durable integration and API with a faux

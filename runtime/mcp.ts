@@ -4,12 +4,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { defineExtension, defineTool } from "@earendil-works/pi-durable";
+import { defineExtension, defineTool, type Registry } from "@earendil-works/pi-durable";
 import { map, unknown } from "@earendil-works/pi-schema";
 import { z } from "zod";
 import type { RuntimeEventBus } from "./events.ts";
 import { runHostMigrations } from "./db/migrations.ts";
-import { CapabilitySettings } from "./capabilities.ts";
+import { CapabilitySettings, mcpToolKey } from "./capabilities.ts";
 import { isErrorCode, logger } from "./log.ts";
 import { badRequest, conflict, notFound } from "./http-error.ts";
 
@@ -38,6 +38,8 @@ export type McpDiscoveredTool = {
 	name: string;
 	description: string;
 	inputSchema?: Record<string, unknown>;
+	/** On for this scope unless a per-tool switch turned it off. */
+	enabled?: boolean;
 };
 
 export type McpServerStatus = McpServerConfig & {
@@ -356,6 +358,8 @@ export class McpManager {
 	#home: string;
 	#caps: CapabilitySettings;
 	#runtime = new Map<string, ConnectedServer>();
+	#connecting = new Map<string, Promise<McpServerStatus>>();
+	#registrySignatures = new WeakMap<Registry, string>();
 	#guard: ((server: { id: string; transport: "stdio" | "http"; url?: string }) => string | null) | null = null;
 
 	/** EU-only mode: servers the guard blocks don't connect, and the ones connected now are disconnected. */
@@ -446,6 +450,7 @@ export class McpManager {
 
 	/** The servers as the app sees them: env and header values are masked (names stay), as are secrets in the URL. */
 	list(scope: McpScope = {}): McpServerStatus[] {
+		const toolOn = this.#caps.resolver("mcp-tool", scope.projectId);
 		return this.#resolve(scope).map(({ cwd: _cwd, ...server }) => {
 			const rt = this.#runtime.get(server.id);
 			return {
@@ -455,7 +460,7 @@ export class McpManager {
 				url: server.url ? maskUrl(server.url) : server.url,
 				status: rt?.status ?? "disconnected",
 				error: rt?.error ?? null,
-				tools: rt?.tools ?? [],
+				tools: (rt?.tools ?? []).map(tool => ({ ...tool, enabled: toolOn(mcpToolKey(server.key, tool.name)).active })),
 			};
 		});
 	}
@@ -507,15 +512,21 @@ export class McpManager {
 	/** Add every server in a pasted JSON block (servers with the same name are updated). */
 	importJson(text: string, origin = "pasted JSON"): McpServerStatus[] {
 		const map = parseMcpJson(text);
-		const saved: string[] = [];
-		for (const [name, def] of Object.entries(map)) {
+		const configs = Object.entries(map).map(([name, def]) => {
 			const cfg = toConfig(def);
 			if (!cfg) throw badRequest(`"${name}" needs a command (stdio) or a url (HTTP).`);
 			const url = cfg.transport === "http" && cfg.url ? validateMcpHttpUrl(cfg.url) : cfg.url;
+			return { name, cfg, url };
+		});
+		const saved: string[] = [];
+		for (const { name, cfg, url } of configs) {
 			const existing = this.#db.prepare("SELECT id FROM mcp_servers WHERE name=?").get(name) as { id: string } | undefined;
 			const id = existing?.id ?? randomUUID();
 			const configJson = JSON.stringify({ command: cfg.command, args: cfg.args ?? [], env: cfg.env ?? {}, url, headers: cfg.headers ?? {} });
-			if (existing) this.#db.prepare("UPDATE mcp_servers SET transport=?, configJson=? WHERE id=?").run(cfg.transport, configJson, id);
+			if (existing) {
+				this.#db.prepare("UPDATE mcp_servers SET transport=?, configJson=? WHERE id=?").run(cfg.transport, configJson, id);
+				this.disconnect(id);
+			}
 			else this.#db.prepare("INSERT INTO mcp_servers (id, name, transport, configJson, enabled, createdAt, origin) VALUES (?, ?, ?, ?, 1, ?, ?)").run(id, name, cfg.transport, configJson, Date.now(), origin);
 			saved.push(id);
 		}
@@ -553,8 +564,27 @@ export class McpManager {
 		if (!server) throw notFound("MCP server not found.");
 		// A repository's .mcp.json starts programs from that repository: never before the person trusts it.
 		if (server.needsTrust) throw conflict("This repository's .mcp.json isn't trusted yet. Trust it for the project in Settings → Skills & tools first.");
+		if (!server.active) throw conflict("This MCP server is turned off or shadowed for this scope.");
 		const blocked = this.#guard?.(server);
 		if (blocked) throw conflict(blocked);
+		const pending = this.#connecting.get(id);
+		if (pending) {
+			await pending;
+			const current = this.list(scope).find(item => item.id === id);
+			if (!current) throw notFound("MCP server not found.");
+			return current;
+		}
+		const operation = this.#connect(server, scope);
+		this.#connecting.set(id, operation);
+		try {
+			return await operation;
+		} finally {
+			if (this.#connecting.get(id) === operation) this.#connecting.delete(id);
+		}
+	}
+
+	async #connect(server: ResolvedServer, scope: McpScope): Promise<McpServerStatus> {
+		const id = server.id;
 		const validatedUrl = server.transport === "http" ? validateMcpHttpUrl(server.url ?? "") : null;
 		this.disconnect(id);
 		const state: ConnectedServer = { client: null, status: "connecting", error: null, tools: [] };
@@ -571,8 +601,10 @@ export class McpManager {
 				capabilities: {},
 				clientInfo: { name: "ade", version: "0.1.0" },
 			});
+			if (this.#runtime.get(id) !== state) throw conflict("MCP connection was replaced or disconnected.");
 			client.notify("notifications/initialized", {});
 			const toolsRes = await client.request<{ tools?: Array<{ name?: unknown; description?: unknown; inputSchema?: Record<string, unknown> }> }>("tools/list", {});
+			if (this.#runtime.get(id) !== state) throw conflict("MCP connection was replaced or disconnected.");
 			state.tools = Array.isArray(toolsRes?.tools)
 				? toolsRes.tools.map((t) => ({
 					name: String(t.name),
@@ -588,11 +620,13 @@ export class McpManager {
 			state.status = "error";
 			state.error = error instanceof Error ? error.message : "Failed to connect to MCP server.";
 		}
+		if (this.#runtime.get(id) !== state) throw conflict("MCP connection was replaced or disconnected.");
 		this.#emit();
 		return this.list(scope).find(s => s.id === id)!;
 	}
 
 	disconnect(id: string): void {
+		this.#connecting.delete(id);
 		const rt = this.#runtime.get(id);
 		if (rt) {
 			rt.client?.close();
@@ -606,17 +640,44 @@ export class McpManager {
 		return this.list(scope).filter(server => server.active);
 	}
 
+	/** Active servers with real env and headers, for a CLI config file. Never send this to the app. */
+	handoff(scope: McpScope): McpServerStatus[] {
+		const toolOn = this.#caps.resolver("mcp-tool", scope.projectId);
+		return this.#resolve(scope).filter(server => server.active).map(server => {
+			const rt = this.#runtime.get(server.id);
+			return {
+				...server,
+				status: rt?.status ?? "disconnected",
+				error: rt?.error ?? null,
+				tools: (rt?.tools ?? []).map(tool => ({ ...tool, enabled: toolOn(mcpToolKey(server.key, tool.name)).active })),
+			};
+		});
+	}
+
 	/** Connect the active servers a session needs (servers connect when a session needs them, not by hand). */
 	async ensureConnected(scope: McpScope): Promise<void> {
-		const pending = this.active(scope).filter(server => server.status !== "connected" && server.status !== "connecting");
+		const pending = this.active(scope).filter(server => server.status !== "connected");
 		await Promise.all(pending.map(server => this.connect(server.id, scope).catch(error => {
 			logger.warn("Could not connect MCP server for a session", { error, context: { server: server.name } });
 		})));
 	}
 
+	/** Refresh a session's registered MCP tools before its next turn. */
+	async refreshRegistry(registry: Registry, scope: McpScope): Promise<void> {
+		await this.ensureConnected(scope);
+		const servers = this.active(scope).filter(server => server.status === "connected");
+		const signature = JSON.stringify(servers.map(({ id, name, tools }) => ({ id, name, tools })));
+		if (this.#registrySignatures.get(registry) === signature) return;
+		const previous = registry.snapshot().extension("ade-mcp");
+		const extension = this.createExtension(scope);
+		if (extension) registry.install(extension);
+		else if (previous) registry.uninstall(previous);
+		this.#registrySignatures.set(registry, signature);
+	}
+
 	createExtension(scope: McpScope = {}) {
 		const isStillActive = (id: string) => this.list(scope).some(server => server.id === id && server.active);
-		const createTool = (serverId: string, serverName: string, tool: McpDiscoveredTool) => {
+		const createTool = (serverId: string, serverKey: string, serverName: string, tool: McpDiscoveredTool) => {
 			const safeServer = serverName.toLowerCase().replace(/[^a-z0-9_]/g, "_").slice(0, 24);
 			const safeTool = tool.name.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 40);
 			return defineTool({
@@ -628,6 +689,9 @@ export class McpManager {
 					// Turning a server off applies straight away, even in a running session.
 					if (!isStillActive(serverId)) {
 						return { isError: true, output: [{ type: "text", text: `The MCP server "${serverName}" is turned off for this project. Ask the user to turn it on in Settings → Skills & MCP.` }] };
+					}
+					if (!this.#caps.isActive("mcp-tool", mcpToolKey(serverKey, tool.name), scope.projectId)) {
+						return { isError: true, output: [{ type: "text", text: `The tool "${tool.name}" on "${serverName}" is turned off. Ask the user to turn it on in Settings → Skills & MCP.` }] };
 					}
 					let rt = this.#runtime.get(serverId);
 					if (!rt || rt.status !== "connected") {
@@ -653,7 +717,8 @@ export class McpManager {
 		for (const server of this.active(scope)) {
 			if (server.status !== "connected") continue;
 			for (const tool of server.tools) {
-				const created = createTool(server.id, server.name, tool);
+				if (tool.enabled === false) continue;
+				const created = createTool(server.id, server.key, server.name, tool);
 				if (names.has(created.name)) continue;
 				names.add(created.name);
 				tools.push(created);

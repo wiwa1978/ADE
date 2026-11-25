@@ -10,7 +10,9 @@ import { checkFailedPrompt } from "../packages/protocol/agent-prompts.ts";
 import { createInbox } from "./inbox.ts";
 import { copyIntoWorktree, ProjectScriptStore, ScriptRunner } from "./project-scripts.ts";
 import { createCheckpoints } from "./checkpoints.ts";
-import { EngineManager } from "./engines.ts";
+import { copySkillsForCli, writeClaudeMcpConfig } from "./cli-capabilities.ts";
+import { EngineManager, type EngineId } from "./engines.ts";
+import { effectiveSkills, scanSkillLandscape } from "./skill-catalog.ts";
 import { UsageTracker } from "./usage.ts";
 import { LimitGuard } from "./limits.ts";
 import { CONTINUE_PROMPT, UsageLimitWaiter } from "./usage-limits.ts";
@@ -50,6 +52,15 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	const scriptRunner = new ScriptRunner({ events: host.events });
 	const checkpoints = createCheckpoints();
 	const engines = new EngineManager({ stateDirectory, events: host.events });
+	/** Active skills go into the CLI's skills folder. Claude Code also gets only the MCP servers that are on. */
+	const cliMcpConfig = (sessionId: string, workspace: string, engine: EngineId) => {
+		const projectId = host.sessionProjectId(sessionId);
+		const scope = { workspace, projectId };
+		const skills = effectiveSkills(scanSkillLandscape({ workspace, sources: host.skillLibrary.list() }))
+			.filter(skill => host.capabilities.isActive("skill", skill.name, projectId) && !skill.shadowedBy);
+		copySkillsForCli(workspace, engine, skills.map(skill => ({ name: skill.name, dir: skill.dir })));
+		return engine === "claude-code" ? writeClaudeMcpConfig(sessionId, host.mcp.handoff(scope)) : null;
+	};
 	engines.setGuard(engine => host.eu.engineBlock(engine));
 	const overlayEngine = (session: Conversation): Conversation => {
 		const engine = engines.get(session.id);
@@ -137,7 +148,8 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		inbox.invalidate(sessionId);
 		if (engines.get(sessionId)) {
 			if (!workspace) throw Object.assign(new Error("Session has no ready workspace."), { statusCode: 404 });
-			engines.send(sessionId, workspace, content, host.approvals.policy(sessionId), null);
+			const engine = engines.get(sessionId)!.engine;
+			engines.send(sessionId, workspace, content, host.approvals.policy(sessionId), null, cliMcpConfig(sessionId, workspace, engine));
 			return viewSession(sessionId);
 		}
 		return host.send("coding", { ...options, content }, sessionId);
@@ -325,7 +337,7 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 				try {
 					const parent = state?.parent;
 					if (!parent?.cwd) throw new Error("gone");
-					void scheduler.submit(id, () => engines.send(id, parent.cwd!, CONTINUE_PROMPT, host.approvals.policy(parent.sessionId), subagentModel(state!.engine)), countsHere(parent.sessionId)).then(started => resolveResume?.(started));
+					void scheduler.submit(id, () => engines.send(id, parent.cwd!, CONTINUE_PROMPT, host.approvals.policy(parent.sessionId), subagentModel(state!.engine), cliMcpConfig(parent.sessionId, parent.cwd!, state!.engine)), countsHere(parent.sessionId)).then(started => resolveResume?.(started));
 				} catch {
 					resolveResume?.(false);
 				}
@@ -460,7 +472,7 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 			// A read-only subagent can't change files; others follow the session's approval setting.
 			const approval = readOnly ? "ask" : host.approvals.policy(sessionId);
 			const prompt = existing?.items.length ? "ADE restarted while you were working. Continue the task where you left off, then give your report." : task;
-			subagentStarts.set(key, scheduler.submit(key, () => engines.send(key, cwd, prompt, approval, subagentModel(harness)), countsHere(sessionId)));
+			subagentStarts.set(key, scheduler.submit(key, () => engines.send(key, cwd, prompt, approval, subagentModel(harness), cliMcpConfig(sessionId, cwd, harness)), countsHere(sessionId)));
 		},
 		message(sessionId, conversationId, text) {
 			const key = subagentKey(sessionId, conversationId);
@@ -469,7 +481,7 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 			if (!parent?.cwd) throw Object.assign(new Error("That subagent isn't available anymore."), { statusCode: 404 });
 			if (scheduler.position(key)) throw Object.assign(new Error("That subagent is still queued; it gets your task when it starts."), { statusCode: 409 });
 			usageWaiter.cancel(key);
-			subagentStarts.set(key, scheduler.submit(key, () => engines.send(key, parent.cwd!, text, host.approvals.policy(sessionId), subagentModel(state!.engine)), countsHere(sessionId)));
+			subagentStarts.set(key, scheduler.submit(key, () => engines.send(key, parent.cwd!, text, host.approvals.policy(sessionId), subagentModel(state!.engine), cliMcpConfig(sessionId, parent.cwd!, state!.engine)), countsHere(sessionId)));
 		},
 		// A subagent that hits a usage limit waits for the reset and continues; the main agent keeps waiting for its report.
 		async wait(sessionId, conversationId) {

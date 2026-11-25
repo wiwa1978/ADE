@@ -11,6 +11,7 @@ import { ProjectInstructionsSettings } from "./ProjectInstructionsSettings"
 import { ProjectRunOnSettings } from "./ProjectRunOnSettings"
 import { ProjectScriptsSettings } from "./ProjectScriptsSettings"
 import { ProjectSecretsSettings } from "./ProjectSecretsSettings"
+import { SkillsToolsSettings } from "../settings/SkillsToolsSettings"
 
 const repositoryName = (value: string) => value.replace(/^https:\/\/github\.com\//i, "")
 
@@ -235,6 +236,14 @@ export function ProjectSettings({
 
       <ProjectScriptsSettings projectId={project.id} />
       {project.repository ? <ProjectRunOnSettings projectId={project.id} /> : null}
+      <section className="project-field" aria-labelledby="project-skills-mcp-title">
+        <h3 id="project-skills-mcp-title">{t("skills.projectSection")}</h3>
+        <SkillsToolsSettings
+          projects={[{ id: project.id, name: project.name }]}
+          fixedProjectId={project.id}
+          activeEnvironmentName={environmentName}
+        />
+      </section>
       <ProjectSecretsSettings projectId={project.id} />
       {project.repository ? <ProjectInstructionsSettings projectId={project.id} /> : null}
     </aside>

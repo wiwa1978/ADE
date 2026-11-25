@@ -262,11 +262,12 @@ export function gitWritableDirs(cwd: string): string[] {
 	return [];
 }
 
-export function engineArgs(engine: EngineId, prompt: string, externalId: string | null, policy: ApprovalPolicy, model: string | null, writableDirs: string[] = [], contained = false) {
+export function engineArgs(engine: EngineId, prompt: string, externalId: string | null, policy: ApprovalPolicy, model: string | null, writableDirs: string[] = [], contained = false, mcpConfigPath: string | null = null) {
 	if (engine === "claude-code") {
 		const mode = policy === "auto-all" ? "bypassPermissions" : policy === "ask" ? "default" : "acceptEdits";
 		// ADE's guardrails as deny rules: they hold even in bypassPermissions (Autopilot).
 		const args = ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", mode, "--settings", JSON.stringify({ permissions: { deny: claudeDenyRules() } })];
+		if (mcpConfigPath) args.push("--mcp-config", mcpConfigPath, "--strict-mcp-config");
 		if (externalId) args.push("--resume", externalId);
 		if (model) args.push("--model", model);
 		args.push("--", prompt);
@@ -467,7 +468,7 @@ export class EngineManager {
 		});
 	}
 
-	send(sessionId: string, cwd: string, prompt: string, policy: ApprovalPolicy, model: string | null = null) {
+	send(sessionId: string, cwd: string, prompt: string, policy: ApprovalPolicy, model: string | null = null, mcpConfigPath: string | null = null) {
 		const state = this.get(sessionId);
 		if (!state) throw Object.assign(new Error("This session doesn't use an external engine."), { statusCode: 400 });
 		if (this.#running.has(sessionId)) throw Object.assign(new Error("The agent is still working. Wait, or stop it first."), { statusCode: 409 });
@@ -486,7 +487,7 @@ export class EngineManager {
 		// A subagent runs where its ADE session runs.
 		const targetSession = state.parent?.sessionId ?? sessionId;
 		const target = sessionTarget(targetSession);
-		const args = engineArgs(state.engine, content, state.externalId, policy, model, target === "local" ? gitWritableDirs(cwd) : [], target !== "local");
+		const args = engineArgs(state.engine, content, state.externalId, policy, model, target === "local" ? gitWritableDirs(cwd) : [], target !== "local", mcpConfigPath);
 		const env: Record<string, string> = { ...secrets, NO_COLOR: "1", IS_SANDBOX: "1" };
 		// Sessions that run in Docker, WSL2, on an SSH host or a Boat.dev VM run the agent CLI there.
 		// It's installed with npm on first use if missing; it signs in with ANTHROPIC_API_KEY /
