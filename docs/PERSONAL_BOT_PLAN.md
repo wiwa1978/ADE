@@ -18,6 +18,7 @@
 | **Hermes Agent** (Nous Research, MIT) | Long-lived, self-improving agent that "grows with you" | Memory across sessions (`MEMORY.md`, `USER.md`, session search; optional memory plugins), a **learning loop** that creates and refines skills, built-in **cron with delivery to any platform**, subagents, browser use, MCP, voice | A **messaging gateway** (Telegram, Discord, Slack, WhatsApp) installed on a machine, can run as a systemd service | Your machine/VPS |
 | **Claude Duet** (Anthropic; research preview, reported US-only, invite/waitlist) ⚠️ | Proactive cloud agent | Morning brief; runs in its own cloud computer; acts on connected accounts but **asks approval before it sends, pays or signs**; some actions banned outright (e.g. moving money, trading) | Mobile apps and claude.ai | Vendor cloud |
 | **Grok Bot** (xAI) ⚠️ | "Team of named bots" (Research, Sales, Ops…) that hand work to each other | MCP connectors, persistent memory and saved skills, a browser | App; available without a waitlist on paid plans (per blogs) | Vendor cloud |
+| **AI Teammates** ([code-with-antonio/ai-teammates](https://github.com/code-with-antonio/ai-teammates), open source, 94 stars when read) — *read from its source, see §11* | A small, readable starter that mimics Grok Bot / Dots / Muse: named bots with a **job**, a **memory** and a **cloud computer** each | Persistent Linux sandbox per bot with shell, files and a **graphical desktop the bot controls** (mouse, keyboard, screenshots) with a live view in the chat; **group chats with handoffs**; memory notes shared across chats; durable turns; per-period usage allowance | A web app (chat UI only; no messaging channels) | Hosted SaaS stack |
 | **ChatGPT Dots**, **Meta Muse** ⚠️ | Cloud personal agents from OpenAI and Meta | Connector ecosystems; Dots reported unavailable to Pro users in the EEA, UK and Switzerland | Apps | Vendor cloud |
 
 **Patterns that all of them share:** (1) it lives where you already chat; (2) it **remembers** you and what it learned; (3) it is **proactive** (schedules, briefs, events), not only reactive; (4) it acts through **connectors/skills/browser**; (5) it needs **strict approval rules** because it holds your accounts; (6) the open-source ones put a security burden on the user (one comparison reports a scan finding flaws in a large share of community skills ⚠️; another advises a dedicated account for the messaging gateway).
@@ -60,6 +61,8 @@ Design rules:
 ```text
 profiles(id TEXT PK, kind 'coding'|'personal', name, settingsJson, createdAt)     -- seed one of each
 chat_threads(+ profileId)                                                          -- personal threads belong to the personal profile
+teammates(id, profileId, name, job, instructions, avatarSeed, sandboxTargetJson, createdAt)   -- named personas with their own memory and (optional) persistent sandbox (see §11)
+chat_members(chatId, teammateId, joinedAt)                                          -- group conversations with several teammates
 capability_settings(scopeKind 'global'|'project'|'profile', ...)                    -- extend scopes (runtime/capabilities.ts)
 memory_items(id, profileId, kind 'fact'|'preference'|'person'|'routine', text, source, pinned, createdAt, updatedAt)  + FTS5 index
 channels(id, profileId, kind, configJson(sans secrets), status, createdAt)
@@ -179,7 +182,9 @@ Standing task fires (heartbeat/schedule/webhook) ─▶ same path, delivery to t
 | **0 — Spike (2–4 days)** | `profiles` + `profileId` on threads; Personal instructions/persona; **Telegram adapter** with pairing; approvals as buttons; the existing artifacts/skills/MCP | Proves the loop "message → agent → approval → reply" end to end with the least new code | Pair Telegram, ask a question, approve a tool call from the phone |
 | **1 — Remembers and acts on schedule** | Memory (FTS5, tools, Memory page); standing tasks (schedule + heartbeat); Today brief; own folder; web search/fetch | Memory and proactivity are what make it feel like a bot, not a chat | "Morning brief" arrives on Telegram; it recalls a preference from last week |
 | **2 — Safe with real accounts** | Action classes, untrusted-content taint rule, audit log, kill switch, Gmail/Calendar read connectors (write behind toggles) | Do not connect real accounts before the safety model exists | Injection fixture is refused; sending an email asks with the exact text |
+| **1b — Teammates** | Named teammates (name, job, instructions, own memory), group conversations with a `handoff` tool and a per-message teammate picker (§11.2–11.3) | The pattern all the "bot team" products share, and it fits ADE's team board and Swarm view | Two teammates in one chat; "Research" hands a task to "Ops" and the handoff shows in the Team view |
 | **3 — The ADE advantage** | `start_coding_session` handoff with gates and briefs posted back; Web Push (NEXT_STEPS_PLAN I1) | The reason to have both profiles in one product | "Fix issue #12" on Telegram → Spec Kit session → approve the plan from the phone |
+| **3b — A computer of its own (optional)** | Per-teammate persistent sandbox with a desktop and computer-use tools, live view in the chat (§11.4) | Visual, memorable, and the only way to act on sites without APIs; but the riskiest tool, so after the safety model | Watch a teammate book something on a website in its own desktop and stop at the approval card |
 | **4 — Reach** | Slack/Discord/Email channels; Signal/Matrix; voice notes; shared/family mode | Breadth after depth | — |
 | **5 — Polish and trust** | Memory export/delete, retention, audit export, EU channel classification, onboarding with dedicated-account advice, translations | Needed before others use it | — |
 
@@ -203,6 +208,8 @@ Rough size: phase 0 is small (days), phases 1–3 are each a few weeks of focuse
 5. **Connectors:** which two matter first (mail and calendar?) and are you willing to create your own Google OAuth client for the self-hosted setup?
 6. **WhatsApp/iMessage:** worth the terms-of-service and bridge risk, or skip?
 7. **Name and positioning:** "Personal Bot" vs "Assistant"; and the **ADE name collision** with Orca (GAP_ANALYSIS §0).
+9. **Teammates or one bot?** One personal assistant, or several named teammates with jobs (Grok Bot / ai-teammates style)? The data model above supports both; the first release can ship with one teammate.
+10. **Computer use:** do you want a desktop sandbox per teammate (visual, powerful, riskiest), or only API/browser tools?
 8. **Open source:** OpenClaw and Hermes are MIT. Reusing their skill formats (`SKILL.md`, which ADE already reads) is cheap; importing their code is a licence and security review.
 
 ## 9. Validate first (hands-on, before committing a large build)
@@ -227,3 +234,77 @@ Rough size: phase 0 is small (days), phases 1–3 are each a few weeks of focuse
 Hermes Agent: [official site](https://hermes-agent.nousresearch.com/) · [docs](https://hermes-agent.nousresearch.com/docs) · [overview (third party)](https://agentic-ai.readthedocs.io/en/latest/AgentPlatforms/hermes-agent/)
 OpenClaw: [site](https://www.openclaw.ai) · [overview (third party)](https://dev.to/jahanzaibai/what-is-openclaw-everything-you-need-to-know-about-the-worlds-most-starred-ai-agent-3l10)
 Claude Duet / Grok Bot / Dots / Muse (third-party comparisons): [HackerNoon](https://hackernoon.com/grok-bot-vs-claude-duet-vs-dots-vs-muse-which-ai-agent-should-you-use) · [iGeeksBlog](https://www.igeeksblog.com/grok-bot-vs-chatgpt-dots-vs-claude-duet/) · [MindStudio](https://www.mindstudio.ai/blog/claude-duet-vs-muse-grokbot-dots) · [ForkLog on Duet](https://forklog.com/en/news/anthropic-unveils-personal-ai-agent-claude-duet) · [Latent Space on Grok Bot](https://latent.space/p/grok-bot)
+
+---
+
+## 11. What `ai-teammates` teaches us, and how each idea fits ADE
+
+> Read from the repository's source on 2026-11-25: `README.md`, `trigger/chat.ts`, `trigger/usage.ts`, `lib/sandbox-tools.ts`, `lib/daytona.ts`, `lib/handoff-tool.ts`, `lib/usage.ts`, `db/schema.ts`, `AGENTS.md`. I did not run it. It is a small, tidy teaching-style project (55 commits at the time), not a hardened product.
+
+### 11.0 What it is, in one paragraph
+
+A Next.js web app where each user creates **bots** (`name`, `job`, free-text `instructions`). Every bot owns one **Daytona cloud sandbox** (a Linux machine that keeps its files). A chat turn is a durable **Trigger.dev** run: the bot's system prompt is built from its job and instructions, and the model gets tools that act **only on that sandbox**: `bash`, `readFile`, `writeFile`, `listFiles`, mouse/keyboard tools, `viewScreen` (the bot looks) and `showScreen` (the person looks), plus `remember` and `recall`. **Group chats** add a `handoff` tool that gives the rest of the turn to another bot. A **usage ledger** (append-only rows with idempotency keys) meters model spend and sandbox seconds per billing period, and a five-minute cron stops sandboxes of owners who ran out. Auth and billing are Clerk, data is Neon Postgres, errors go to Sentry, hosting is Railway.
+
+### 11.1 What it does *not* have (so we know our contribution)
+
+Verified by reading the code: **no messaging channels** (it is a web chat only), **no approval step** (every tool runs at once; the only brake is the usage allowance and a 50-step cap), **no handling of untrusted content or prompt injection**, **no proactive/scheduled bot work** (the only cron meters sandboxes), **no connectors** (no MCP/skills for the bots; the `.mcp.json` in the repo is for the developer's own coding agent), **no audit log**, **no data-location control** (every vendor in its stack is a hosted US service), and **no licence file in the repository root** (I looked for `LICENSE` and got a 404). Everything in §4B, §4D, §4E and §4F of this plan is therefore **our own work to do**, not something to borrow.
+
+**Licence consequence:** with no licence file the code is, by default, all rights reserved. **Use it as inspiration for ideas only; do not copy code** into ADE. Ask the author if you want to reuse code.
+
+### 11.2 Idea → ADE: teammates with a job
+
+*Theirs:* `bots(name, job, instructions, sandboxId)`; the prompt starts "You are {name}, an AI teammate. Your job: {job}", then the owner's instructions, then rules about the sandbox and memory. The job is limited to 100 characters, the instructions to 4000.
+
+*Fit:* ADE's Personal profile can hold several **teammates**. Each one = a persona (name, job, instructions) + its own scope (which MCP servers/skills are on, which sandbox, which memory). ADE's pieces: the profile/capability scopes (§3), skills (`SKILL.md` is already the unit of "how to do my job"), per-profile on/off in Skills & tools.
+*To build:* `teammates` table (§3), a persona editor (name, job, instructions, avatar seed), prompt assembly in `SessionManager.openSession` for personal threads, a per-teammate toggle set in Skills & tools (new scope `teammate`), a teammate picker in the personal chat.
+*Keep from them:* short, constrained fields (a one-line job, long instructions), "answer as yourself when asked who you are", and re-reading the persona **every turn** so edits apply to the next message.
+
+### 11.3 Idea → ADE: group chats and `handoff`
+
+*Theirs:* in a group chat each bot's prompt lists the other teammates (id + job); a `handoff(botId, note)` tool gives **the rest of the turn** to that teammate (`prepareStep` swaps the instructions, the sandbox tools follow). A `held` set stops requests bouncing back; the message metadata records which bot answered; the person picks the addressed bot per message.
+
+*Fit:* this is the same shape as ADE's subagents and team board, but conversational and visible. ADE can do it with Pi Durable: a `handoff` tool in personal group threads that switches the active teammate (instructions + tools) for the remainder of the turn, with the same loop guard, and records the handoff as a **team-board event** so the Team and Swarm views draw it (they already draw "who passed what to whom").
+*To build:* `chat_members`, a handoff tool (`runtime/team-tools.ts` pattern), per-message `botId` metadata in the timeline, a picker in `ComposerDock`, a handoff chip in `TimelineView`. Tests with the faux provider: a handoff happens, a bounce-back is refused, the answering teammate is stamped on the reply.
+*Caution:* a handoff must carry only a short note, not the previous teammate's private memory (their idea of "earlier replies may be written by other teammates, don't present their work as yours" is a good prompt rule to keep).
+
+### 11.4 Idea → ADE: a computer of its own, with a live view
+
+*Theirs:* one persistent sandbox per bot, created with the bot and deleted with it; files persist; idle sandboxes stop and are woken on demand; a 1024×768 **desktop** the bot drives with `mouseClick/Move/Drag/Scroll`, `keyboardType/Press`; **`viewScreen`** (screenshot returned to the model as an image) vs **`showScreen`** (also shown to the person, only when asked); a **noVNC** view streamed into the chat panel through a signed, short-lived URL. Tool output is truncated to 20,000 characters.
+
+*Fit:* ADE already has **run targets** (Docker, Boat.dev VMs, SSH). A *Personal sandbox* is a long-lived Docker/Boat target with a persistent home volume per teammate. Add a *desktop* image (X server + VNC/noVNC) and the same tool set (screenshot, mouse, keyboard) as ADE tools, plus a **Desktop panel** in the side pane (Full view) and an inline viewer card in the chat. This also answers the competitor gap "computer use / hosted previews" (GAP_ANALYSIS G10).
+*Why ADE can do it better:* the sandbox is **on your own server in your own region**, and tool calls pass through ADE's approval and audit layers (their tools run unchecked).
+*Rules to copy:* separate "look" (private) from "show" (to the person) so screenshots with private data are not pushed into the chat by default; truncate tool output; wake-on-demand and stop-when-idle to save cost.
+*Risks:* computer use + untrusted web pages is the highest-risk combination (§4F): require the **taint rule** (after reading untrusted content, sends/purchases need approval), run the desktop in a container with no access to the host or to other teammates, no real credentials in it (use scoped tokens through ADE's vault), and keep it off by default.
+*Unknown to check before committing:* which open-source desktop-sandbox image/tooling to use (I have not verified specific projects), and the CPU/RAM cost per always-on desktop on a small server.
+
+### 11.5 Idea → ADE: memory that crosses conversations
+
+*Theirs:* a plain `MEMORY.md` in the bot's home; `remember(note)` appends one line (base64-encoded so a note cannot break out of the shell command; appended so two chats saving at once both survive); `recall()` returns the whole file. The **prompt is the mechanism**: "Call recall before answering anything that could depend on another conversation… never say you don't know until you have called recall in this turn"; "Call remember in the same turn you learn something; saying you will remember does nothing unless you call it"; the bot may edit the file when a note is out of date.
+
+*Fit:* confirms §4C and adds two cheap, valuable rules. (1) **Mandatory recall** wording in the persona prompt (tested with a fixture: a question about a stored preference must trigger `recall`). (2) **Append-only writes** with an atomic append so concurrent chats don't lose notes (in ADE's SQLite this is simply an `INSERT`). Their format (one line per note, whole file returned) will not scale; keep our typed items + FTS + top-k, **and** mirror to a human-editable `MEMORY.md` per teammate (§4C "optional file view") so the file-based workflow people like is available.
+*Add:* a "memory is per teammate or shared?" setting. Their design: per bot (each bot has its own sandbox and file), shared across that bot's chats.
+
+### 11.6 Idea → ADE: durable turns, budgets and metering
+
+*Theirs:* turns survive refresh, redeploy and closed tabs (Trigger.dev); the allowance is checked **every turn** and also by a `stopWhen` rule that ends a long turn once it has spent what was left; the ledger is append-only with `idempotencyKey` (`ai:{runId}:{turn}`, `sandbox:{id}:{timestamp}`) so retries never double-count; sandbox time is metered by **looking** every five minutes because the provider reports no running time; owners out of allowance get their sandboxes stopped; failures and every turn's cost go to structured logs.
+
+*Fit:* ADE already has durable turns (Pi Durable on the local SQLite, stronger than a hosted queue), cost/time limits and a usage tracker (`runtime/limits.ts`, `usage.ts`). **Adopt two details:** (a) a **step-level budget stop** inside a turn (end the turn when this turn's spend would exceed what's left, not only at the next message) — a small addition where ADE sets up `stopWhen`/limits for a session; (b) **idempotency keys on usage entries** so a retried turn or a restart cannot double-count. If a hosted ADE ever bills (GAP_ANALYSIS G9), their per-period allowance with a metered ledger is a clean model; for single-user self-hosting it is just "limits per profile".
+
+### 11.7 What we should *not* take from it
+
+- **The stack.** Clerk, Neon, Trigger.dev, Daytona, Railway, Sentry are hosted services; ADE's value is self-hosting and EU control. Take the patterns, not the vendors.
+- **No approvals.** Their bots act freely in their sandbox because the sandbox is the boundary. A personal bot with real accounts needs §4F; the sandbox boundary alone is not enough once credentials or purchases are involved.
+- **Billing/auth as product scaffolding.** Out of scope for single-owner ADE (see GAP_ANALYSIS G12/G13 for when teams matter).
+- **Their code.** No licence file: ideas only.
+
+### 11.8 Revised priorities for the Personal Bot
+
+1. Phase 0 spike stays: Personal profile + Telegram + approvals.
+2. **Phase 1b teammates and handoff** (new): small, visible, and it turns the Swarm/Team views into a feature of the personal side too.
+3. Memory with the mandatory-recall rule and the mirrored `MEMORY.md`.
+4. Safety model (§4F) **before** any desktop sandbox or real connectors.
+5. Desktop sandbox with live view as an optional phase 3b, after the safety model; it is the most visually striking part of `ai-teammates` and the part most worth doing properly.
+
+### 11.9 Source
+
+[code-with-antonio/ai-teammates](https://github.com/code-with-antonio/ai-teammates) — README and the files listed above, read through GitHub's raw file view on 2026-11-25.
