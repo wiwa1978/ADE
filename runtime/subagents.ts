@@ -48,7 +48,7 @@ type SubagentToolsOptions = {
 	teamTools?: readonly ModelToolEntry[];
 	/** The independent review of a review stage: which model a fresh readonly reviewer gets, and proof it ran. */
 	reviews?: {
-		begin(): Promise<{ model: { provider: string; modelId: string } | null; label: string | null; independent: boolean } | null>;
+		begin(): Promise<{ model: { provider: string; modelId: string } | null; label: string | null; independent: boolean; captainFamily?: string } | null>;
 		started(subagentId: string, info: { model: string | null; independent: boolean }): void;
 		finished(subagentId: string, status: "completed" | "failed", report: string): void;
 	};
@@ -79,21 +79,21 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 		return meta?.harness ?? "pi";
 	};
 
-	const buildInstructions = (role: string, mode: SubagentMode, workspacePath: string | null) => {
+	const buildInstructions = (role: string, mode: SubagentMode, workspacePath: string | null, includeTeam = true) => {
 		const capabilityText =
 			mode === "readonly"
 				? "You are a read-only subagent. You can inspect and search files, but you cannot edit files or run commands."
 				: mode === "worktree"
 					? `You are a workspace subagent with full file, search, and shell access in your own isolated Git worktree (${workspacePath ?? "assigned worktree"}). Make clean, focused changes and verify them.`
 					: `You are a workspace subagent with full file, search, and shell access in the shared workspace (${workspacePath ?? "assigned workspace"}). Make clean, focused changes and verify them.`;
-		const teamText = opts.teamTools?.length ? ` ${TEAM_INSTRUCTIONS} Take tasks that fit your role from the board, ask on the team board instead of guessing, and mark your tasks done when they are.` : "";
+		const teamText = includeTeam && opts.teamTools?.length ? ` ${TEAM_INSTRUCTIONS} Take tasks that fit your role from the board, ask on the team board instead of guessing, and mark your tasks done when they are.` : "";
 		return `You are "${role}", a focused subagent working for the session lead in ADE. ${capabilityText} Complete your assigned task thoroughly and return a clear, concise report of findings or changes made.${teamText}`;
 	};
 
-	const selectModelTools = async (mode: SubagentMode, subId: string): Promise<{ tools: ModelToolEntry[]; workspacePath: string | null; branch: string | null }> => {
+	const selectModelTools = async (mode: SubagentMode, subId: string, includeTeam = true): Promise<{ tools: ModelToolEntry[]; workspacePath: string | null; branch: string | null }> => {
 		if (mode === "readonly" || !opts.workspace || !opts.workspaceIdentity) {
 			return {
-				tools: [...opts.readTools, ...opts.searchTools, ...(opts.teamTools ?? [])],
+				tools: [...opts.readTools, ...opts.searchTools, ...(includeTeam ? (opts.teamTools ?? []) : [])],
 				workspacePath: opts.workspace,
 				branch: null,
 			};
@@ -205,13 +205,18 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 
 			// A review stage's reviewer: ADE picks its model (another family when it can) and keeps the proof it ran.
 			const review = mode === "readonly" ? await opts.reviews?.begin().catch(() => null) ?? null : null;
+			const includeTeam = !review;
 			const subUuid = randomUUID();
-			const selected = await selectModelTools(mode, subUuid);
+			const selected = await selectModelTools(mode, subUuid, includeTeam);
 			// Pick the harness: the user's fixed choice, else the main agent's pick when it's usable.
 			const policy = subagentPolicy();
 			let { harness, note } = resolveHarness(args.harness, policy, installedHarnesses());
 			const external = externalSubagents();
 			const cwd = selected.workspacePath ?? opts.workspace;
+			if (review?.model && harness !== "pi" && policy.choice === "agent") {
+				note = `Independent review runs on Pi (${review.label ?? review.model.provider}) to use a separate model family.`;
+				harness = "pi";
+			}
 			if (harness !== "pi" && (!external || !cwd)) {
 				note = `${harnessNames[harness]} needs a workspace, so this subagent runs on Pi.`;
 				harness = "pi";
@@ -239,7 +244,7 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 				await configure(tx, child.id, {
 					modelTools: selected.tools,
 					maxTurns: 24,
-					instructions: buildInstructions(role || name, mode, selected.workspacePath),
+					instructions: buildInstructions(role || name, mode, selected.workspacePath, includeTeam),
 					// Pi subagents can use another model than the main agent (Settings → Subagents).
 					...(subModel ? { model: subModel } : {}),
 				});
@@ -259,7 +264,19 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 			}, ctx);
 
 			opts.onSubagentCreated?.(id);
-			if (review) opts.reviews?.started(String(id), { model: review.label, independent: review.independent });
+			if (review) {
+				let reviewModel = review.label;
+				let reviewIndependent = review.independent;
+				if (harness !== "pi") {
+					const cliFamily = harness === "claude-code" ? "anthropic" : harness === "codex" ? "openai" : "other";
+					reviewModel = harnessNames[harness];
+					reviewIndependent = Boolean(review.captainFamily && cliFamily !== "other" && cliFamily !== review.captainFamily);
+				} else if (!subModel) {
+					reviewModel = null;
+					reviewIndependent = false;
+				}
+				opts.reviews?.started(String(id), { model: reviewModel, independent: reviewIndependent });
+			}
 			const done = <T extends { status: string; report: string }>(result: T): T => {
 				if (review) opts.reviews?.finished(String(id), result.status === "completed" ? "completed" : "failed", result.report);
 				return result;

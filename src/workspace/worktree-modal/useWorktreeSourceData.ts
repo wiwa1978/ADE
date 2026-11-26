@@ -24,6 +24,7 @@ export interface WorktreeCreatePayload {
   prompt: string
   githubIssue?: GitHubIssue
   engine: EngineId
+  blueprintId?: string
   startFrom?: StartFrom
   title?: string
   attempts?: EngineId[]
@@ -40,6 +41,7 @@ export function buildWorktreeCreatePayload({
   selectedPr,
   selectedIssue,
   engine,
+  blueprintId,
   runOn,
   attempts,
 }: {
@@ -52,6 +54,7 @@ export function buildWorktreeCreatePayload({
   selectedPr: OpenPullItem | null
   selectedIssue: OpenIssueItem | null
   engine: EngineId
+  blueprintId?: string
   runOn: RunTarget
   attempts: number
 }): WorktreeCreatePayload {
@@ -84,6 +87,7 @@ export function buildWorktreeCreatePayload({
     prompt: promptText,
     githubIssue: selectedIssue ? { ...selectedIssue, truncated: false } : undefined,
     engine,
+    ...(blueprintId ? { blueprintId } : {}),
     ...(startFrom ? { startFrom } : {}),
     ...(title ? { title } : {}),
     ...(kind !== "none" ? { runOn } : {}),

@@ -35,7 +35,7 @@ import { buildSkillsAndRulesPrompt, createSkillsExtension, discoverSkillsAndRule
 import { createSubagentTools } from "../subagents.ts";
 import type { SessionBlueprints } from "../session-blueprints.ts";
 import type { EuPolicy } from "../eu-policy.ts";
-import type { ModelChoice, ModelRouting } from "../model-routing.ts";
+import { familyOf, type ModelChoice, type ModelRouting } from "../model-routing.ts";
 import { TEAM_INSTRUCTIONS, type TeamBoard } from "../team-board.ts";
 import { createTeamTools } from "../team-tools.ts";
 import { createAgentTaskTools } from "../agent-tasks-tools.ts";
@@ -177,13 +177,14 @@ export class SessionManager {
 		// The model the Captain uses this turn: the user's pick, unless the project sets another for the current stage.
 		let provider = config.provider;
 		let model = modelId;
+		const project = task?.projectId ? this.#projects.serialize(this.#projects.get(task.projectId)) : null;
+		const projectEuOnly = Boolean(project?.euOnlyMode || project?.cloudActFree);
 		if (task && this.#routing && this.#blueprints) {
-			const project = task.projectId ? this.#projects.serialize(this.#projects.get(task.projectId)) : null;
 			const routed = await this.#routing.forTurn(this.#blueprints.currentStage(task.id), project, { provider, model });
 			provider = routed.provider;
 			model = routed.model;
 		}
-		this.#eu?.guardProvider(provider);
+		this.#eu?.guardProvider(provider, projectEuOnly);
 		this.#rootModels.set(key, { provider, model });
 		// Skills and MCP servers that are on for this session's project (everything is on unless turned off).
 		const projectId = task?.projectId ?? null;
@@ -257,7 +258,18 @@ export class SessionManager {
 					processes: this.#processes,
 					events: this.#events,
 					teamTools: teamExt?.tools ?? [],
-					...(eu ? { euBlock: { provider: id => eu.blockReason("provider", id, eu.regionOfProvider(id)), engine: id => eu.engineBlock(id) } } : {}),
+					...(eu ? {
+						euBlock: {
+							provider: id => {
+								const p = task.projectId ? this.#projects.serialize(this.#projects.get(task.projectId)) : null;
+								return eu.blockReason("provider", id, eu.regionOfProvider(id), Boolean(p?.euOnlyMode || p?.cloudActFree));
+							},
+							engine: id => {
+								const p = task.projectId ? this.#projects.serialize(this.#projects.get(task.projectId)) : null;
+								return eu.engineBlock(id, Boolean(p?.euOnlyMode || p?.cloudActFree));
+							},
+						},
+					} : {}),
 					...(blueprints && routing ? {
 						reviews: {
 							begin: async () => {
@@ -266,7 +278,7 @@ export class SessionManager {
 								const project = task.projectId ? this.#projects.serialize(this.#projects.get(task.projectId)) : null;
 								const mine = this.#rootModels.get(key) ?? { provider: "", model: "" };
 								const choice = await routing.reviewer(stage, project, mine);
-								return { model: choice.model ? { provider: choice.model.provider, modelId: choice.model.model } : null, label: choice.label, independent: choice.independent };
+								return { model: choice.model ? { provider: choice.model.provider, modelId: choice.model.model } : null, label: choice.label, independent: choice.independent, captainFamily: familyOf(mine) };
 							},
 							started: (subagentId, info) => blueprints.reviewStarted(key, { subagentId, ...info }),
 							finished: (subagentId, status, report) => blueprints.reviewFinished(key, subagentId, status, report),
@@ -413,6 +425,10 @@ export class SessionManager {
 		if (!trimmed) throw badRequest("Provide a message for the subagent.");
 		const open = this.#sessions.get(sessionId);
 		if (!open) throw conflict("Session is not currently open.");
+		const task = this.#tasks.get(sessionId);
+		const project = task?.projectId ? this.#projects.serialize(this.#projects.get(task.projectId)) : null;
+		const rootModel = this.#rootModels.get(sessionId);
+		if (rootModel) this.#eu?.guardProvider(rootModel.provider, Boolean(project?.euOnlyMode || project?.cloudActFree));
 		const convId = toConversationId(subagentId);
 		const conv = await open.harness.conversation(convId, context);
 		if (!conv) throw notFound("Subagent not found.");

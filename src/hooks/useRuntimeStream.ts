@@ -134,11 +134,13 @@ export function useRuntimeStream(opts: {
   hasWorkspace: boolean
   isCodingTask: boolean
   environmentVersion: number
+  /** When true (e.g. Mobile Inbox), fetch pending approvals across all sessions instead of scoping to sessionId. */
+  allApprovals?: boolean
   onSessionsChanged?: () => void
   onAgentBrowserDriving?: () => void
   onArtifactUpdated?: (artifactId: string) => void
 }) {
-  const { sessionId, hasWorkspace, isCodingTask, environmentVersion, onSessionsChanged, onAgentBrowserDriving, onArtifactUpdated } = opts
+  const { sessionId, hasWorkspace, isCodingTask, environmentVersion, allApprovals = false, onSessionsChanged, onAgentBrowserDriving, onArtifactUpdated } = opts
   const [timeline, setTimeline] = useState<ConversationTimelineSnapshot | null>(null)
   const [subagentTimelines, setSubagentTimelines] = useState<Record<string, ConversationTimelineSnapshot>>({})
   const [subagents, setSubagents] = useState<SubagentInfo[]>([])
@@ -169,9 +171,11 @@ export function useRuntimeStream(opts: {
 
   const callbacksRef = useRef({ onSessionsChanged, onAgentBrowserDriving, onArtifactUpdated })
   const sessionIdRef = useRef(sessionId)
+  const allApprovalsRef = useRef(allApprovals)
   useEffect(() => {
     callbacksRef.current = { onSessionsChanged, onAgentBrowserDriving, onArtifactUpdated }
     sessionIdRef.current = sessionId
+    allApprovalsRef.current = allApprovals
   })
 
   const refreshTimeline = useCallback(async (targetId: string, signal?: AbortSignal) => {
@@ -268,7 +272,8 @@ export function useRuntimeStream(opts: {
     const controller = new AbortController()
     const { signal } = controller
     const qs = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""
-    void request<{ pending: PendingApproval[]; policy: ApprovalPolicy; rules: ApprovalRule[] }>(`/api/approvals${qs}`, { signal })
+    const approvalsQs = allApprovals ? "" : qs
+    void request<{ pending: PendingApproval[]; policy: ApprovalPolicy; rules: ApprovalRule[] }>(`/api/approvals${approvalsQs}`, { signal })
       .then(data => {
         if (signal.aborted) return
         setApprovals(data.pending ?? [])
@@ -311,7 +316,7 @@ export function useRuntimeStream(opts: {
         })
     }
     return () => controller.abort()
-  }, [sessionId, hasWorkspace, isCodingTask, environmentVersion])
+  }, [sessionId, hasWorkspace, isCodingTask, environmentVersion, allApprovals])
 
   // Subscribe to the shared EventSource stream with Zod-validated payloads
   useEffect(() => {
@@ -352,7 +357,7 @@ export function useRuntimeStream(opts: {
       eventStream.subscribeTyped("approval.resolved", (ev) => {
         const item = ev.payload
         setApprovals(prev => prev.filter(p => p.id !== item.id))
-        void refreshApprovals(sessionIdRef.current)
+        void refreshApprovals(allApprovalsRef.current ? null : sessionIdRef.current)
       }),
       eventStream.subscribeTyped("processes.update", (ev) => {
         if ("processes" in ev.payload && (!ev.sessionId || ev.sessionId === sessionIdRef.current)) {

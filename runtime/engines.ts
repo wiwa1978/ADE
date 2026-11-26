@@ -304,10 +304,10 @@ export class EngineManager {
 	#available: Record<EngineId, boolean> | null = null;
 	#environment: NodeJS.ProcessEnv;
 
-	#guard: ((engine: string) => string | null) | null = null;
+	#guard: ((engine: string, sessionId?: string) => string | null) | null = null;
 
 	/** EU-only mode: why an engine may not be used (null when it may). */
-	setGuard(guard: (engine: string) => string | null) {
+	setGuard(guard: (engine: string, sessionId?: string) => string | null) {
 		this.#guard = guard;
 	}
 
@@ -414,7 +414,7 @@ export class EngineManager {
 	setEngine(sessionId: string, engine: unknown, parent: EngineSession["parent"] = null) {
 		if (engine === "pi") return null;
 		if (engine !== "claude-code" && engine !== "codex") throw Object.assign(new Error("Unknown engine."), { statusCode: 400 });
-		const blocked = this.#guard?.(engine);
+		const blocked = this.#guard?.(engine, parent?.sessionId ?? sessionId);
 		if (blocked) throw Object.assign(new Error(blocked), { statusCode: 403 });
 		const existing = this.get(sessionId);
 		if (existing?.items.length) {
@@ -472,7 +472,7 @@ export class EngineManager {
 		const state = this.get(sessionId);
 		if (!state) throw Object.assign(new Error("This session doesn't use an external engine."), { statusCode: 400 });
 		if (this.#running.has(sessionId)) throw Object.assign(new Error("The agent is still working. Wait, or stop it first."), { statusCode: 409 });
-		const blocked = this.#guard?.(state.engine);
+		const blocked = this.#guard?.(state.engine, state.parent?.sessionId ?? sessionId);
 		if (blocked) throw Object.assign(new Error(blocked), { statusCode: 403 });
 		const content = prompt.trim();
 		if (!content || content.length > 20000) throw Object.assign(new Error("Enter a message between 1 and 20000 characters."), { statusCode: 400 });

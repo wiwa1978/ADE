@@ -6,8 +6,13 @@ import { allowedStageTools, stageToolBlock } from "./stage-tools.ts";
 test("groups turn into real tools; looking around and the team are always there", () => {
 	const review = { name: "Review", allowedToolGroups: ["repo-read", "diff-read", "artifacts"] };
 	const tools = allowedStageTools(review);
-	for (const tool of ["read", "grep_search", "finish_stage", "team_post", "spawn_subagent", "write_artifact"]) assert.ok(tools.has(tool), tool);
+	for (const tool of ["read", "grep_search", "finish_stage", "agent_tasks", "team_post", "spawn_subagent", "write_artifact"]) assert.ok(tools.has(tool), tool);
 	for (const tool of ["write", "edit", "run_command", "browser_click"]) assert.ok(!tools.has(tool), tool);
+	assert.equal(stageToolBlock(review, "spawn_subagent", { mode: "readonly" }, null, "/repo"), null);
+	assert.match(stageToolBlock(review, "spawn_subagent", { mode: "workspace" }, null, "/repo") ?? "", /only spawn readonly subagents/);
+	assert.match(stageToolBlock(review, "spawn_subagent", { mode: "worktree" }, null, "/repo") ?? "", /only spawn readonly subagents/);
+	const build = { name: "Implement", allowedToolGroups: ["workspace-edit", "shell"] };
+	assert.equal(stageToolBlock(build, "spawn_subagent", { mode: "worktree" }, null, "/repo"), null);
 });
 
 test("a stage with checks may edit, so a failing check can be fixed", () => {

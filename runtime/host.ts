@@ -143,7 +143,10 @@ export class LocalAgentHost {
 			sessions: this.#sessionManager,
 			listSessions: () => this.sessions(),
 			gateNote: taskId => this.blueprints.gateNote(taskId),
-			guardProvider: provider => this.eu.guardProvider(provider),
+			guardProvider: (provider, projectId) => {
+				const project = projectId ? this.#projects.serialize(this.#projects.get(projectId)) : null;
+				this.eu.guardProvider(provider, Boolean(project?.euOnlyMode || project?.cloudActFree));
+			},
 		});
 	}
 

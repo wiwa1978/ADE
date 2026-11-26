@@ -172,7 +172,7 @@ export function ProjectStreamsWorkspace({
           >
             <Plus className="size-3.5" /> New session
           </button>
-          {onToggleFiles ? (
+          {onToggleFiles && !simple ? (
             <button
               type="button"
               className={`ade-icon-btn ${filesOpen ? "bg-[rgb(var(--surface-raised))] text-[rgb(var(--foreground))]" : ""}`}

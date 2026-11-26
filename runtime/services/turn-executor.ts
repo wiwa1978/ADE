@@ -26,7 +26,7 @@ export class TurnExecutor {
 	#recovering = new Set<string>();
 	#closing = false;
 	#gateNote?: (taskId: string) => string | null;
-	#guardProvider?: (provider: string) => void;
+	#guardProvider?: (provider: string, projectId?: string | null) => void;
 
 	constructor(opts: {
 		db: DatabaseSync;
@@ -40,7 +40,7 @@ export class TurnExecutor {
 		/** A turn that ended at a blueprint gate has no text of its own; this is its answer. */
 		gateNote?: (taskId: string) => string | null;
 		/** Throws when the provider may not be used (EU-only mode). */
-		guardProvider?: (provider: string) => void;
+		guardProvider?: (provider: string, projectId?: string | null) => void;
 	}) {
 		this.#db = opts.db;
 		this.#events = opts.events;
@@ -151,7 +151,7 @@ export class TurnExecutor {
 				throw conflict("Another task is already working in this checkout. Use a separate worktree for concurrent work.");
 			}
 		}
-		this.#guardProvider?.(config.provider);
+		this.#guardProvider?.(config.provider, task?.projectId ?? null);
 		if (!config.configured) throw serviceUnavailable(config.setupMessage || "The selected model provider is not configured");
 		const modelId = normalizedSend.model || config.defaultModel;
 		if (!modelId || !config.resolveModel(modelId)) {

@@ -289,18 +289,47 @@ function clientIp(request: IncomingMessage): string {
 }
 
 function isSecureRequest(request: IncomingMessage): boolean {
-	if (!isLoopbackSocket(request)) return false;
+	if ((request.socket as { encrypted?: boolean } | undefined)?.encrypted) return true;
 	const proto = request.headers["x-forwarded-proto"];
 	if (typeof proto === "string" && proto.toLowerCase().includes("https")) return true;
 	return false;
 }
+
+const DESKTOP_ADMIN_PREFIXES = [
+	"/api/mobile",
+	"/api/terminals",
+	"/api/model-credentials",
+	"/api/copilot",
+	"/api/eu",
+	"/api/mcp",
+	"/api/skills",
+	"/api/capabilities",
+	"/api/environments",
+	"/api/integrations",
+	"/api/board",
+	"/api/execution-targets",
+	"/api/guardrails",
+	"/api/approval-rules",
+	"/api/system/open-in",
+	"/api/system/pick-folder",
+];
 
 export function isDesktopAdminRoute(pathname: string): boolean {
 	const normalized = pathname.toLowerCase();
 	if (normalized === "/api/mobile/session" || normalized === "/api/mobile/claim" || normalized === "/api/mobile/logout") {
 		return false;
 	}
-	return normalized === "/api/mobile" || normalized.startsWith("/api/mobile/");
+	if (/^\/api\/projects\/[^/]+\/secrets(\/|$)/.test(normalized)) return true;
+	return DESKTOP_ADMIN_PREFIXES.some(prefix => normalized === prefix || normalized.startsWith(`${prefix}/`));
+}
+
+function escapeHtml(text: string): string {
+	return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+}
+
+function pairConfirmationHtml(code: string): string {
+	const safeCode = escapeHtml(code);
+	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pair device with ADE</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#111318;color:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,sans-serif;padding:24px}main{max-width:360px;width:100%;background:#1a1d24;border:1px solid #2b303c;border-radius:16px;padding:24px;text-align:center}h1{margin:0 0 8px;font-size:20px}p{margin:0 0 20px;color:#9ca3af;font-size:14px;line-height:1.5}button{width:100%;padding:12px 16px;border:0;border-radius:10px;background:#3b82f6;color:#fff;font-size:15px;font-weight:600;cursor:pointer}</style></head><body><main><h1>Pair this device with ADE</h1><p>Confirm below to connect this browser to your ADE host.</p><form method="POST" action="/pair"><input type="hidden" name="code" value="${safeCode}"><button type="submit">Pair device</button></form></main></body></html>`;
 }
 
 export class MobilePairingManager {
@@ -317,6 +346,7 @@ export class MobilePairingManager {
 	#mainRouter: Router | null = null;
 	#readBody: ((req: IncomingMessage, maxBytes?: number) => Promise<Record<string, unknown>>) | null = null;
 	#requireWorkspace: ((sessionId: string) => string) | null = null;
+	#activeStreams = new Map<string, Set<ServerResponse>>();
 
 	constructor(opts: {
 		stateDirectory?: string | null;
@@ -510,11 +540,38 @@ export class MobilePairingManager {
 		return toPublicDevice(device);
 	}
 
+	#trackStream(deviceId: string, request: IncomingMessage, response: ServerResponse): void {
+		let set = this.#activeStreams.get(deviceId);
+		if (!set) {
+			set = new Set();
+			this.#activeStreams.set(deviceId, set);
+		}
+		set.add(response);
+		const cleanup = () => {
+			const current = this.#activeStreams.get(deviceId);
+			if (!current) return;
+			current.delete(response);
+			if (current.size === 0) this.#activeStreams.delete(deviceId);
+		};
+		if (typeof response.once === "function") response.once("close", cleanup);
+		if (typeof request.once === "function") request.once("close", cleanup);
+	}
+
+	#closeDeviceStreams(deviceId: string): void {
+		const set = this.#activeStreams.get(deviceId);
+		if (!set) return;
+		this.#activeStreams.delete(deviceId);
+		for (const res of set) {
+			try { res.end(); } catch { /* stream already closed */ }
+		}
+	}
+
 	revokeDevice(id: string): { revoked: boolean } {
 		const device = this.#state.devices.find(d => d.id === id && !d.revokedAt);
 		if (!device) throw notFound("Paired device not found.");
 		device.revokedAt = Date.now();
 		this.#save();
+		this.#closeDeviceStreams(device.id);
 		return { revoked: true };
 	}
 
@@ -524,6 +581,7 @@ export class MobilePairingManager {
 		for (const device of this.#state.devices) {
 			if (!device.revokedAt) {
 				device.revokedAt = now;
+				this.#closeDeviceStreams(device.id);
 				count++;
 			}
 		}
@@ -765,9 +823,54 @@ export class MobilePairingManager {
 			const ip = clientIp(request);
 			const lowerPath = url.pathname.toLowerCase();
 
-			// 1. One-tap QR landing link: GET /pair?code=...
+			// 1. One-tap QR landing link: GET /pair?code=... renders a confirmation form so link previews never consume the code.
 			if (method === "GET" && url.pathname === "/pair") {
-				const code = url.searchParams.get("code") ?? "";
+				const code = (url.searchParams.get("code") ?? "").trim();
+				if (!code) {
+					response.writeHead(302, { location: "/?pairError=expired", "cache-control": "no-store" });
+					response.end();
+					return;
+				}
+				response.writeHead(200, {
+					"content-type": "text/html; charset=utf-8",
+					"cache-control": "no-store",
+					"content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
+					"referrer-policy": "no-referrer",
+				});
+				response.end(pairConfirmationHtml(code));
+				return;
+			}
+
+			// 1b. Pairing form submission: POST /pair consumes the single-use code and sets the HttpOnly cookie.
+			if (method === "POST" && url.pathname === "/pair") {
+				if (!this.#isAllowedBridgeOrigin(request, { requireOrigin: false })) {
+					sendJson(response, 403, { error: "Cross-origin pairing request is not allowed." });
+					return;
+				}
+				const chunks: Buffer[] = [];
+				let total = 0;
+				for await (const chunk of request) {
+					const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+					total += buf.length;
+					if (total > 8_192) {
+						sendJson(response, 413, { error: "Pairing request too large." });
+						return;
+					}
+					chunks.push(buf);
+				}
+				const rawBody = Buffer.concat(chunks).toString("utf8");
+				let code = "";
+				const contentType = String(request.headers["content-type"] ?? "").toLowerCase();
+				if (contentType.includes("application/json")) {
+					try {
+						const parsed = JSON.parse(rawBody) as { code?: unknown };
+						code = typeof parsed.code === "string" ? parsed.code : "";
+					} catch {
+						code = "";
+					}
+				} else {
+					code = new URLSearchParams(rawBody).get("code") ?? "";
+				}
 				try {
 					const { token } = this.claimPairingCode({
 						code,
@@ -842,6 +945,7 @@ export class MobilePairingManager {
 				if (device) {
 					device.revokedAt = Date.now();
 					this.#save();
+					this.#closeDeviceStreams(device.id);
 				}
 				sendJson(response, 200, { loggedOut: true }, { "set-cookie": this.#clearAuthCookieHeader() });
 				return;
@@ -866,6 +970,9 @@ export class MobilePairingManager {
 				if (!this.#mainRouter || !this.#readBody || !this.#requireWorkspace) {
 					sendJson(response, 503, { error: "ADE runtime is not ready." });
 					return;
+				}
+				if (lowerPath === "/api/events") {
+					this.#trackStream(device.id, request, response);
 				}
 				const ctx = {
 					request,

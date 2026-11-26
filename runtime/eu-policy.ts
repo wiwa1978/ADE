@@ -75,20 +75,20 @@ export class EuPolicy {
 	}
 
 	/** Null when it may be used; otherwise what to tell the user. */
-	blockReason(kind: "provider" | "engine" | "mcp", id: string, region: Region): string | null {
-		if (!this.#settings.euOnly || region !== "non-eu") return null;
+	blockReason(kind: "provider" | "engine" | "mcp", id: string, region: Region, forceEuOnly = false): string | null {
+		if ((!this.#settings.euOnly && !forceEuOnly) || region !== "non-eu") return null;
 		if (this.#settings.exceptions.includes(`${kind}:${id}`)) return null;
 		const what = kind === "provider" ? `The model provider "${id}"` : kind === "engine" ? `The agent "${id}"` : `The tool server "${id}"`;
 		return `EU-only mode is on: ${what} runs ${REGION_LABEL[region]}. Pick an EU or local one, or allow it as an exception in Settings → EU-only.`;
 	}
 
-	guardProvider(id: string): void {
-		const reason = this.blockReason("provider", id, this.regionOfProvider(id));
+	guardProvider(id: string, forceEuOnly = false): void {
+		const reason = this.blockReason("provider", id, this.regionOfProvider(id), forceEuOnly);
 		if (reason) throw forbidden(reason);
 	}
 
 	/** Claude Code and Codex send your code to US servers. */
-	engineBlock(id: string): string | null {
-		return id === "pi" ? null : this.blockReason("engine", id, "non-eu");
+	engineBlock(id: string, forceEuOnly = false): string | null {
+		return id === "pi" ? null : this.blockReason("engine", id, "non-eu", forceEuOnly);
 	}
 }

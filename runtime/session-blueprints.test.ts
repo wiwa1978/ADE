@@ -346,3 +346,18 @@ test("when the agent finishes a stage and stops, ADE starts the next one itself,
 	assert.equal(blueprints.takeAutoAdvance("s1"), null);
 	assert.equal(blueprints.summary("s1")!.stage?.id, "review");
 });
+
+test("finish_stage cannot bypass a before-gated stage while awaiting approval", () => {
+	const { blueprints } = setup("automated-factory");
+	for (const stageId of ["triage", "plan", "implement", "verify"]) blueprints.finish("s1", { stageId, summary: `${stageId} done` });
+	withReview(blueprints).finish("s1", { stageId: "review", summary: "Reviewed", verdict: { outcome: "pass", summary: "OK" } });
+	assert.equal(blueprints.summary("s1")!.stage?.id, "publish_pr");
+	assert.equal(blueprints.summary("s1")!.stage?.status, "awaiting_approval");
+	// Both toolBlockReason and finish() refuse to advance publish_pr before user approval.
+	assert.match(blueprints.toolBlockReason("s1", "finish_stage", { stageId: "publish_pr" }, true) ?? "", /waiting for the user's approval/);
+	const bypassed = blueprints.finish("s1", { stageId: "publish_pr", summary: "Opened PR without asking" });
+	assert.equal(bypassed.waiting, true);
+	assert.match(bypassed.reply, /waiting for the user's decision/);
+	assert.equal(blueprints.summary("s1")!.status, "awaiting_human");
+	assert.equal(blueprints.summary("s1")!.stage?.status, "awaiting_approval");
+});

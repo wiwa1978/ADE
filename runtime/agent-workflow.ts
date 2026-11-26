@@ -61,7 +61,11 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		copySkillsForCli(workspace, engine, skills.map(skill => ({ name: skill.name, dir: skill.dir })));
 		return engine === "claude-code" ? writeClaudeMcpConfig(sessionId, host.mcp.handoff(scope)) : null;
 	};
-	engines.setGuard(engine => host.eu.engineBlock(engine));
+	engines.setGuard((engine, sessionId) => {
+		const projectId = sessionId ? host.sessionProjectId?.(sessionId) : null;
+		const project = projectId ? (host.projects?.() ?? []).find(p => p.id === projectId) : null;
+		return host.eu.engineBlock(engine, Boolean(project?.euOnlyMode || project?.cloudActFree));
+	});
 	const overlayEngine = (session: Conversation): Conversation => {
 		const engine = engines.get(session.id);
 		if (!engine) return session;

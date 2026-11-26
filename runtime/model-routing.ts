@@ -25,11 +25,11 @@ export class ModelRouting {
 	}
 
 	#usable(catalog: CatalogProvider[], project: ProjectLike) {
-		const euOn = this.#eu.on || Boolean(project?.euOnlyMode);
+		const euOn = this.#eu.on || Boolean(project?.euOnlyMode || (project as { cloudActFree?: boolean } | null | undefined)?.cloudActFree);
 		return (choice: ModelChoice) => {
 			const provider = catalog.find(item => item.id === choice.provider);
 			if (!provider?.configured || !provider.models.some(model => model.id === choice.model)) return false;
-			return !euOn || !this.#eu.blockReason("provider", choice.provider, this.#eu.regionOfProvider(choice.provider));
+			return !euOn || !this.#eu.blockReason("provider", choice.provider, this.#eu.regionOfProvider(choice.provider), euOn);
 		};
 	}
 

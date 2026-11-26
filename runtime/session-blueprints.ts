@@ -392,6 +392,9 @@ export class SessionBlueprints {
 		if (isLead && toolName !== "finish_stage") this.#advanced.delete(sessionId);
 		const waiting = state.status === "awaiting_approval" || record.run.status === "awaiting_human" || this.#gated.has(sessionId);
 		if (waiting) {
+			if (toolName === "finish_stage" && stage.approvalGate !== "after") {
+				return `Stopped: "${stage.name}" is waiting for the user's approval. End your turn now; the user approves or asks for changes in ADE, and you continue after that.`;
+			}
 			if (GATE_ALLOWED.has(toolName)) return null;
 			return `Stopped: "${stage.name}" is waiting for the user's approval. End your turn now (a short summary is enough); the user approves or asks for changes in ADE, and you continue after that.`;
 		}
@@ -537,6 +540,10 @@ export class SessionBlueprints {
 		const state = record.run.stages[index];
 		if (!stage || record.run.status === "completed") return { reply: "All stages are already done.", waiting: false };
 		if (input.stageId !== stage.id) return { reply: `The current stage is "${stage.id}" (${stage.name}), not "${input.stageId}". Finish the current stage first.`, waiting: false };
+		if (state.status === "awaiting_approval" && stage.approvalGate !== "after") {
+			this.#gated.add(sessionId);
+			return { reply: `Stage "${stage.name}" is waiting for the user's decision before it can proceed. Stop here and wait for the user to approve or request changes in ADE.`, waiting: true };
+		}
 		if (state.status !== "running" && state.status !== "awaiting_approval") return { reply: `Stage "${stage.id}" isn't running (it's ${state.status}).`, waiting: false };
 		// The stage's document has to exist on the branch: ADE looks, it doesn't take the agent's word.
 		const missing = state.status === "running" ? this.#missingArtifact(sessionId, row, stage) : null;

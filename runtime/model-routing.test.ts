@@ -63,3 +63,20 @@ test("EU-only mode keeps both the Captain and the reviewer on EU or local models
 		assert.equal(allowed.model?.provider, "openai", "an exception makes a US reviewer possible");
 	} finally { done(); }
 });
+
+test("per-project euOnlyMode blocks US providers even when global EU-only is off", async () => {
+	const { routing, eu, done } = setup("https://api.mistral.ai/v1");
+	try {
+		assert.equal(eu.on, false);
+		assert.throws(() => eu.guardProvider("openai", true), /EU-only mode is on/);
+		assert.match(eu.engineBlock("claude-code", true) ?? "", /EU-only mode is on/);
+		const us = await routing.forTurn(
+			stage,
+			{ euOnlyMode: true, stageOverrides: { propose_delta: { provider: "openai", model: "gpt-5" } } },
+			{ provider: "compatible", model: "mistral-large-latest" },
+		);
+		assert.equal(us.provider, "compatible", "per-project EU-only rejects pinned US model");
+		const review = await routing.reviewer(stage, { euOnlyMode: true }, { provider: "compatible", model: "mistral-large-latest" });
+		assert.equal(review.model, null, "per-project EU-only rejects US reviewer");
+	} finally { done(); }
+});

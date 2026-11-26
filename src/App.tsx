@@ -23,7 +23,7 @@ import { AppOverlays } from "./layout/AppOverlays"
 import type { AddProjectSource } from "./projects/AddProjectWizard"
 import { resolveKeybindings } from "./keybindings"
 import { MobileAuthGate, type MobileSessionState } from "./mobile/MobileAuthGate"
-import { MobileAppShell } from "./mobile/MobileAppShell"
+import { MobileAppShell, type MobileTab } from "./mobile/MobileAppShell"
 import { useIsMobile } from "./mobile/useIsMobile"
 import { I18nProvider } from "./i18n/I18nProvider"
 import { useI18n } from "./i18n/I18nContext"
@@ -201,8 +201,11 @@ function AppInner({ settingsHook }: { settingsHook: ReturnType<typeof useSetting
     onError: model.setRuntimeError,
   })
 
+  const [mobileTab, setMobileTab] = useState<MobileTab>("inbox")
+
   const stream = useRuntimeStream({
     sessionId: screen === "work" && !newSessionOpen ? sess.activeSession.id : null,
+    allApprovals: isMobile && mobileTab === "inbox",
     hasWorkspace: sess.hasWorkspace,
     isCodingTask: sess.isCodingTask,
     environmentVersion: env.environmentVersion,
@@ -510,6 +513,7 @@ function AppInner({ settingsHook }: { settingsHook: ReturnType<typeof useSetting
           onCreateChatThread={handleCreateChatThread}
           onStartNewSession={sess.startNewSession}
           onOpenExternalBrowser={url => void stream.openExternalBrowser(url)}
+          onTabChange={setMobileTab}
         />
       </>
     )

@@ -1,4 +1,4 @@
-import { useMemo, useState, type RefObject } from "react"
+import { useEffect, useMemo, useState, type RefObject } from "react"
 import {
   ArrowLeft,
   Check,
@@ -101,6 +101,7 @@ export function MobileAppShell({
   onCreateChatThread,
   onStartNewSession,
   onOpenExternalBrowser,
+  onTabChange,
 }: {
   mobileSession: MobileSessionState | null
   hostName: string
@@ -157,9 +158,11 @@ export function MobileAppShell({
     title?: string
   }) => Promise<string | null | void>
   onOpenExternalBrowser: (url: string) => void
+  onTabChange?: (tab: MobileTab) => void
 }) {
   const { t, formatDay } = useI18n()
   const [tab, setTab] = useState<MobileTab>("inbox")
+  useEffect(() => { onTabChange?.(tab) }, [tab, onTabChange])
   const [searchQuery, setSearchQuery] = useState("")
   const [artefactScope, setArtefactScope] = useState<"session" | "project">("session")
   const [artefactProjectId, setArtefactProjectId] = useState<string | null>(null)

@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Bot, FolderPlus, Laptop, SlidersHorizontal, X } from "lucide-react"
+import { FolderPlus, Laptop, Layers, SlidersHorizontal, X } from "lucide-react"
 import { Banner, Button, IconButton, Switch, useEscapeKey } from "@/components/ui"
+import { BUILTIN_BLUEPRINTS } from "@ade/blueprints"
 import type { TaskStart } from "../app-types"
+import { useBlueprintOptions } from "../blueprints/blueprint-options"
 import type { Project } from "../ProjectsView"
 import { targetLabel, targetUnavailable, useRunTargets, type RunTarget } from "../run-targets"
 import {
   buildWorktreeCreatePayload,
   useWorktreeSourceData,
   type CreateFromTab,
-  type EngineId,
   type OpenIssueItem,
   type OpenPullItem,
   type WorktreeCreatePayload,
@@ -50,7 +51,8 @@ function CreateWorktreeModalDialog({
   const [selectedBranch, setSelectedBranch] = useState("")
   const [selectedPr, setSelectedPr] = useState<OpenPullItem | null>(null)
   const [selectedIssue, setSelectedIssue] = useState<OpenIssueItem | null>(null)
-  const [engine, setEngine] = useState<EngineId>("pi")
+  const [blueprintId, setBlueprintId] = useState<string>(initialProject?.blueprintId || "vibe")
+  const blueprintOptions = useBlueprintOptions()
   const [kind, setKind] = useState<TaskStart["kind"]>(initialProject?.repository ? "worktree" : "checkout")
   const [attempts, setAttempts] = useState(1)
   const [manualRepo, setManualRepo] = useState(initialProject?.repository ?? "")
@@ -89,9 +91,10 @@ function CreateWorktreeModalDialog({
     }
     setLocalError("")
     try {
+      const effectiveBlueprint = activeProject?.blueprintLocked ? (activeProject.blueprintId || "vibe") : blueprintId
       await onCreate(buildWorktreeCreatePayload({
         projectId: activeProjectId, kind, effectiveRepo, fromTab, queryText,
-        selectedBranch, selectedPr, selectedIssue, engine, runOn, attempts,
+        selectedBranch, selectedPr, selectedIssue, engine: "pi", blueprintId: effectiveBlueprint, runOn, attempts,
       }))
       if (createMore) {
         setQueryText(""); setSelectedBranch(""); setSelectedPr(null); setSelectedIssue(null)
@@ -103,7 +106,7 @@ function CreateWorktreeModalDialog({
       setLocalError(err instanceof Error ? err.message : t("wsx.ws.couldNotCreateWorktree"))
     }
   }, [
-    activeProjectId, attempts, canCreate, createMore, effectiveRepo, engine,
+    activeProject, activeProjectId, attempts, blueprintId, canCreate, createMore, effectiveRepo,
     fromTab, kind, onClose, onCreate, queryText, runOn, selectedBranch, selectedIssue, selectedPr, t,
   ])
 
@@ -145,6 +148,7 @@ function CreateWorktreeModalDialog({
                   setProjectId(id)
                   const next = unarchived.find(p => p.id === id)
                   setManualRepo(next?.repository ?? ""); setKind(next?.repository ? "worktree" : "checkout")
+                  setBlueprintId(next?.blueprintId || "vibe")
                   setSelectedBranch(""); setSelectedPr(null); setSelectedIssue(null)
                 }}
               >
@@ -180,17 +184,23 @@ function CreateWorktreeModalDialog({
 
           <div className="ade-wt-field">
             <div className="ade-wt-label-row">
-              <label htmlFor="wt-agent">{t("wsx.ws.agent")} <span className="opacity-50 font-normal">{t("wsx.ws.optionalTag")}</span></label>
+              <label htmlFor="wt-blueprint">{t("prjx.cfg.wayOfWorking")}</label>
               <IconButton title={t("wsx.ws.configureProviders")} aria-label={t("wsx.ws.configureProviders")} onClick={() => { onClose(); onOpenProviderSettings() }}>
                 <SlidersHorizontal className="size-3.5" />
               </IconButton>
             </div>
             <div className="ade-wt-select-wrap">
-              <Bot className="size-3.5 opacity-75 shrink-0" />
-              <select id="wt-agent" className="ade-wt-select-bare" value={engine} onChange={e => setEngine(e.target.value as EngineId)}>
-                <option value="pi">ADE Agent (Pi Durable)</option>
-                <option value="claude-code">Claude Code (CLI)</option>
-                <option value="codex">Codex (CLI)</option>
+              <Layers className="size-3.5 opacity-75 shrink-0" />
+              <select
+                id="wt-blueprint"
+                className="ade-wt-select-bare"
+                value={activeProject?.blueprintLocked ? (activeProject.blueprintId || "vibe") : blueprintId}
+                disabled={Boolean(activeProject?.blueprintLocked)}
+                onChange={e => setBlueprintId(e.target.value)}
+              >
+                {(blueprintOptions.length ? blueprintOptions : [{ id: "vibe", name: t("prjx.wiz.cfg.vibeCoding") }, ...BUILTIN_BLUEPRINTS]).map(bp => (
+                  <option key={bp.id} value={bp.id}>{bp.name}</option>
+                ))}
               </select>
             </div>
           </div>

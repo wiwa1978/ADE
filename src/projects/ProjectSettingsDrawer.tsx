@@ -7,7 +7,6 @@ import type { GitHubConnection, Project, ProjectInput } from "@ade/protocol"
 import { useBlueprintOptions } from "../blueprints/blueprint-options"
 import { useI18n } from "../i18n/I18nContext"
 import { GitHubRepositoryPicker, type SearchGitHubRepositories } from "./GitHubRepositoryPicker"
-import { ProjectCapabilitiesSettings } from "./ProjectCapabilitiesSettings"
 import { ProjectInstructionsSettings } from "./ProjectInstructionsSettings"
 import { ProjectRunOnSettings } from "./ProjectRunOnSettings"
 import { ProjectScriptsSettings } from "./ProjectScriptsSettings"
@@ -247,7 +246,6 @@ export function ProjectSettings({
       </section>
       <ProjectSecretsSettings projectId={project.id} />
       {project.repository ? <ProjectInstructionsSettings projectId={project.id} /> : null}
-      <ProjectCapabilitiesSettings projectId={project.id} />
     </aside>
   )
 }

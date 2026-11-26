@@ -73,6 +73,9 @@ test("MobilePairingManager enforces single-use QR codes, hashes tokens on disk, 
 		const mgr = new MobilePairingManager({ stateDirectory: dir, defaultPort: 4320 });
 		const router = new Router();
 		router.get("/api/ping", (ctx) => ctx.json(200, { pong: true }));
+		router.get("/api/events", (ctx) => {
+			ctx.response.writeHead(200, { "content-type": "text/event-stream" });
+		});
 		mgr.attachRuntime({
 			mainRouter: router,
 			readBody: async (req) => {
@@ -93,12 +96,29 @@ test("MobilePairingManager enforces single-use QR codes, hashes tokens on disk, 
 		await mgr.handleBridgeRequest(makeMockReq({ url: "/api/ping" }), unauth.res);
 		assert.equal(unauth.status(), 401);
 
-		// 2. Scanning QR code (GET /pair?code=...) pairs iPhone, sets HttpOnly cookie, and redirects
-		const pairRes = makeMockRes();
+		// 2. Scanning QR code (GET /pair?code=...) renders confirmation page WITHOUT consuming the single-use code
+		const previewRes = makeMockRes();
 		await mgr.handleBridgeRequest(
 			makeMockReq({
 				url: `/pair?code=${encodeURIComponent(status.challenge!.code)}`,
-				headers: { "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) Safari/604.1" },
+				headers: { "user-agent": "LinkPreviewBot/1.0" },
+			}),
+			previewRes.res,
+		);
+		assert.equal(previewRes.status(), 200);
+		assert.match(previewRes.body(), /method="POST" action="\/pair"/);
+
+		// 2b. Confirming pairing (POST /pair) pairs iPhone, sets HttpOnly cookie, and redirects
+		const pairRes = makeMockRes();
+		await mgr.handleBridgeRequest(
+			makeMockReq({
+				method: "POST",
+				url: "/pair",
+				headers: {
+					"user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) Safari/604.1",
+					"content-type": "application/json",
+				},
+				body: { code: status.challenge!.code },
 			}),
 			pairRes.res,
 		);
@@ -117,7 +137,12 @@ test("MobilePairingManager enforces single-use QR codes, hashes tokens on disk, 
 		// 3. Reusing the same QR code fails (redirects to ?pairError=expired)
 		const replayRes = makeMockRes();
 		await mgr.handleBridgeRequest(
-			makeMockReq({ url: `/pair?code=${encodeURIComponent(status.challenge!.code)}` }),
+			makeMockReq({
+				method: "POST",
+				url: "/pair",
+				headers: { "content-type": "application/json" },
+				body: { code: status.challenge!.code },
+			}),
 			replayRes.res,
 		);
 		assert.equal(replayRes.status(), 302);
@@ -129,18 +154,29 @@ test("MobilePairingManager enforces single-use QR codes, hashes tokens on disk, 
 		assert.equal(okRes.status(), 200);
 		assert.deepEqual(JSON.parse(okRes.body()), { pong: true });
 
-		// 5. Desktop admin routes are blocked (403) even for a paired phone
-		const adminRes = makeMockRes();
-		await mgr.handleBridgeRequest(
-			makeMockReq({ method: "POST", url: "/api/mobile/enable", headers: { cookie: cookiePair }, body: { enabled: false } }),
-			adminRes.res,
-		);
-		assert.equal(adminRes.status(), 403);
+		// 5. Desktop admin & host-control routes are blocked (403) even for a paired phone
+		for (const adminPath of ["/api/mobile/enable", "/api/terminals", "/api/eu", "/api/model-credentials", "/api/mcp", "/api/projects/p1/secrets", "/api/board/posts"]) {
+			const adminRes = makeMockRes();
+			await mgr.handleBridgeRequest(
+				makeMockReq({ method: "POST", url: adminPath, headers: { cookie: cookiePair, origin: "http://192.168.1.50:4320" }, body: {} }),
+				adminRes.res,
+			);
+			assert.equal(adminRes.status(), 403, `Expected 403 for ${adminPath}`);
+		}
 
-		// 6. Revoking the device immediately cuts off access
+		// 6. Revoking the device immediately cuts off access AND closes open SSE streams
+		let sseClosed = false;
+		const sseRes = {
+			writeHead() { return this; },
+			end() { sseClosed = true; return this; },
+		} as unknown as ServerResponse;
+		await mgr.handleBridgeRequest(makeMockReq({ url: "/api/events", headers: { cookie: cookiePair } }), sseRes);
+		assert.equal(sseClosed, false);
+
 		const paired = mgr.status().devices[0];
 		assert.equal(paired.platform, "ios");
 		mgr.revokeDevice(paired.id);
+		assert.equal(sseClosed, true, "Revoking a paired device must close its open SSE stream");
 		const revokedRes = makeMockRes();
 		await mgr.handleBridgeRequest(makeMockReq({ url: "/api/ping", headers: { cookie: cookiePair } }), revokedRes.res);
 		assert.equal(revokedRes.status(), 401);

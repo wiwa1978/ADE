@@ -8,7 +8,7 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
 import type { BlueprintStage } from "@ade/protocol";
 
 const ALWAYS = new Set([
-	"read", "list_files", "grep_search", "find_files", "read_skill", "finish_stage",
+	"read", "list_files", "grep_search", "find_files", "read_skill", "finish_stage", "agent_tasks",
 	"team_tasks", "team_plan", "team_post", "team_read", "team_claim", "team_overview", "team_focus",
 	"delegate", "spawn_subagent", "message_subagent", "wait_subagent", "list_subagents", "stop_subagent",
 ]);
@@ -39,7 +39,15 @@ export function stageToolBlock(
 	artifactPath: string | null,
 	workspace: string | null,
 ): string | null {
-	if (toolName.startsWith("mcp_") || allowedStageTools(stage).has(toolName)) return null;
+	const allowed = allowedStageTools(stage);
+	if (toolName === "spawn_subagent") {
+		const mode = typeof args.mode === "string" ? args.mode : "readonly";
+		if ((mode === "workspace" || mode === "worktree") && !allowed.has("write") && !allowed.has("run_command")) {
+			return `Not allowed in the stage "${stage.name}": it can only spawn readonly subagents here, not "${mode}". Do the stage's own work, then call finish_stage; later stages get editing tools.`;
+		}
+		return null;
+	}
+	if (toolName.startsWith("mcp_") || allowed.has(toolName)) return null;
 	if ((toolName === "write" || toolName === "edit") && artifactPath && typeof args.path === "string" && insideFolder(args.path, dirname(artifactPath), workspace)) return null;
 	const groups = stage.allowedToolGroups.join(", ") || "none";
 	const hint = artifactPath && (toolName === "write" || toolName === "edit") ? ` This stage may only write in ${dirname(artifactPath)}/.` : "";
