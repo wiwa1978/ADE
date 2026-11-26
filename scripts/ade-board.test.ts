@@ -6,6 +6,10 @@ test("ade board parses read, post, claim, complete, and wait", () => {
 	assert.equal(parseBoardArgs(["read", "--session", "s1", "--channel", "ops"]).board, "s1");
 	assert.equal(parseBoardArgs(["post", "--project", "alpha", "--text", "hi"]).board, "project:alpha");
 	assert.equal(parseBoardArgs(["task", "claim", "--session", "s1", "--id", "T1", "--as", "bee"]).action, "claim");
+	const renewed = parseBoardArgs(["task", "renew", "--session", "s1", "--id", "T1", "--token", "abc", "--lease", "60000"]);
+	assert.equal(renewed.action, "renew");
+	assert.equal(renewed.token, "abc");
+	assert.equal(renewed.leaseMs, 60000);
 	const done = parseBoardArgs(["task", "complete", "--session", "s1", "--id", "T1", "--token", "abc", "--result", "shipped"]);
 	assert.equal(done.action, "complete");
 	assert.equal(done.token, "abc");

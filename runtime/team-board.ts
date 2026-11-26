@@ -147,20 +147,32 @@ export class TeamBoard {
 		return join(this.#dir, `${sessionId.replace(/:/g, "__")}.json`);
 	}
 
-	/** Return expired in-progress claims to todo. Returns the task ids that lost their claim. */
+	/** Return expired in-progress claims to todo, releasing stale file claims and syncing threads. */
 	#reap(state: TeamState): string[] {
 		const now = this.#now();
 		const lost: string[] = [];
+		const formerOwners = new Set<Party>();
 		for (const task of state.tasks) {
 			if (task.status !== "in_progress") continue;
 			if (typeof task.leaseExpiresAt !== "number" || task.leaseExpiresAt > now) continue;
+			const prevOwner = task.owner;
 			task.status = "todo";
 			task.owner = null;
 			task.claimToken = null;
 			task.leaseExpiresAt = null;
 			task.updatedAt = now;
 			task.history.push({ at: now, by: "board", action: "lease_expired" });
+			this.#syncThreadFromTasks(state, task.threadId);
+			this.#log(state, { part: "tasks", action: "lease_expired", direction: "out", from: "tasks", to: prevOwner ? [prevOwner] : [], subject: task.id, text: `${task.id} lease expired — returned to todo` });
+			if (prevOwner) formerOwners.add(prevOwner);
 			lost.push(task.id);
+		}
+		for (const owner of formerOwners) {
+			if (state.tasks.some(other => other.owner === owner && other.status === "in_progress")) continue;
+			const released = state.claims.filter(claim => claim.agent === owner);
+			if (!released.length) continue;
+			state.claims = state.claims.filter(claim => claim.agent !== owner);
+			this.#log(state, { part: "claims", action: "release", direction: "in", from: owner, to: [], subject: released.map(claim => claim.path).join(", "), text: `released ${released.length} ${released.length === 1 ? "path" : "paths"} (lease expired)` });
 		}
 		return lost;
 	}
@@ -387,6 +399,22 @@ export class TeamBoard {
 		}) as TaskClaimReceipt;
 	}
 
+	renewTask(sessionId: string, agent: Party, id: string, claimToken?: string | null, leaseMs?: number): TaskClaimReceipt {
+		return this.#change(sessionId, state => {
+			const lost = this.#reap(state);
+			const task = this.#task(state, id);
+			if (lost.includes(task.id) || task.status !== "in_progress" || task.owner !== agent || (claimToken && claimToken !== task.claimToken)) {
+				throw conflict("claim_lost");
+			}
+			const now = this.#now();
+			task.claimToken = task.claimToken || randomUUID();
+			task.leaseExpiresAt = now + clampLeaseMs(leaseMs);
+			task.updatedAt = now;
+			this.#log(state, { part: "tasks", action: "renew", direction: "in", from: agent, to: [], subject: task.id, text: `renewed lease on ${task.id}` });
+			return { taskId: task.id, owner: agent, claimToken: task.claimToken, leaseExpiresAt: task.leaseExpiresAt, message: `Renewed ${task.id}.` };
+		}) as TaskClaimReceipt;
+	}
+
 	finishTask(sessionId: string, agent: Party, id: string, result: string, claimToken?: string | null) {
 		return this.#change(sessionId, state => {
 			const lost = this.#reap(state);
@@ -573,6 +601,7 @@ export class TeamBoard {
 			const finish = () => {
 				clearTimeout(timer);
 				waiters.delete(wake);
+				if (waiters.size === 0) this.#waiters.delete(sessionId);
 				resolve(snapshot());
 			};
 			const wake = () => { if (snapshot().matched) finish(); };

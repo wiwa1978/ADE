@@ -3,13 +3,14 @@
 const DEFAULT_URL = "http://127.0.0.1:4319";
 
 export type BoardCommand = {
-	action: "read" | "post" | "claim" | "complete" | "wait";
+	action: "read" | "post" | "claim" | "renew" | "complete" | "wait";
 	board: string;
 	text?: string;
 	channel?: string;
 	id?: string;
 	as?: string;
 	token?: string;
+	leaseMs?: number;
 	result?: string;
 	after?: number;
 	timeout?: number;
@@ -37,10 +38,13 @@ export function parseBoardArgs(argv: string[]): BoardCommand {
 		const verb = rest[0];
 		const id = flag(rest, "--id");
 		if (!id) throw new Error("Pass --id.");
-		if (verb === "claim") return { action: "claim", board, as, id };
+		const leaseRaw = flag(rest, "--lease");
+		const leaseMs = leaseRaw !== undefined ? Number(leaseRaw) : undefined;
+		if (verb === "claim") return { action: "claim", board, as, id, leaseMs };
+		if (verb === "renew") return { action: "renew", board, as, id, token: flag(rest, "--token"), leaseMs };
 		if (verb === "complete") return { action: "complete", board, as, id, token: flag(rest, "--token") ?? "", result: flag(rest, "--result") ?? "" };
 	}
-	throw new Error("Usage: ade board read|post|wait|task claim|task complete");
+	throw new Error("Usage: ade board read|post|wait|task claim|task renew|task complete");
 }
 
 function runtimeUrl(): string {
@@ -52,26 +56,37 @@ function runtimeUrl(): string {
 	return url.origin;
 }
 
+async function readJsonOrThrow(response: Response): Promise<unknown> {
+	const payload = await response.json() as { error?: string; message?: string };
+	if (!response.ok) throw new Error(payload.message ?? payload.error ?? `board request failed (${response.status})`);
+	return payload;
+}
+
 async function call(command: BoardCommand): Promise<unknown> {
 	const base = runtimeUrl();
 	const params = new URLSearchParams({ board: command.board });
 	if (command.channel) params.set("channel", command.channel);
-	if (command.action === "read") return (await fetch(`${base}/api/board?${params}`)).json();
+	if (command.action === "read") return readJsonOrThrow(await fetch(`${base}/api/board?${params}`));
 	if (command.action === "wait") {
 		params.set("after", String(command.after ?? 0));
 		params.set("timeout", String(command.timeout ?? 30_000));
-		return (await fetch(`${base}/api/board/wait?${params}`)).json();
+		return readJsonOrThrow(await fetch(`${base}/api/board/wait?${params}`));
 	}
-	const path = command.action === "post" ? "/api/board/posts" : command.action === "claim" ? "/api/board/tasks/claim" : "/api/board/tasks/complete";
+	const path = command.action === "post"
+		? "/api/board/posts"
+		: command.action === "claim"
+			? "/api/board/tasks/claim"
+			: command.action === "renew"
+				? "/api/board/tasks/renew"
+				: "/api/board/tasks/complete";
 	const body = command.action === "post"
 		? { board: command.board, as: command.as, text: command.text, channel: command.channel }
 		: command.action === "claim"
-			? { board: command.board, as: command.as, id: command.id }
-			: { board: command.board, as: command.as, id: command.id, token: command.token, result: command.result };
-	const response = await fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-	const payload = await response.json() as { error?: string; message?: string };
-	if (!response.ok) throw new Error(payload.message ?? payload.error ?? `board request failed (${response.status})`);
-	return payload;
+			? { board: command.board, as: command.as, id: command.id, ...(typeof command.leaseMs === "number" && Number.isFinite(command.leaseMs) ? { leaseMs: command.leaseMs } : {}) }
+			: command.action === "renew"
+				? { board: command.board, as: command.as, id: command.id, token: command.token ?? null, ...(typeof command.leaseMs === "number" && Number.isFinite(command.leaseMs) ? { leaseMs: command.leaseMs } : {}) }
+				: { board: command.board, as: command.as, id: command.id, token: command.token, result: command.result };
+	return readJsonOrThrow(await fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
 }
 
 export async function runBoard(argv: string[]): Promise<unknown> {

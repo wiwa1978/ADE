@@ -39,15 +39,16 @@ export function createTeamTools(opts: TeamToolsOptions) {
 
 	const teamTasks = defineTool({
 		name: "team_tasks",
-		description: "The shared task board. action: list (default), add (title, optional detail, owner name, dependsOn task ids, threadId), take (id: take a ready task to work on it; one agent per task), done (id, result), and for the lead: send_back (id, note), drop (id), reopen (id).",
+		description: "The shared task board. action: list (default), add (title, optional detail, owner name, dependsOn task ids, threadId), take (id, optional leaseMs: take a ready task to work on it; one agent per task), renew (id, optional leaseMs: extend your active lease), done (id, result), and for the lead: send_back (id, note), drop (id), reopen (id).",
 		parameters: obj({
-			action: opt(str({ description: "list, add, take, done, send_back, drop or reopen" })),
+			action: opt(str({ description: "list, add, take, renew, done, send_back, drop or reopen" })),
 			id: opt(str({ description: "Task id, e.g. T3" })),
 			title: opt(str()),
 			detail: opt(str()),
 			owner: opt(str({ description: "Who should do it (a subagent's name); empty = whoever takes it" })),
 			dependsOn: opt(arr(str(), { description: "Task ids this task waits for" })),
 			threadId: opt(str({ description: "Optional workstream thread id (e.g. TH1)" })),
+			leaseMs: opt(num({ description: "Optional lease duration in ms (default 300000 = 5m)" })),
 			result: opt(str({ description: "For done: what you did and where" })),
 			note: opt(str()),
 		}),
@@ -62,7 +63,8 @@ export function createTeamTools(opts: TeamToolsOptions) {
 				return `Added ${id}.`;
 			});
 			if (!args.id) return reply("Give the task id.");
-			if (action === "take") return attempt(() => opts.board.takeTask(opts.sessionId, agent, args.id!));
+			if (action === "take") return attempt(() => opts.board.takeTask(opts.sessionId, agent, args.id!, args.leaseMs));
+			if (action === "renew") return attempt(() => opts.board.renewTask(opts.sessionId, agent, args.id!, null, args.leaseMs).message);
 			if (action === "done") return attempt(() => opts.board.finishTask(opts.sessionId, agent, args.id!, args.result ?? ""));
 			if (action === "send_back" || action === "drop" || action === "reopen") {
 				if (agent !== "lead") return reply("Only the lead sends back, drops or reopens tasks. Post on the team board instead.");
@@ -95,30 +97,33 @@ export function createTeamTools(opts: TeamToolsOptions) {
 
 	const teamPost = defineTool({
 		name: "team_post",
-		description: "Post on the team board: a question, a finding, an answer or an update. Address it to names (or \"lead\"), or leave `to` empty for everyone. `re` answers a post number.",
+		description: "Post on the team board: a question, a finding, an answer or an update. Address it to names (or \"lead\"), or leave `to` empty for everyone. Optional `channel` (default \"general\") groups posts; `re` answers a post number.",
 		parameters: obj({
 			text: str(),
 			kind: opt(str({ description: "question, finding, answer or update (default)" })),
 			to: opt(arr(str())),
 			re: opt(num()),
+			channel: opt(str({ description: "Optional channel name, e.g. general, review, ops" })),
 		}),
 		replay: "safe",
 		execute: async (args, api) => {
 			const agent = who(api.conversationId);
 			const { resolve } = await lookup();
 			const kind = (["question", "finding", "answer", "update"].includes(args.kind ?? "") ? args.kind : "update") as PostKind;
-			return attempt(() => opts.board.post(opts.sessionId, agent, { text: args.text, kind, to: (args.to ?? []).map(resolve).filter(Boolean), re: args.re ?? null }));
+			return attempt(() => opts.board.post(opts.sessionId, agent, { text: args.text, kind, to: (args.to ?? []).map(resolve).filter(Boolean), re: args.re ?? null, channel: args.channel ?? null }));
 		},
 	});
 
 	const teamRead = defineTool({
 		name: "team_read",
-		description: "What's new for you on the team board: posts to you or everyone, decisions on your plans, and tasks sent back to you.",
-		parameters: obj({}),
+		description: "What's new for you on the team board: posts to you or everyone, decisions on your plans, and tasks sent back to you. Optionally filter by `channel`.",
+		parameters: obj({
+			channel: opt(str({ description: "Optional channel filter, e.g. general, review, ops" })),
+		}),
 		replay: "safe",
-		execute: async (_args, api) => {
+		execute: async (args, api) => {
 			const { names } = await lookup();
-			return reply(opts.board.read(opts.sessionId, who(api.conversationId), names));
+			return reply(opts.board.read(opts.sessionId, who(api.conversationId), names, args.channel ?? null));
 		},
 	});
 

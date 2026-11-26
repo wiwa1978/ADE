@@ -47,6 +47,10 @@ test("swarm tools: team_overview and team_focus wire goal, threads, and live wor
 		assert.match(await call("team_overview", { action: "thread", title: "Zod safety", summary: "Validate all boundaries" }, lead), /Thread TH1 saved/);
 		assert.match(await call("team_tasks", { action: "add", title: "Add Zod schemas", owner: "zod-protocol", threadId: "TH1" }, lead), /Added T1/);
 		assert.match(await call("team_tasks", { action: "take", id: "T1" }, "c-zod"), /You have T1/);
+		assert.match(await call("team_tasks", { action: "renew", id: "T1", leaseMs: 120_000 }, "c-zod"), /Renewed T1/);
+		assert.match(await call("team_post", { text: "Schema check passed", channel: "review" }, "c-zod"), /Posted #1/);
+		assert.match(await call("team_read", { channel: "ops" }, lead), /Nothing new/);
+		assert.match(await call("team_read", { channel: "review" }, lead), /Schema check passed/);
 		assert.match(await call("team_focus", { text: "Check MobilePairingManager constructor signature" }, "c-zod"), /Focus set/);
 		assert.match(await call("team_overview", { action: "status" }, lead), /Zod safety \(0\/1\) · Now: Check MobilePairingManager/);
 	} finally {

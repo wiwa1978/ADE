@@ -164,12 +164,21 @@ test("a stalled claim returns the task to todo and a late write is claim_lost", 
 	try {
 		const id = board.addTask("s", "lead", { title: "Work" });
 		const claim = board.claimTask("s", "s1", id, 10_000);
+		board.claim("s", "s1", ["src/app.ts"]);
 		assert.equal(board.state("s").tasks[0]?.status, "in_progress");
 		assert.equal(board.state("s").tasks[0]?.leaseExpiresAt, now + 10_000);
+		// Renewing before expiry extends the lease.
+		now += 6_000;
+		const renewed = board.renewTask("s", "s1", id, claim.claimToken, 10_000);
+		assert.equal(renewed.leaseExpiresAt, now + 10_000);
+		assert.throws(() => board.renewTask("s", "s1", id, "wrong-token", 10_000), /claim_lost/);
+		// Expiry returns the task to todo and releases stale file claims.
 		now += 10_001;
 		assert.throws(() => board.finishTask("s", "s1", id, "late", claim.claimToken), /claim_lost/);
 		assert.equal(board.state("s").tasks[0]?.status, "todo");
 		assert.equal(board.state("s").tasks[0]?.owner, null);
+		assert.equal(board.holderOf("s", "s2", "src/app.ts"), null, "expired lease released file claims");
+		assert.throws(() => board.renewTask("s", "s1", id, claim.claimToken), /claim_lost/);
 		const again = board.claimTask("s", "s2", id, 10_000);
 		assert.throws(() => board.finishTask("s", "s2", id, "nope", "stale-token"), /claim_lost/);
 		assert.match(board.finishTask("s", "s2", id, "ok", again.claimToken), /Done/);
