@@ -10,6 +10,51 @@ export function registerTerminalRoutes(router: Router, deps: RouteDeps): void {
 		ctx.json(200, terminals.read(ctx.params.id, ctx.url.searchParams.get("cursor") ?? undefined));
 	});
 
+	router.get("/api/terminals/:id([0-9a-f-]{36})/stream", (ctx) => {
+		const cursor = ctx.url.searchParams.get("cursor") ?? undefined;
+		// Validate terminal id and cursor before opening the SSE response.
+		terminals.read(ctx.params.id, cursor);
+		ctx.response.writeHead(200, {
+			"content-type": "text/event-stream; charset=utf-8",
+			"cache-control": "no-cache, no-transform",
+			connection: "keep-alive",
+			"x-content-type-options": "nosniff",
+		});
+		let closed = false;
+		let unsubscribe = () => {};
+		const heartbeat = setInterval(() => {
+			if (closed) return;
+			try {
+				ctx.response.write(": ping\n\n");
+			} catch {
+				cleanup();
+			}
+		}, 20_000);
+		heartbeat.unref?.();
+		const cleanup = () => {
+			if (closed) return;
+			closed = true;
+			clearInterval(heartbeat);
+			unsubscribe();
+			try {
+				if (!ctx.response.writableEnded) ctx.response.end();
+			} catch {
+				// Client already disconnected.
+			}
+		};
+		ctx.response.once("close", cleanup);
+		ctx.response.once("error", cleanup);
+		unsubscribe = terminals.subscribe(ctx.params.id, cursor, event => {
+			if (closed) return;
+			try {
+				ctx.response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+				if (event.type === "exit") cleanup();
+			} catch {
+				cleanup();
+			}
+		});
+	});
+
 	router.post(
 		"/api/terminals",
 		async (ctx) => {

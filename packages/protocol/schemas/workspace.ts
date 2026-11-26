@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TerminalHarnessSchema } from "./sessions.ts";
 
 const nonEmptyTrimmed = (field: string, message?: string) =>
 	z.string().refine((v) => v.trim().length > 0, {
@@ -83,6 +84,9 @@ export const TerminalCreateRequestSchema = z.object({
 	workspace: z.string().optional(),
 	cols: z.number().finite().optional(),
 	rows: z.number().finite().optional(),
+	harness: TerminalHarnessSchema.optional(),
+	sessionId: z.string().max(128).optional(),
+	initialPrompt: z.string().max(20_000).optional(),
 });
 
 export const TerminalInputRequestSchema = z.object({

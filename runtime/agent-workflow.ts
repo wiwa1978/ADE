@@ -54,6 +54,7 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	const engines = new EngineManager({ stateDirectory, events: host.events });
 	/** Active skills go into the CLI's skills folder. Claude Code also gets only the MCP servers that are on. */
 	const cliMcpConfig = (sessionId: string, workspace: string, engine: EngineId) => {
+		if (engine !== "claude-code" && engine !== "codex") return null;
 		const projectId = host.sessionProjectId(sessionId);
 		const scope = { workspace, projectId };
 		const skills = effectiveSkills(scanSkillLandscape({ workspace, sources: host.skillLibrary.list() }))
@@ -73,6 +74,7 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		return {
 			...session,
 			engine: engine.engine,
+			...(engine.interactionMode ? { interactionMode: engine.interactionMode } : {}),
 			status: working ? "working" : session.status,
 			updatedAt: Math.max(session.updatedAt ?? 0, engine.updatedAt),
 			lastTurnStatus: working ? "pending" : engine.lastStatus,
@@ -462,7 +464,9 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	setExternalSubagentRunner({
 		installed(sessionId) {
 			const set = new Set<SubagentHarness>(["pi"]);
-			for (const engine of engines.available()) if (engine.id !== "pi" && engine.available) set.add(engine.id);
+			for (const engine of engines.available()) {
+				if ((engine.id === "claude-code" || engine.id === "codex") && engine.available) set.add(engine.id);
+			}
 			// On a container, VM or WSL, ADE installs the CLI there with npm when it's first used.
 			if (sessionTarget(sessionId) !== "local") { set.add("claude-code"); set.add("codex"); }
 			return set;

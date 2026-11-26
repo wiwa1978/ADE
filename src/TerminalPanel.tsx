@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState } from "react"
-import { Play, Square, Terminal as TerminalIcon } from "lucide-react"
+import { Play, RotateCw, Square, Terminal as TerminalIcon } from "lucide-react"
 import type { FitAddon as FitAddonInstance } from "@xterm/addon-fit"
 import type { Terminal as XTermInstance } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
-import { request, requestJson } from "./api"
+import { request, requestJson, resolveCaptainUrl } from "./api"
 import { useI18n } from "./i18n/I18nContext"
+import { HARNESS_LABELS, terminalPromptStorageKey, type TerminalHarnessId } from "./terminal-mode"
 
 /** The runtime accepts 20–300 columns and 5–200 rows; a short drawer can measure less. */
 function terminalSize(cols: number, rows: number) {
   return { cols: Math.min(300, Math.max(20, Math.round(cols))), rows: Math.min(200, Math.max(5, Math.round(rows))) }
 }
 
-type TerminalStart = { id: string; shell: string; cwd: string; cols: number; rows: number }
-type TerminalOutput = { data: string; cursor: number; baseCursor: number; truncated: boolean; exited: boolean; exitCode: number | null; shell: string }
+type TerminalStart = { id: string; shell: string; cwd: string; cols: number; rows: number; harness?: TerminalHarnessId; reused?: boolean }
+type TerminalOutput = { data: string; cursor: number; baseCursor: number; truncated: boolean; exited: boolean; exitCode: number | null; shell: string; harness?: TerminalHarnessId }
 type TerminalStatus =
   | { kind: "not_started" }
   | { kind: "reconnecting" }
@@ -29,8 +30,14 @@ type TerminalPanelProps = {
   visible: boolean
   fontSize: number
   scrollback: number
-  /** Start a shell as soon as the terminal is ready instead of waiting for "Start terminal". */
+  /** Start a shell (or harness) as soon as the terminal is ready instead of waiting for "Start". */
   autoStart?: boolean
+  /** Optional interactive agent CLI harness to run instead of the system shell. */
+  harness?: TerminalHarnessId
+  /** Session ID used to reattach to a live harness PTY across tab switches. */
+  sessionId?: string
+  /** Fill the entire primary workspace pane (terminal mode). */
+  fullPane?: boolean
 }
 
 function terminalTheme() {
@@ -51,7 +58,18 @@ function terminalTheme() {
   }
 }
 
-export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontSize, scrollback, autoStart = false }: TerminalPanelProps) {
+export function TerminalPanel({
+  environmentId,
+  workspaceKey,
+  cwd,
+  visible,
+  fontSize,
+  scrollback,
+  autoStart = false,
+  harness,
+  sessionId,
+  fullPane = false,
+}: TerminalPanelProps) {
   const { t } = useI18n()
   const tRef = useRef(t)
   useEffect(() => {
@@ -64,14 +82,16 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
   const cursorRef = useRef(0)
   const exitedRef = useRef(false)
   const writeQueueRef = useRef<Promise<void>>(Promise.resolve())
-  const wakePollRef = useRef<(() => void) | null>(null)
   const fontSizeRef = useRef(fontSize)
   const scrollbackRef = useRef(scrollback)
+  const autoStartedRef = useRef(false)
   const [terminalReady, setTerminalReady] = useState(false)
   const [terminalId, setTerminalId] = useState<string | null>(null)
   const [status, setStatus] = useState<TerminalStatus>({ kind: "not_started" })
   const [error, setError] = useState("")
-  const storageKey = `ade-terminal-v1:${environmentId}:${workspaceKey}`
+  const storageKey = harness && sessionId
+    ? `ade-terminal-harness-v1:${environmentId}:${sessionId}:${harness}`
+    : `ade-terminal-v1:${environmentId}:${workspaceKey}`
 
   useEffect(() => {
     if (!visible || !hostRef.current) return
@@ -113,6 +133,8 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
         const savedId = localStorage.getItem(storageKey)
         if (savedId && !terminalIdRef.current) {
           terminalIdRef.current = savedId
+          cursorRef.current = 0
+          exitedRef.current = false
           setTerminalId(savedId)
           setStatus({ kind: "reconnecting" })
         }
@@ -122,7 +144,6 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
           if (!id || exitedRef.current) return
           writeQueueRef.current = writeQueueRef.current.then(async () => {
             await requestJson(`/api/terminals/${id}/input`, "POST", { data })
-            wakePollRef.current?.()
           }).catch(cause => {
             setError(cause instanceof Error ? cause.message : tRef.current("pnlx.term.errWrite"))
           })
@@ -168,109 +189,144 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
     try { fitRef.current?.fit() } catch { /* The terminal can be hidden while preferences change. */ }
   }, [fontSize, scrollback])
 
+  // Reset per-workspace terminal state when switching sessions/storage keys.
+  const prevStorageKeyRef = useRef(storageKey)
+  useEffect(() => {
+    if (prevStorageKeyRef.current === storageKey) return
+    prevStorageKeyRef.current = storageKey
+    terminalIdRef.current = null
+    cursorRef.current = 0
+    exitedRef.current = false
+    autoStartedRef.current = false
+    setTerminalId(null)
+    setStatus({ kind: "not_started" })
+    setError("")
+  }, [storageKey])
+
+  // Stream PTY output over SSE for low-latency interactive TUIs (falls back to single fetch when EventSource is absent).
   useEffect(() => {
     if (!visible || !terminalReady || !terminalId || !terminalRef.current) return
-    const ACTIVE_POLL_MS = 180
-    const MAX_IDLE_POLL_MS = 1000
     let active = true
-    let polling = false
-    let delayMs = ACTIVE_POLL_MS
-    let timer: ReturnType<typeof setTimeout> | null = null
-    let controller: AbortController | null = null
+    let source: EventSource | null = null
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let probeController: AbortController | null = null
 
-    const isHidden = () => typeof document !== "undefined" && document.visibilityState !== "visible"
-
-    const clearTimer = () => {
-      if (timer !== null) {
-        clearTimeout(timer)
-        timer = null
+    const closeStream = () => {
+      if (reconnectTimer !== null) {
+        clearTimeout(reconnectTimer)
+        reconnectTimer = null
+      }
+      if (source) {
+        source.close()
+        source = null
+      }
+      if (probeController) {
+        probeController.abort()
+        probeController = null
       }
     }
 
-    const schedule = (ms: number) => {
-      clearTimer()
-      if (!active || exitedRef.current || isHidden()) return
-      timer = setTimeout(() => { void poll() }, ms)
-    }
-
-    const poll = async () => {
-      if (!active || polling || exitedRef.current || isHidden()) return
-      polling = true
-      clearTimer()
-      const nextController = new AbortController()
-      controller = nextController
-      try {
-        const result = await request<TerminalOutput>(
-          `/api/terminals/${terminalId}/output?cursor=${cursorRef.current}`,
-          { signal: nextController.signal },
-        )
-        if (!active || nextController.signal.aborted) return
-        if (result.truncated) terminalRef.current?.write(tRef.current("pnlx.term.truncated"))
-        if (result.data) terminalRef.current?.write(result.data)
-        cursorRef.current = result.cursor
-        exitedRef.current = result.exited
-        setStatus(result.exited ? { kind: "exited", exitCode: result.exitCode } : { kind: "running", shell: result.shell })
-        delayMs = result.data ? ACTIVE_POLL_MS : Math.min(MAX_IDLE_POLL_MS, Math.round(delayMs * 1.5))
-      } catch (cause) {
-        if (!active || nextController.signal.aborted) return
-        const message = cause instanceof Error ? cause.message : tRef.current("pnlx.term.errLost")
-        if (/not found|already closed/i.test(message)) {
-          localStorage.removeItem(storageKey)
-          terminalIdRef.current = null
-          setTerminalId(null)
-          exitedRef.current = true
-          setStatus({ kind: "expired" })
-        } else {
-          setStatus({ kind: "interrupted" })
-          delayMs = MAX_IDLE_POLL_MS
-        }
-        setError(message)
-      } finally {
-        if (controller === nextController) controller = null
-        polling = false
-        if (active && !exitedRef.current && !isHidden()) {
-          schedule(delayMs)
-        }
-      }
-    }
-
-    const wake = () => {
-      if (!active || exitedRef.current || isHidden()) return
-      delayMs = ACTIVE_POLL_MS
-      if (!polling) {
-        schedule(40)
-      }
-    }
-    wakePollRef.current = wake
-
-    const onVisibilityChange = () => {
+    const applyOutput = (result: TerminalOutput) => {
       if (!active) return
-      if (isHidden()) {
-        clearTimer()
+      if (result.truncated) terminalRef.current?.write(tRef.current("pnlx.term.truncated"))
+      if (result.data) terminalRef.current?.write(result.data)
+      cursorRef.current = result.cursor
+      exitedRef.current = result.exited
+      setError("")
+      setStatus(result.exited ? { kind: "exited", exitCode: result.exitCode } : { kind: "running", shell: result.shell })
+    }
+
+    const handleExpired = (message: string) => {
+      localStorage.removeItem(storageKey)
+      terminalIdRef.current = null
+      setTerminalId(null)
+      exitedRef.current = true
+      setStatus({ kind: "expired" })
+      if (!harness) setError(message)
+    }
+
+    const connect = () => {
+      if (!active || exitedRef.current) return
+      if (typeof EventSource === "undefined") {
+        // Fallback for non-browser test environments without EventSource.
+        const controller = new AbortController()
+        probeController = controller
+        void request<TerminalOutput>(`/api/terminals/${terminalId}/output?cursor=${cursorRef.current}`, { signal: controller.signal })
+          .then(applyOutput)
+          .catch(cause => {
+            if (!active || controller.signal.aborted) return
+            const message = cause instanceof Error ? cause.message : tRef.current("pnlx.term.errLost")
+            if (/not found|already closed/i.test(message)) handleExpired(message)
+            else { setStatus({ kind: "interrupted" }); setError(message) }
+          })
         return
       }
-      delayMs = ACTIVE_POLL_MS
-      void poll()
+
+      const url = resolveCaptainUrl(`/api/terminals/${terminalId}/stream?cursor=${cursorRef.current}`)
+      const nextSource = new EventSource(url)
+      source = nextSource
+
+      nextSource.addEventListener("output", (event: MessageEvent) => {
+        if (!active || source !== nextSource) return
+        try {
+          const parsed = JSON.parse(String(event.data)) as TerminalOutput
+          applyOutput(parsed)
+        } catch {
+          // Ignore malformed SSE frames.
+        }
+      })
+
+      nextSource.addEventListener("exit", (event: MessageEvent) => {
+        if (!active || source !== nextSource) return
+        try {
+          const parsed = JSON.parse(String(event.data)) as { exitCode: number | null; cursor?: number }
+          if (typeof parsed.cursor === "number") cursorRef.current = parsed.cursor
+          exitedRef.current = true
+          setStatus({ kind: "exited", exitCode: parsed.exitCode ?? null })
+        } catch {
+          exitedRef.current = true
+          setStatus({ kind: "exited", exitCode: null })
+        }
+        nextSource.close()
+        if (source === nextSource) source = null
+      })
+
+      nextSource.onerror = () => {
+        if (!active || source !== nextSource || exitedRef.current) return
+        nextSource.close()
+        source = null
+        // Probe once to distinguish an expired/closed terminal (404) from a transient disconnect.
+        const controller = new AbortController()
+        probeController = controller
+        void request<TerminalOutput>(`/api/terminals/${terminalId}/output?cursor=${cursorRef.current}`, { signal: controller.signal })
+          .then(result => {
+            if (!active || controller.signal.aborted) return
+            applyOutput(result)
+            if (!result.exited) {
+              reconnectTimer = setTimeout(() => { reconnectTimer = null; connect() }, 500)
+            }
+          })
+          .catch(cause => {
+            if (!active || controller.signal.aborted) return
+            const message = cause instanceof Error ? cause.message : tRef.current("pnlx.term.errLost")
+            if (/not found|already closed/i.test(message)) {
+              handleExpired(message)
+            } else {
+              setStatus({ kind: "interrupted" })
+              setError(message)
+              reconnectTimer = setTimeout(() => { reconnectTimer = null; connect() }, 1500)
+            }
+          })
+      }
     }
 
-    if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", onVisibilityChange)
-    }
-
-    if (!isHidden()) {
-      void poll()
-    }
+    connect()
 
     return () => {
       active = false
-      if (wakePollRef.current === wake) wakePollRef.current = null
-      clearTimer()
-      controller?.abort()
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", onVisibilityChange)
-      }
+      closeStream()
     }
-  }, [visible, terminalReady, terminalId, storageKey])
+  }, [visible, terminalReady, terminalId, storageKey, harness])
 
   async function start() {
     if (!cwd || terminalId || !visible || !terminalReady || !terminalRef.current) return
@@ -279,7 +335,22 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
     try {
       try { fitRef.current?.fit() } catch { /* Use the terminal's default size before first layout. */ }
       const terminal = terminalRef.current
-      const result = await requestJson<TerminalStart>("/api/terminals", "POST", { cwd, ...terminalSize(terminal?.cols ?? 80, terminal?.rows ?? 24) })
+      let initialPrompt: string | undefined
+      if (harness && sessionId) {
+        const promptKey = terminalPromptStorageKey(sessionId)
+        const stored = sessionStorage.getItem(promptKey)
+        if (stored?.trim()) {
+          initialPrompt = stored.trim()
+          sessionStorage.removeItem(promptKey)
+        }
+      }
+      const result = await requestJson<TerminalStart>("/api/terminals", "POST", {
+        cwd,
+        ...terminalSize(terminal?.cols ?? 80, terminal?.rows ?? 24),
+        ...(harness ? { harness } : {}),
+        ...(sessionId ? { sessionId } : {}),
+        ...(initialPrompt ? { initialPrompt } : {}),
+      })
       terminalIdRef.current = result.id
       cursorRef.current = 0
       exitedRef.current = false
@@ -294,7 +365,6 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
   }
 
   // Auto-start once per mount when enabled and nothing is running for this workspace yet.
-  const autoStartedRef = useRef(false)
   useEffect(() => {
     if (!autoStart || autoStartedRef.current || !terminalReady || terminalId || !cwd || !visible) return
     autoStartedRef.current = true
@@ -320,6 +390,11 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
     terminalRef.current?.reset()
   }
 
+  async function restart() {
+    await close()
+    autoStartedRef.current = false
+  }
+
   const statusText = status.kind === "not_started" ? t("pnlx.term.notStarted")
     : status.kind === "reconnecting" ? t("pnlx.term.reconnecting")
     : status.kind === "starting" ? t("pnlx.term.starting")
@@ -328,13 +403,24 @@ export function TerminalPanel({ environmentId, workspaceKey, cwd, visible, fontS
     : status.kind === "expired" ? t("pnlx.term.expired")
     : t("pnlx.term.interrupted")
   const isDocker = status.kind === "running" && status.shell === "docker"
+  const harnessLabel = harness ? HARNESS_LABELS[harness] : null
 
-  return <div className={`terminal-workbench${visible ? " visible" : ""}`} aria-label={t("pnlx.term.ariaWorkbench")}>
+  return <div className={`terminal-workbench${visible ? " visible" : ""}${fullPane ? " is-full-pane" : ""}`} aria-label={t("pnlx.term.ariaWorkbench")}>
     <div className="terminal-toolbar">
-      <div className="terminal-location"><TerminalIcon size={14} /><span title={cwd || t("pnlx.term.noWorkspace")}>{cwd || t("pnlx.term.noWorkspace")}</span><small>{statusText}</small></div>
-      <div className="terminal-actions">{terminalId
-        ? <button type="button" className="quiet-button" onClick={() => void close()}><Square size={13} /> {t("pnlx.term.close")}</button>
-        : <button type="button" className="quiet-button" disabled={!cwd || !visible || !terminalReady} onClick={() => void start()}><Play size={13} /> {t("pnlx.term.start")}</button>}</div>
+      <div className="terminal-location">
+        <TerminalIcon size={14} />
+        {harnessLabel ? <span className="ade-pill">{harnessLabel}</span> : null}
+        <span title={cwd || t("pnlx.term.noWorkspace")}>{cwd || t("pnlx.term.noWorkspace")}</span>
+        <small>{statusText}</small>
+      </div>
+      <div className="terminal-actions">
+        {terminalId && status.kind === "exited" ? (
+          <button type="button" className="quiet-button" onClick={() => void restart()}><RotateCw size={13} /> Restart</button>
+        ) : null}
+        {terminalId
+          ? <button type="button" className="quiet-button" onClick={() => void close()}><Square size={13} /> {t("pnlx.term.close")}</button>
+          : <button type="button" className="quiet-button" disabled={!cwd || !visible || !terminalReady} onClick={() => void start()}><Play size={13} /> {harnessLabel ? `Start ${harnessLabel}` : t("pnlx.term.start")}</button>}
+      </div>
     </div>
     {!cwd && <p className="terminal-empty">{t("pnlx.term.empty")}</p>}
     {error && <p className="terminal-error" role="alert">{error}</p>}

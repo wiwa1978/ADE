@@ -13,28 +13,32 @@ export function ConversationLayout({
   footer,
   containerRef,
   primaryWidth = "100%",
+  fullCanvas = false,
 }: {
   header: ReactNode
   children: ReactNode
   aboveComposer?: ReactNode
-  composer: ReactNode
+  composer?: ReactNode
   beside?: ReactNode
   footer?: ReactNode
   containerRef?: RefObject<HTMLDivElement | null>
   primaryWidth?: string
+  fullCanvas?: boolean
 }) {
   return (
     <div className="ade-workspace-shell">
       {header}
       <div className="ade-split-container" ref={containerRef}>
         <section className="ade-pane ade-pane-primary" style={{ width: primaryWidth }}>
-          <div className="ade-pane-scroll ade-lead-scroll">
+          <div className={fullCanvas ? "ade-pane-fill" : "ade-pane-scroll ade-lead-scroll"}>
             {children}
           </div>
-          <div className="ade-composer-anchor">
-            {aboveComposer}
-            {composer}
-          </div>
+          {aboveComposer || composer ? (
+            <div className="ade-composer-anchor">
+              {aboveComposer}
+              {composer}
+            </div>
+          ) : null}
         </section>
         {beside}
       </div>

@@ -477,8 +477,9 @@ export function registerAgentWorkflowRoutes(
 	router.post("/api/sessions/:id/engine", async (ctx) => {
 		const input = validateSessionEngine(await ctx.readBody());
 		if (!host.getWorkspacePath(ctx.params.id)) {
-			throw conflict("Claude Code and Codex need a session with a workspace (its own branch or the project folder).");
+			throw conflict("External agents need a session with a workspace (its own branch or the project folder).");
 		}
-		ctx.json(200, { engine: engines.setEngine(ctx.params.id, input.engine)?.engine ?? "pi" });
+		const saved = engines.setEngine(ctx.params.id, input.engine, null, input.interactionMode);
+		ctx.json(200, { engine: saved?.engine ?? "pi", interactionMode: saved?.interactionMode ?? "chat" });
 	}, { originError: "Use ADE to choose the agent." });
 }

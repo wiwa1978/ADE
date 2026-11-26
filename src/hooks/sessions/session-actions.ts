@@ -1,9 +1,12 @@
+import { harnessEntry, harnessLabel, type SessionEngineId } from "@ade/protocol"
 import { request } from "../../api"
 import type { Conversation, GitHubIssue, StartFrom, TaskStart } from "../../app-types"
 import { clearPendingStart, pendingStarts, storePendingStart } from "../../pending-task-starts"
 import type { Project } from "../../ProjectsView"
+import { terminalPromptStorageKey } from "../../terminal-mode"
 
 export type SessionAttachment = { id: string; name: string; content: string }
+export type { SessionEngineId }
 
 export type StartNewSessionInput = {
   projectId: string | null
@@ -11,12 +14,13 @@ export type StartNewSessionInput = {
   repository: string
   prompt: string
   githubIssue?: GitHubIssue
-  engine?: "pi" | "claude-code" | "codex"
+  engine?: SessionEngineId
+  interactionMode?: "chat" | "terminal"
   startFrom?: StartFrom
   /** Session name when there is no prompt to name it after (e.g. "PR #12: Fix login"). */
   title?: string
   /** Best of N: one agent per attempt; each gets its own worktree and the same task. */
-  attempts?: Array<"pi" | "claude-code" | "codex">
+  attempts?: SessionEngineId[]
   runOn?: "local" | "docker" | "wsl" | "ssh" | "boat"
   blueprintId?: string
 }
@@ -118,7 +122,7 @@ export async function postSessionMessageApi(params: {
 
 export async function createCodingTaskApi(params: {
   input: StartNewSessionInput
-  engine: "pi" | "claude-code" | "codex" | undefined
+  engine: SessionEngineId | undefined
   title: string
   attemptGroup?: string
   environmentId: string
@@ -130,6 +134,8 @@ export async function createCodingTaskApi(params: {
 }) {
   const { input, engine, title, attemptGroup, environmentId, modelReady, provider, model, reasoning, onAsyncMessageError } = params
   const external = Boolean(engine && engine !== "pi" && input.kind !== "none")
+  const terminalOnly = Boolean(engine && engine !== "pi" && !harnessEntry(engine).modes.includes("chat"))
+  const interactionMode: "chat" | "terminal" = external && (input.interactionMode === "terminal" || terminalOnly) ? "terminal" : "chat"
   const taskId = crypto.randomUUID()
   const start: TaskStart = {
     id: taskId,
@@ -167,9 +173,13 @@ export async function createCodingTaskApi(params: {
       await request(`/api/sessions/${encodeURIComponent(taskId)}/engine`, {
         method: "POST",
         headers: JSON_HEADERS,
-        body: JSON.stringify({ engine }),
+        body: JSON.stringify({ engine, interactionMode }),
       })
-      if (input.prompt.trim()) {
+      if (interactionMode === "terminal") {
+        if (input.prompt.trim() && typeof sessionStorage !== "undefined") {
+          sessionStorage.setItem(terminalPromptStorageKey(res.session.id), input.prompt.trim())
+        }
+      } else if (input.prompt.trim()) {
         // Don't wait for the agent's turn; several attempts run at the same time.
         void request(`/api/coding-tasks/${encodeURIComponent(taskId)}/messages`, {
           method: "POST",
@@ -198,13 +208,16 @@ export async function startSessionOrAttemptsApi(params: {
   | { kind: "single"; id: string; waitingForModel: boolean }
 > {
   const { input, environmentId, modelReady, provider, model, reasoning, onAsyncMessageError } = params
-  const baseTitle = (input.title || input.prompt).replace(/\s+/g, " ").trim().slice(0, 72) || "New session"
-  const attempts = input.attempts && input.attempts.length > 1 && input.kind === "worktree" && !input.startFrom
+  const fallbackTitle = input.interactionMode === "terminal" && input.engine && input.engine !== "pi"
+    ? `${harnessLabel(input.engine)} terminal`
+    : "New session"
+  const baseTitle = (input.title || input.prompt).replace(/\s+/g, " ").trim().slice(0, 72) || fallbackTitle
+  const attempts = input.attempts && input.attempts.length > 1 && input.kind === "worktree" && !input.startFrom && input.interactionMode !== "terminal"
     ? input.attempts.slice(0, 4)
     : null
   const attemptGroup = attempts ? crypto.randomUUID() : undefined
 
-  const createOne = (engine: "pi" | "claude-code" | "codex" | undefined, title: string) =>
+  const createOne = (engine: SessionEngineId | undefined, title: string) =>
     createCodingTaskApi({
       input, engine, title, attemptGroup, environmentId, modelReady, provider, model, reasoning, onAsyncMessageError,
     })

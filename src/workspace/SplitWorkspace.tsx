@@ -9,7 +9,9 @@ import { ComposerDock } from "../composer/ComposerDock"
 import { request } from "../api"
 import type { RunStatus } from "../panels/RunPanel"
 import { getRestoreConfirmOptions, restoreCheckpoint, type CheckpointInfo } from "../panels/checkpoint-actions"
+import { harnessLabel } from "@ade/protocol"
 import { WorkspaceHeaderBar } from "./WorkspaceHeaderBar"
+import { TerminalPanel } from "../TerminalPanel"
 import { useSessionStages } from "../blueprints/session-stages"
 import { BesidePane } from "./BesidePane"
 import { ConversationLayout } from "./ConversationLayout"
@@ -45,6 +47,7 @@ export function SplitWorkspace(props: SplitWorkspaceProps) {
   const hasWorkspace = Boolean(session.workspace?.path && session.workspace.status === "ready")
   const workspacePath = session.workspace?.path ?? null
   const terminalCwd = workspacePath ?? "~"
+  const isTerminalSession = session.interactionMode === "terminal" && Boolean(session.engine)
   const isBusy = session.status === "working" || Boolean(timeline?.busy)
   const blueprint = session.blueprint ?? null
   const { stages, setStages } = useSessionStages(hasWorkspace ? session.id : null, `${JSON.stringify(blueprint)}:${session.status}`)
@@ -202,6 +205,7 @@ export function SplitWorkspace(props: SplitWorkspaceProps) {
     <ConversationLayout
       containerRef={split.containerRef}
       primaryWidth={showBeside ? `${split.splitRatio}%` : "100%"}
+      fullCanvas={isTerminalSession}
       header={
         <WorkspaceHeaderBar
           session={session} isBusy={isBusy} approvals={approvals} runStatus={hasWorkspace ? runStatus : null}
@@ -210,7 +214,7 @@ export function SplitWorkspace(props: SplitWorkspaceProps) {
           timeline={timeline} onOpenCapabilitiesSettings={onOpenSettings}
         />
       }
-      aboveComposer={simple ? (
+      aboveComposer={isTerminalSession ? undefined : simple ? (
         <CaptainStatusLine
           sessionId={session.id}
           busy={isBusy}
@@ -230,7 +234,7 @@ export function SplitWorkspace(props: SplitWorkspaceProps) {
           usage={timeline?.usage} onOpenProgress={beside.openProgress}
         />
       )}
-      composer={
+      composer={isTerminalSession ? undefined : (
         <ComposerDock
           draft={draft} onDraftChange={onDraftChange} busy={isBusy} modelCatalog={modelCatalog}
           selectedProvider={selectedProvider} selectedModel={selectedModel} onSelectModel={onSelectModel}
@@ -251,10 +255,10 @@ export function SplitWorkspace(props: SplitWorkspaceProps) {
             else if (panel === "pr") beside.openPullRequest()
           }}
           textareaRef={textareaRef} sendChord={keybindings.sendMessage} newLineChord={keybindings.newLine}
-          engineLabel={session.engine === "claude-code" ? "Claude Code" : session.engine === "codex" ? "Codex" : undefined}
+          engineLabel={session.engine ? harnessLabel(session.engine) : undefined}
           sessionId={session.id}
         />
-      }
+      )}
       beside={
         showBeside && beside.activeBesideTab ? (
           <>
@@ -297,19 +301,35 @@ export function SplitWorkspace(props: SplitWorkspaceProps) {
         />
       }
     >
-      <TimelineView
-        timeline={timeline} fallbackMessages={session.messages} approvals={approvals} subagents={subagents}
-        busy={isBusy} workspacePath={workspacePath} emptyTitle={session.label}
-        emptySubtitle={hasWorkspace
-          ? `The agent works on ${session.workspace?.branch ? `branch ${session.workspace.branch}` : "the project folder"}. Describe a task below. Review its work in Changes, run it with Run or Terminal, and ship it from Pull request.`
-          : session.workspace?.removed
-            ? "This session was archived and its worktree removed. Restore it from Archived in the sidebar to continue."
-            : "Ask anything, plan work with /plan, or preview web pages in the built-in browser."}
-        onResolveApproval={onResolveApproval} onOpenFile={hasWorkspace ? beside.openFile : undefined}
-        onOpenSubagent={beside.openSubagent} onOpenBrowser={beside.openBrowser}
-        onOpenExternalBrowser={onOpenExternalBrowser} onOpenArtifact={beside.openArtifact}
-        onRewind={hasWorkspace ? content => void rewindTo(content) : undefined}
-      />
+      {isTerminalSession && session.engine ? (
+        <TerminalPanel
+          key={session.id}
+          environmentId={environmentId}
+          workspaceKey={`harness:${session.id}`}
+          sessionId={session.id}
+          harness={session.engine}
+          cwd={terminalCwd}
+          visible
+          autoStart
+          fullPane
+          fontSize={terminalFontSize}
+          scrollback={terminalScrollback}
+        />
+      ) : (
+        <TimelineView
+          timeline={timeline} fallbackMessages={session.messages} approvals={approvals} subagents={subagents}
+          busy={isBusy} workspacePath={workspacePath} emptyTitle={session.label}
+          emptySubtitle={hasWorkspace
+            ? `The agent works on ${session.workspace?.branch ? `branch ${session.workspace.branch}` : "the project folder"}. Describe a task below. Review its work in Changes, run it with Run or Terminal, and ship it from Pull request.`
+            : session.workspace?.removed
+              ? "This session was archived and its worktree removed. Restore it from Archived in the sidebar to continue."
+              : "Ask anything, plan work with /plan, or preview web pages in the built-in browser."}
+          onResolveApproval={onResolveApproval} onOpenFile={hasWorkspace ? beside.openFile : undefined}
+          onOpenSubagent={beside.openSubagent} onOpenBrowser={beside.openBrowser}
+          onOpenExternalBrowser={onOpenExternalBrowser} onOpenArtifact={beside.openArtifact}
+          onRewind={hasWorkspace ? content => void rewindTo(content) : undefined}
+        />
+      )}
     </ConversationLayout>
   )
 }

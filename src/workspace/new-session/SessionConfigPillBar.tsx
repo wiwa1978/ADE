@@ -1,7 +1,7 @@
 import { useRef, useState } from "react"
 import {
-  Check, ChevronDown, Cpu, FolderGit2, FolderOpen, FolderPlus,
-  GitBranch, Layers, Link2, Lock, MessageSquare, Workflow,
+  Bot, Check, ChevronDown, Cpu, FolderGit2, FolderOpen, FolderPlus,
+  GitBranch, Layers, Link2, Lock, MessageSquare, Terminal, Workflow,
 } from "lucide-react"
 import { SearchInput, useClickOutside, useEscapeKey } from "../../../components/ui/index.ts"
 import type { GitHubIssue, TaskStart } from "../../app-types"
@@ -9,13 +9,17 @@ import type { Project } from "../../ProjectsView"
 import { shortBlueprintName, stagesLine, VIBE_ID, type BlueprintOption } from "../../blueprints/blueprint-options"
 import { useI18n } from "../../i18n/I18nContext"
 import { runTargetDescriptions, targetLabel, targetUnavailable, type RunTarget, type RunTargetsInfo, type TargetSettings } from "../../run-targets"
-import { WORKSPACE_OPTIONS, type OpenMenu } from "./useNewSessionForm"
+import { WORKSPACE_OPTIONS, type EngineId, type EngineOption, type InteractionMode, type OpenMenu } from "./useNewSessionForm"
 
 interface SessionConfigPillBarProps {
   unarchivedProjects: Project[]
   selectedProjectId: string | null
   activeProject: Project | null
   kind: TaskStart["kind"]
+  engine: EngineId
+  interactionMode: InteractionMode
+  engineOptions: EngineOption[]
+  activeEngineOption: EngineOption
   effectiveBlueprint: string
   projectBlueprint: string
   blueprintLocked: boolean
@@ -29,6 +33,8 @@ interface SessionConfigPillBarProps {
   linkedIssue: GitHubIssue | null
   onSelectProject: (id: string | null) => void
   onSelectKind: (kind: TaskStart["kind"]) => void
+  onSelectEngine: (engine: EngineId) => void
+  onSelectMode: (mode: InteractionMode) => void
   onSelectBlueprint: (id: string) => void
   onSelectRunOn: (target: RunTarget) => void
   onSelectAttemptCount: (count: number) => void
@@ -38,9 +44,10 @@ interface SessionConfigPillBarProps {
 
 export function SessionConfigPillBar({
   unarchivedProjects, selectedProjectId, activeProject, kind,
+  engine, interactionMode, engineOptions, activeEngineOption,
   effectiveBlueprint, projectBlueprint, blueprintLocked, effectiveBlueprintOption, blueprintOptions,
   effectiveRunOn, runTargets, projectRunOn, canAttempt, attemptCount, linkedIssue,
-  onSelectProject, onSelectKind, onSelectBlueprint, onSelectRunOn, onSelectAttemptCount,
+  onSelectProject, onSelectKind, onSelectEngine, onSelectMode, onSelectBlueprint, onSelectRunOn, onSelectAttemptCount,
   onAddProject, onToggleIssueOpen,
 }: SessionConfigPillBarProps) {
   const { t } = useI18n()
@@ -143,6 +150,93 @@ export function SessionConfigPillBar({
       </div>
 
       {kind !== "none" ? (
+        <div className="ade-ns-menu-anchor">
+          <button
+            type="button"
+            className={`ade-ns-pill ${openMenu === "mode" ? "is-open" : ""}`}
+            aria-haspopup="listbox"
+            aria-expanded={openMenu === "mode"}
+            onClick={() => setOpenMenu(m => (m === "mode" ? null : "mode"))}
+          >
+            {interactionMode === "terminal" ? <Terminal className="size-3.5 opacity-70" /> : <MessageSquare className="size-3.5 opacity-70" />}
+            <span>{interactionMode === "terminal" ? "Terminal mode" : "Chat mode"}</span>
+            <ChevronDown className="size-3 opacity-55" />
+          </button>
+          {openMenu === "mode" ? (
+            <div className="ade-ns-popover ade-ns-popover-up !w-[280px]" role="dialog" aria-label="Interaction mode">
+              <div className="ade-ns-popover-list">
+                <button
+                  type="button"
+                  className={`ade-ns-popover-item ${interactionMode === "chat" ? "is-selected" : ""}`}
+                  onClick={() => { onSelectMode("chat"); setOpenMenu(null) }}
+                >
+                  <span className="flex-1 min-w-0">
+                    <span className="block font-medium">Chat mode</span>
+                    <span className="block text-[11px] opacity-60 leading-snug">ADE timeline UI with structured tool cards, checkpoints, and blueprints.</span>
+                  </span>
+                  {interactionMode === "chat" ? <Check className="size-3.5 text-[rgb(var(--primary))] shrink-0" /> : null}
+                </button>
+                <button
+                  type="button"
+                  className={`ade-ns-popover-item ${interactionMode === "terminal" ? "is-selected" : ""}`}
+                  onClick={() => { onSelectMode("terminal"); setOpenMenu(null) }}
+                >
+                  <span className="flex-1 min-w-0">
+                    <span className="block font-medium">Terminal mode</span>
+                    <span className="block text-[11px] opacity-60 leading-snug">Run Claude Code, Codex, Copilot, Pi, OpenCode, Gemini, and more in their native TUI.</span>
+                  </span>
+                  {interactionMode === "terminal" ? <Check className="size-3.5 text-[rgb(var(--primary))] shrink-0" /> : null}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {kind !== "none" ? (
+        <div className="ade-ns-menu-anchor">
+          <button
+            type="button"
+            className={`ade-ns-pill ${openMenu === "agent" ? "is-open" : ""}`}
+            aria-haspopup="listbox"
+            aria-expanded={openMenu === "agent"}
+            onClick={() => setOpenMenu(m => (m === "agent" ? null : "agent"))}
+          >
+            <Bot className="size-3.5 opacity-70" />
+            <span>{activeEngineOption.name}</span>
+            <ChevronDown className="size-3 opacity-55" />
+          </button>
+          {openMenu === "agent" ? (
+            <div className="ade-ns-popover ade-ns-popover-up !w-[300px]" role="dialog" aria-label="Agent">
+              <div className="ade-ns-popover-list">
+                {[...engineOptions]
+                  .filter(opt => interactionMode === "terminal" ? opt.modes.includes("terminal") : true)
+                  .sort((a, b) => Number(b.available) - Number(a.available))
+                  .map(opt => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      className={`ade-ns-popover-item ${engine === opt.id ? "is-selected" : ""}`}
+                      onClick={() => { onSelectEngine(opt.id); setOpenMenu(null) }}
+                    >
+                      <span className="flex-1 min-w-0">
+                        <span className="block font-medium">
+                          {opt.name}
+                          {!opt.available ? <span className="opacity-55 font-normal"> (CLI not found)</span> : null}
+                          {!opt.modes.includes("chat") ? <span className="opacity-55 font-normal"> · Terminal</span> : null}
+                        </span>
+                        <span className="block text-[11px] opacity-60 leading-snug">{opt.description}</span>
+                      </span>
+                      {engine === opt.id ? <Check className="size-3.5 text-[rgb(var(--primary))] shrink-0" /> : null}
+                    </button>
+                  ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {kind !== "none" && interactionMode !== "terminal" ? (
         <div className="ade-ns-menu-anchor">
           <button
             type="button"

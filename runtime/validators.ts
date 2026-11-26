@@ -112,6 +112,9 @@ export function validateTerminalCreate(body: Record<string, unknown>) {
 		cwd: parsed.cwd ?? parsed.workspace,
 		cols: parsed.cols,
 		rows: parsed.rows,
+		harness: parsed.harness,
+		sessionId: parsed.sessionId,
+		initialPrompt: parsed.initialPrompt,
 	};
 }
 

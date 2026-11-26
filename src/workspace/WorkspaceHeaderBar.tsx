@@ -1,5 +1,6 @@
+import { harnessLabel } from "@ade/protocol"
 import { clock, useSessionHold } from "../subagents/session-hold"
-import { ExternalLink, GitBranch } from "lucide-react"
+import { ExternalLink, GitBranch, Terminal } from "lucide-react"
 import type {
   BrowserState,
   Conversation,
@@ -106,6 +107,11 @@ export function WorkspaceHeaderBar({
         {runStatus?.check === "running" ? <button type="button" className="ade-row-tag is-running" onClick={onOpenRun}>{t("workspace.checking")}</button>
           : runStatus?.check === "failed" ? <button type="button" className="ade-row-tag is-failed" onClick={onOpenRun}>{t("workspace.checkFailed")}</button>
             : runStatus?.check === "succeeded" ? <button type="button" className="ade-row-tag is-ok" onClick={onOpenRun}>{t("workspace.checkPassed")}</button> : null}
+        {session.interactionMode === "terminal" && session.engine ? (
+          <span className="ade-pill">
+            <Terminal className="size-3" /> {harnessLabel(session.engine)}
+          </span>
+        ) : null}
         {session.workspace?.branch ? (
           <span className="ade-pill ade-mono"><GitBranch className="size-3" /> {session.workspace.branch}</span>
         ) : null}

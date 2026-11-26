@@ -6,6 +6,9 @@ import { randomUUID } from "node:crypto";
 import { httpError } from "./http-error.ts";
 import { secretEnv } from "./project-secrets.ts";
 import { terminalInvocation } from "./execution-targets.ts";
+import { HARNESS_CATALOG, TerminalHarnessSchema, type TerminalHarness } from "@ade/protocol";
+
+export type { TerminalHarness };
 
 const MAX_INPUT_BYTES = 8_192;
 const MAX_OUTPUT_CHARACTERS = 500_000;
@@ -13,10 +16,38 @@ const MAX_ACTIVE_TERMINALS = 8;
 const MAX_EXITED_TERMINALS = 20;
 const EXITED_TERMINAL_TTL_MS = 10 * 60_000;
 
+export type TerminalStreamEvent =
+	| {
+		type: "output";
+		id: string;
+		cwd: string;
+		shell: string;
+		harness?: TerminalHarness;
+		data: string;
+		cursor: number;
+		baseCursor: number;
+		truncated: boolean;
+		exited: boolean;
+		exitCode: number | null;
+	}
+	| {
+		type: "exit";
+		id: string;
+		shell: string;
+		harness?: TerminalHarness;
+		cursor: number;
+		exited: true;
+		exitCode: number | null;
+	};
+
+type TerminalListener = (event: TerminalStreamEvent) => void;
+
 type TerminalRecord = {
 	id: string;
 	pty: IPty;
 	shell: string;
+	harness?: TerminalHarness;
+	sessionId?: string;
 	cwd: string;
 	chunks: string[];
 	outputLength: number;
@@ -24,7 +55,32 @@ type TerminalRecord = {
 	exited: boolean;
 	exitCode: number | null;
 	exitedAt: number | null;
+	listeners: Set<TerminalListener>;
 };
+
+const HARNESS_PROMPT_ARGS: Partial<Record<TerminalHarness, (prompt: string) => string[]>> = {
+	copilot: prompt => ["-i", prompt],
+	gemini: prompt => ["-i", prompt],
+	opencode: prompt => ["--prompt", prompt],
+};
+
+const HARNESS_COMMANDS: Record<TerminalHarness, { command: string; label: string; promptArgs: (prompt: string) => string[] }> = Object.fromEntries(
+	HARNESS_CATALOG.map(entry => [
+		entry.id,
+		{
+			command: entry.command,
+			label: entry.name,
+			promptArgs: HARNESS_PROMPT_ARGS[entry.id] ?? (prompt => [prompt]),
+		},
+	]),
+) as Record<TerminalHarness, { command: string; label: string; promptArgs: (prompt: string) => string[] }>;
+
+function parseHarness(value: unknown): TerminalHarness | undefined {
+	if (value === undefined || value === null || value === "") return undefined;
+	const parsed = TerminalHarnessSchema.safeParse(value);
+	if (parsed.success) return parsed.data;
+	throw inputError("Unsupported terminal harness.");
+}
 
 function inputError(message: string, statusCode = 400) {
 	return httpError(statusCode, message);
@@ -78,8 +134,24 @@ export class TerminalManager {
 		}
 	}
 
-	create(input: { cwd?: unknown; cols?: unknown; rows?: unknown } | null | undefined) {
+	create(input: { cwd?: unknown; cols?: unknown; rows?: unknown; harness?: unknown; sessionId?: unknown; initialPrompt?: unknown } | null | undefined) {
 		this.#pruneExited();
+		const harness = parseHarness(input?.harness);
+		const sessionId = typeof input?.sessionId === "string" && input.sessionId.trim() ? input.sessionId.trim() : undefined;
+		const initialPrompt = typeof input?.initialPrompt === "string" && input.initialPrompt.trim() ? input.initialPrompt.trim() : undefined;
+		const cols = integerInRange(input?.cols, 20, 300, 80, "Terminal columns");
+		const rows = integerInRange(input?.rows, 5, 200, 24, "Terminal rows");
+
+		// Reattach to an existing live harness terminal for this session instead of spawning a duplicate.
+		if (sessionId && harness) {
+			for (const existing of this.#terminals.values()) {
+				if (existing.sessionId === sessionId && existing.harness === harness && !existing.exited) {
+					try { existing.pty.resize(cols, rows); } catch { /* Resize is best-effort on reattach. */ }
+					return { id: existing.id, shell: existing.shell, cwd: existing.cwd, cols, rows, harness: existing.harness, sessionId: existing.sessionId, reused: true };
+				}
+			}
+		}
+
 		if ([...this.#terminals.values()].filter(terminal => !terminal.exited).length >= MAX_ACTIVE_TERMINALS) {
 			throw inputError(`Close an existing terminal before starting another (limit ${MAX_ACTIVE_TERMINALS}).`, 429);
 		}
@@ -94,26 +166,36 @@ export class TerminalManager {
 		} catch {
 			throw inputError("The terminal workspace directory is unavailable.", 404);
 		}
-		const cols = integerInRange(input?.cols, 20, 300, 80, "Terminal columns");
-		const rows = integerInRange(input?.rows, 5, 200, 24, "Terminal rows");
 		const secrets = secretEnv(cwd);
-		// A terminal in a Docker session's workspace opens a shell inside its container.
-		const docker = terminalInvocation(cwd, [...Object.keys(secrets), "TERM", "COLORTERM"]);
-		const shell = docker?.file ?? terminalShell(this.#environment);
+		const harnessSpec = harness ? HARNESS_COMMANDS[harness] : null;
+		// A plain shell terminal in a Docker session's workspace opens a shell inside its container.
+		const docker = harnessSpec ? null : terminalInvocation(cwd, [...Object.keys(secrets), "TERM", "COLORTERM"]);
+		const file = harnessSpec ? harnessSpec.command : (docker?.file ?? terminalShell(this.#environment));
+		const args = harnessSpec
+			? (initialPrompt ? harnessSpec.promptArgs(initialPrompt) : [])
+			: (docker?.args ?? []);
 		let pty: IPty;
 		try {
-			pty = this.#spawn(shell, docker?.args ?? [], {
+			pty = this.#spawn(file, args, {
 				name: "xterm-256color", cols, rows, cwd,
 				env: { ...this.#environment, ...secrets, TERM: "xterm-256color", COLORTERM: "truecolor", ...docker?.env } as Record<string, string>,
 			});
 		} catch {
-			throw inputError("Could not start the system shell for this workspace.", 503);
+			throw inputError(
+				harnessSpec
+					? `Could not start ${harnessSpec.label} (${harnessSpec.command}). Make sure it is installed and on your PATH.`
+					: "Could not start the system shell for this workspace.",
+				503,
+			);
 		}
 		const id = randomUUID();
+		const shellLabel = harnessSpec ? harnessSpec.label : basename(file);
 		const terminal: TerminalRecord = {
 			id,
 			pty,
-			shell: basename(shell),
+			shell: shellLabel,
+			harness,
+			sessionId,
 			cwd,
 			chunks: [],
 			outputLength: 0,
@@ -121,6 +203,7 @@ export class TerminalManager {
 			exited: false,
 			exitCode: null,
 			exitedAt: null,
+			listeners: new Set(),
 		};
 		pty.onData(data => {
 			if (!data) return;
@@ -139,15 +222,48 @@ export class TerminalManager {
 					terminal.baseCursor += excess;
 				}
 			}
+			if (terminal.listeners.size > 0) {
+				const event: TerminalStreamEvent = {
+					type: "output",
+					id,
+					cwd: terminal.cwd,
+					shell: terminal.shell,
+					...(terminal.harness ? { harness: terminal.harness } : {}),
+					data,
+					cursor: terminal.baseCursor + terminal.outputLength,
+					baseCursor: terminal.baseCursor,
+					truncated: false,
+					exited: false,
+					exitCode: null,
+				};
+				for (const listener of [...terminal.listeners]) {
+					try { listener(event); } catch { terminal.listeners.delete(listener); }
+				}
+			}
 		});
 		pty.onExit(event => {
 			terminal.exited = true;
 			terminal.exitCode = Number.isInteger(event.exitCode) ? event.exitCode : null;
 			terminal.exitedAt = Date.now();
+			if (terminal.listeners.size > 0) {
+				const exitEvent: TerminalStreamEvent = {
+					type: "exit",
+					id,
+					shell: terminal.shell,
+					...(terminal.harness ? { harness: terminal.harness } : {}),
+					cursor: terminal.baseCursor + terminal.outputLength,
+					exited: true,
+					exitCode: terminal.exitCode,
+				};
+				for (const listener of [...terminal.listeners]) {
+					try { listener(exitEvent); } catch { /* Listener already closed. */ }
+				}
+				terminal.listeners.clear();
+			}
 			this.#pruneExited();
 		});
 		this.#terminals.set(id, terminal);
-		return { id, shell: terminal.shell, cwd, cols, rows };
+		return { id, shell: terminal.shell, cwd, cols, rows, ...(harness ? { harness } : {}), ...(sessionId ? { sessionId } : {}), reused: false };
 	}
 
 	#terminal(id: string): TerminalRecord {
@@ -178,10 +294,68 @@ export class TerminalManager {
 		const endCursor = terminal.baseCursor + terminal.outputLength;
 		const startCursor = Math.max(cursor, terminal.baseCursor);
 		return {
-			id, cwd: terminal.cwd, shell: terminal.shell, data: this.#sliceOutput(terminal, startCursor - terminal.baseCursor),
+			id, cwd: terminal.cwd, shell: terminal.shell,
+			...(terminal.harness ? { harness: terminal.harness } : {}),
+			data: this.#sliceOutput(terminal, startCursor - terminal.baseCursor),
 			cursor: endCursor, baseCursor: terminal.baseCursor, truncated: cursor < terminal.baseCursor,
 			exited: terminal.exited, exitCode: terminal.exitCode,
 		};
+	}
+
+	/** Subscribe to live PTY output starting from `cursorValue`. Immediately replays buffered output. */
+	subscribe(id: string, cursorValue: unknown, listener: TerminalListener): () => void {
+		const terminal = this.#terminal(id);
+		const snapshot = this.read(id, cursorValue);
+		listener({
+			type: "output",
+			id: snapshot.id,
+			cwd: snapshot.cwd,
+			shell: snapshot.shell,
+			...(terminal.harness ? { harness: terminal.harness } : {}),
+			data: snapshot.data,
+			cursor: snapshot.cursor,
+			baseCursor: snapshot.baseCursor,
+			truncated: snapshot.truncated,
+			exited: snapshot.exited,
+			exitCode: snapshot.exitCode,
+		});
+		if (terminal.exited) {
+			listener({
+				type: "exit",
+				id: terminal.id,
+				shell: terminal.shell,
+				...(terminal.harness ? { harness: terminal.harness } : {}),
+				cursor: snapshot.cursor,
+				exited: true,
+				exitCode: terminal.exitCode,
+			});
+			return () => {};
+		}
+		terminal.listeners.add(listener);
+		return () => {
+			terminal.listeners.delete(listener);
+		};
+	}
+
+	closeBySession(sessionId: string): number {
+		let closed = 0;
+		for (const [id, terminal] of this.#terminals) {
+			if (terminal.sessionId !== sessionId) continue;
+			if (!terminal.exited) {
+				try { terminal.pty.kill(); } catch { /* The process may already have exited. */ }
+			}
+			terminal.listeners.clear();
+			this.#terminals.delete(id);
+			closed++;
+		}
+		return closed;
+	}
+
+	isSessionActive(sessionId: string): boolean {
+		for (const terminal of this.#terminals.values()) {
+			if (terminal.sessionId === sessionId && !terminal.exited) return true;
+		}
+		return false;
 	}
 
 	write(id: string, data: unknown) {

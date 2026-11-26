@@ -211,7 +211,10 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 		let terminalsClosed = 0;
 		let worktreeRemoved = false;
 		let worktreeError: string | undefined;
-		if (session.workspace && terminals) terminalsClosed = terminals.closeUnder(session.workspace);
+		if (terminals) {
+			terminalsClosed += terminals.closeBySession(session.id);
+			if (session.workspace) terminalsClosed += terminals.closeUnder(session.workspace);
+		}
 		scriptRunner.stopAll(session.id);
 		// An archived session's Docker container goes away; its files stay in the worktree.
 		await executionTargets.remove(session.id).catch(() => undefined);

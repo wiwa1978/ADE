@@ -7,7 +7,8 @@ import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import type { IPty } from "node-pty";
 import { createRuntimeServer } from "./server.ts";
-import { TerminalManager } from "./terminals.ts";
+import { EngineManager } from "./engines.ts";
+import { TerminalManager, type TerminalStreamEvent } from "./terminals.ts";
 
 const directories: string[] = [];
 const servers: Server[] = [];
@@ -140,4 +141,143 @@ test("terminal API routes require an approved ADE origin", async () => {
 	});
 	assert.equal(accepted.status, 200);
 	assert.equal((await accepted.json() as { cwd: string }).cwd, calls[0].cwd);
+});
+
+test("terminal mode spawns interactive harnesses (Claude Code, Codex, Copilot) and reattaches by sessionId", () => {
+	const cwd = temporaryDirectory();
+	const spawned: { command: string; args: string[]; pty: ReturnType<typeof fakePty> }[] = [];
+	const manager = new TerminalManager({
+		spawn: ((command: string, args: string[]) => {
+			const pty = fakePty();
+			spawned.push({ command, args, pty });
+			return pty as unknown as IPty;
+		}) as never,
+	});
+
+	const claude = manager.create({ cwd, harness: "claude-code", sessionId: "sess-1", initialPrompt: "Fix login" });
+	assert.equal(spawned[0].command, "claude");
+	assert.deepEqual(spawned[0].args, ["Fix login"]);
+	assert.equal(claude.shell, "Claude Code");
+	assert.equal(claude.harness, "claude-code");
+	assert.equal(claude.reused, false);
+	assert.equal(manager.isSessionActive("sess-1"), true);
+
+	// Reopening the same session reattaches instead of spawning a second PTY.
+	const reattached = manager.create({ cwd, harness: "claude-code", sessionId: "sess-1", cols: 120, rows: 40 });
+	assert.equal(reattached.id, claude.id);
+	assert.equal(reattached.reused, true);
+	assert.equal(spawned.length, 1);
+	assert.deepEqual(spawned[0].pty.resizes, [{ cols: 120, rows: 40 }]);
+
+	const codex = manager.create({ cwd, harness: "codex", sessionId: "sess-2" });
+	assert.equal(spawned[1].command, "codex");
+	assert.deepEqual(spawned[1].args, []);
+	assert.equal(codex.shell, "Codex");
+
+	const copilot = manager.create({ cwd, harness: "copilot", sessionId: "sess-3", initialPrompt: "Add tests" });
+	assert.equal(spawned[2].command, "copilot");
+	assert.deepEqual(spawned[2].args, ["-i", "Add tests"]);
+	assert.equal(copilot.shell, "GitHub Copilot");
+
+	const piCli = manager.create({ cwd, harness: "pi-cli", sessionId: "sess-4", initialPrompt: "Refactor auth" });
+	assert.equal(spawned[3].command, "pi");
+	assert.deepEqual(spawned[3].args, ["Refactor auth"]);
+	assert.equal(piCli.shell, "Pi CLI");
+
+	const omp = manager.create({ cwd, harness: "oh-my-pi", sessionId: "sess-5" });
+	assert.equal(spawned[4].command, "omp");
+	assert.deepEqual(spawned[4].args, []);
+	assert.equal(omp.shell, "Oh My Pi");
+
+	const opencode = manager.create({ cwd, harness: "opencode", sessionId: "sess-6", initialPrompt: "Fix CSS" });
+	assert.equal(spawned[5].command, "opencode");
+	assert.deepEqual(spawned[5].args, ["--prompt", "Fix CSS"]);
+	assert.equal(opencode.shell, "OpenCode");
+
+	const gemini = manager.create({ cwd, harness: "gemini", sessionId: "sess-7", initialPrompt: "Explain flow" });
+	assert.equal(spawned[6].command, "gemini");
+	assert.deepEqual(spawned[6].args, ["-i", "Explain flow"]);
+	assert.equal(gemini.shell, "Gemini CLI");
+
+	assert.equal(manager.closeBySession("sess-1"), 1);
+	assert.equal(manager.isSessionActive("sess-1"), false);
+	assert.equal(spawned[0].pty.killed, true);
+	manager.closeAll();
+});
+
+test("terminal subscribe replays buffered output and streams live chunks + exit over SSE", async () => {
+	const cwd = temporaryDirectory();
+	const pty = fakePty();
+	const manager = new TerminalManager({
+		spawn: (() => pty as unknown as IPty) as never,
+	});
+	const created = manager.create({ cwd, harness: "claude-code", sessionId: "sess-sse" });
+	pty.emitData("boot> ");
+
+	const received: TerminalStreamEvent[] = [];
+	const unsubscribe = manager.subscribe(created.id, 0, event => received.push(event));
+	assert.equal(received.length, 1);
+	assert.equal(received[0].type, "output");
+	if (received[0].type === "output") {
+		assert.equal(received[0].data, "boot> ");
+		assert.equal(received[0].cursor, 6);
+	}
+
+	pty.emitData("ready\r\n");
+	assert.equal(received.length, 2);
+	if (received[1].type === "output") {
+		assert.equal(received[1].data, "ready\r\n");
+		assert.equal(received[1].cursor, 13);
+	}
+
+	// Verify the HTTP SSE endpoint streams buffered + live events and closes on exit.
+	const server = createRuntimeServer({ host: {} as never, worktreeManager: {} as never, terminals: manager });
+	const port = await listen(server);
+	const response = await fetch(`http://127.0.0.1:${port}/api/terminals/${created.id}/stream?cursor=0`);
+	assert.equal(response.status, 200);
+	assert.match(response.headers.get("content-type") ?? "", /text\/event-stream/);
+	const reader = response.body!.getReader();
+	const decoder = new TextDecoder();
+	let text = "";
+	const readMore = async () => {
+		const { value, done } = await reader.read();
+		if (value) text += decoder.decode(value, { stream: true });
+		return done;
+	};
+	await readMore();
+	assert.match(text, /event: output/);
+	assert.match(text, /boot> ready/);
+	pty.kill();
+	let done = false;
+	while (!done && !text.includes("event: exit")) done = await readMore();
+	assert.match(text, /event: exit/);
+	unsubscribe();
+	manager.closeAll();
+});
+
+test("EngineManager supports terminal mode for Claude Code, Codex, and Copilot", () => {
+	const stateDirectory = temporaryDirectory();
+	const engines = new EngineManager({ stateDirectory });
+	const list = engines.available();
+	const copilotEntry = list.find(e => e.id === "copilot");
+	assert.ok(copilotEntry);
+	assert.deepEqual(copilotEntry.modes, ["terminal"]);
+
+	// Copilot, Pi CLI, and OpenCode reject chat mode and default to terminal mode.
+	assert.throws(() => engines.setEngine("sess-cop-chat", "copilot", null, "chat"), /does not support chat mode/);
+	assert.throws(() => engines.setEngine("sess-pi-chat", "pi-cli", null, "chat"), /does not support chat mode/);
+	const cop = engines.setEngine("sess-cop", "copilot");
+	assert.equal(cop?.engine, "copilot");
+	assert.equal(cop?.interactionMode, "terminal");
+	const piCli = engines.setEngine("sess-pi-cli", "pi-cli");
+	assert.equal(piCli?.engine, "pi-cli");
+	assert.equal(piCli?.interactionMode, "terminal");
+	const opencode = engines.setEngine("sess-opencode", "opencode");
+	assert.equal(opencode?.engine, "opencode");
+	assert.equal(opencode?.interactionMode, "terminal");
+
+	// Claude Code can be configured in terminal mode and rejects headless send().
+	const claudeTerm = engines.setEngine("sess-claude-term", "claude-code", null, "terminal");
+	assert.equal(claudeTerm?.interactionMode, "terminal");
+	assert.throws(() => engines.send("sess-claude-term", stateDirectory, "hello", "ask"), /terminal mode/);
 });

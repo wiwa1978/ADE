@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SubagentHarnessSchema } from "./mcp-targets.ts";
+import { TERMINAL_HARNESS_IDS } from "./sessions.ts";
 
 // --- Stages & Blueprints ---
 
@@ -105,8 +106,12 @@ export const CheckpointCreateRequestSchema = z.object({
 	label: z.string().optional(),
 });
 
+export const SessionEngineIdSchema = z.enum(["pi", ...TERMINAL_HARNESS_IDS]);
+export type SessionEngineId = z.infer<typeof SessionEngineIdSchema>;
+
 export const SessionEngineRequestSchema = z.object({
-	engine: SubagentHarnessSchema,
+	engine: SessionEngineIdSchema,
+	interactionMode: z.enum(["chat", "terminal"]).optional(),
 });
 
 // --- Mobile Pairing ---

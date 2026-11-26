@@ -326,6 +326,7 @@
 
   /* TerminalPanel */
   .terminal-workbench { display: flex; flex-direction: column; height: calc(100% - 42px); min-height: 0; padding: 0 12px 6px; background: rgb(var(--background)); }
+  .terminal-workbench.is-full-pane { height: 100%; flex: 1; padding: 8px 16px 12px; }
   .terminal-workbench.visible { min-height: 120px; }
   .terminal-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 34px; color: rgb(var(--muted)); font-size: 11px; }
   .terminal-location { display: flex; align-items: center; gap: 8px; min-width: 0; }

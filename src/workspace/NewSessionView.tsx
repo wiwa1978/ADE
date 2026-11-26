@@ -110,6 +110,10 @@ export function NewSessionView({
             selectedProjectId={selectedProjectId}
             activeProject={form.activeProject}
             kind={form.kind}
+            engine={form.engine}
+            interactionMode={form.interactionMode}
+            engineOptions={form.engineOptions}
+            activeEngineOption={form.activeEngineOption}
             effectiveBlueprint={form.effectiveBlueprint}
             projectBlueprint={form.projectBlueprint}
             blueprintLocked={form.blueprintLocked}
@@ -123,6 +127,8 @@ export function NewSessionView({
             linkedIssue={form.linkedIssue}
             onSelectProject={form.handleProjectChange}
             onSelectKind={form.setKind}
+            onSelectEngine={form.handleSelectEngine}
+            onSelectMode={form.handleSelectMode}
             onSelectBlueprint={form.setBlueprintChoice}
             onSelectRunOn={form.setRunOn}
             onSelectAttemptCount={form.setAttemptCount}
@@ -196,11 +202,16 @@ export function NewSessionView({
           onDraftChange={form.setPrompt}
           busy={starting}
           disabled={!form.readyToStart}
-          canSubmitEmpty={Boolean(form.startFrom)}
-          placeholder={form.startFrom
-            ? t("ns.promptStartFrom")
-            : t("ns.promptPlaceholder", { send: formatShortcut(keybindings.sendMessage), newLine: formatShortcut(keybindings.newLine) })}
-          submitTitle={form.canAttempt && form.attemptCount > 1 ? t("ns.startAttempts", { count: form.attemptCount }) : t("ns.startSession")}
+          canSubmitEmpty={Boolean(form.startFrom) || form.isTerminalMode}
+          placeholder={form.isTerminalMode
+            ? `Optional initial prompt for ${form.activeEngineOption.name} — or press ${formatShortcut(keybindings.sendMessage)} to open the interactive terminal`
+            : form.startFrom
+              ? t("ns.promptStartFrom")
+              : t("ns.promptPlaceholder", { send: formatShortcut(keybindings.sendMessage), newLine: formatShortcut(keybindings.newLine) })}
+          submitTitle={form.isTerminalMode
+            ? `Start ${form.activeEngineOption.name} terminal`
+            : form.canAttempt && form.attemptCount > 1 ? t("ns.startAttempts", { count: form.attemptCount }) : t("ns.startSession")}
+          engineLabel={form.engine !== "pi" ? `${form.activeEngineOption.name}${form.isTerminalMode ? " · Terminal" : ""}` : undefined}
           modelCatalog={modelCatalog}
           selectedProvider={selectedProvider}
           selectedModel={selectedModel}

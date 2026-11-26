@@ -13,8 +13,10 @@ import type { RuntimeEventBus } from "./events.ts";
 import { redact, secretEnv } from "./project-secrets.ts";
 import { claudeDenyRules } from "./guardrails.ts";
 import { commandInvocation, q, sessionTarget, stopOnTarget } from "./execution-targets.ts";
+import { HARNESS_CATALOG, TerminalHarnessSchema, type TerminalHarness } from "@ade/protocol";
 
-export type EngineId = "claude-code" | "codex";
+export type EngineId = TerminalHarness;
+export type InteractionMode = "chat" | "terminal";
 export type ApprovalPolicy = "ask" | "auto-safe" | "auto-all";
 
 type ToolCall = { callId: string; name: string; arguments: Record<string, unknown>; status: "running" | "done" | "error"; output: string; isError: boolean };
@@ -25,6 +27,7 @@ type Item =
 
 export type EngineSession = {
 	engine: EngineId;
+	interactionMode?: InteractionMode;
 	externalId: string | null;
 	items: Item[];
 	usage: { inputTokens: number; outputTokens: number; totalCost: number };
@@ -61,7 +64,8 @@ const ItemSchema = z.discriminatedUnion("kind", [
 ]);
 
 const EngineSessionSchema = z.object({
-	engine: z.enum(["claude-code", "codex"]),
+	engine: TerminalHarnessSchema,
+	interactionMode: z.enum(["chat", "terminal"]).optional(),
 	externalId: z.string().nullable().default(null),
 	items: z.array(ItemSchema).default([]),
 	usage: z.object({
@@ -115,10 +119,12 @@ function stringifyToolContent(content: unknown): string {
 	return content == null ? "" : String(content);
 }
 
-export const engineInfo: Record<EngineId, { name: string; command: string; description: string }> = {
-	"claude-code": { name: "Claude Code", command: "claude", description: "Anthropic's coding agent, using your Claude Code sign-in." },
-	"codex": { name: "Codex", command: "codex", description: "OpenAI's coding agent, using your Codex sign-in." },
-};
+export const engineInfo: Record<EngineId, { name: string; command: string; description: string; modes: readonly InteractionMode[] }> = Object.fromEntries(
+	HARNESS_CATALOG.map(entry => [
+		entry.id,
+		{ name: entry.name, command: entry.command, description: entry.description, modes: entry.modes },
+	]),
+) as Record<EngineId, { name: string; command: string; description: string; modes: readonly InteractionMode[] }>;
 
 function commandAvailable(command: string) {
 	try {
@@ -318,11 +324,21 @@ export class EngineManager {
 		this.#environment = environment;
 	}
 
-	available(): { id: "pi" | EngineId; name: string; description: string; available: boolean }[] {
-		this.#available ??= { "claude-code": commandAvailable("claude"), "codex": commandAvailable("codex") };
+	available(): { id: "pi" | EngineId; name: string; description: string; available: boolean; modes: readonly InteractionMode[] }[] {
+		if (!this.#available) {
+			const probed = {} as Record<EngineId, boolean>;
+			for (const entry of HARNESS_CATALOG) probed[entry.id] = commandAvailable(entry.command);
+			this.#available = probed;
+		}
 		return [
-			{ id: "pi", name: "ADE agent", description: "Built-in agent (Pi Durable) with your model provider, subagents, browser tools and approvals.", available: true },
-			...(Object.keys(engineInfo) as EngineId[]).map(id => ({ id, name: engineInfo[id].name, description: engineInfo[id].description, available: this.#available![id] })),
+			{ id: "pi", name: "ADE agent", description: "Built-in agent (Pi Durable) with your model provider, subagents, browser tools and approvals.", available: true, modes: ["chat"] },
+			...HARNESS_CATALOG.map(entry => ({
+				id: entry.id,
+				name: entry.name,
+				description: entry.description,
+				available: this.#available![entry.id],
+				modes: entry.modes,
+			})),
 		];
 	}
 
@@ -410,18 +426,25 @@ export class EngineManager {
 		this.#saveTimers.set(sessionId, timer);
 	}
 
-	/** Choose the engine for a session (only before its first message). */
-	setEngine(sessionId: string, engine: unknown, parent: EngineSession["parent"] = null) {
+	/** Choose the engine (and optional chat/terminal mode) for a session before its first message. */
+	setEngine(sessionId: string, engine: unknown, parent: EngineSession["parent"] = null, interactionMode?: InteractionMode) {
 		if (engine === "pi") return null;
-		if (engine !== "claude-code" && engine !== "codex") throw Object.assign(new Error("Unknown engine."), { statusCode: 400 });
-		const blocked = this.#guard?.(engine, parent?.sessionId ?? sessionId);
+		const parsed = TerminalHarnessSchema.safeParse(engine);
+		if (!parsed.success) throw Object.assign(new Error("Unknown engine."), { statusCode: 400 });
+		const engineId = parsed.data;
+		const info = engineInfo[engineId];
+		const resolvedMode: InteractionMode = interactionMode ?? (info.modes.includes("chat") ? "chat" : "terminal");
+		if (!info.modes.includes(resolvedMode)) {
+			throw Object.assign(new Error(`${info.name} does not support ${resolvedMode} mode.`), { statusCode: 400 });
+		}
+		const blocked = this.#guard?.(engineId, parent?.sessionId ?? sessionId);
 		if (blocked) throw Object.assign(new Error(blocked), { statusCode: 403 });
 		const existing = this.get(sessionId);
 		if (existing?.items.length) {
-			if (existing.parent && existing.engine === engine) return existing;
+			if (existing.parent && existing.engine === engineId) return existing;
 			throw Object.assign(new Error("The engine can't change after the conversation has started."), { statusCode: 409 });
 		}
-		const state: EngineSession = { engine, externalId: null, items: [], usage: { inputTokens: 0, outputTokens: 0, totalCost: 0 }, lastStatus: null, updatedAt: Date.now(), parent };
+		const state: EngineSession = { engine: engineId, interactionMode: resolvedMode, externalId: null, items: [], usage: { inputTokens: 0, outputTokens: 0, totalCost: 0 }, lastStatus: null, updatedAt: Date.now(), parent };
 		this.#saveSync(sessionId, state);
 		return state;
 	}
@@ -471,6 +494,9 @@ export class EngineManager {
 	send(sessionId: string, cwd: string, prompt: string, policy: ApprovalPolicy, model: string | null = null, mcpConfigPath: string | null = null) {
 		const state = this.get(sessionId);
 		if (!state) throw Object.assign(new Error("This session doesn't use an external engine."), { statusCode: 400 });
+		if (state.interactionMode === "terminal" || !engineInfo[state.engine].modes.includes("chat")) {
+			throw Object.assign(new Error("This session runs in terminal mode. Interact with it directly in the terminal."), { statusCode: 409 });
+		}
 		if (this.#running.has(sessionId)) throw Object.assign(new Error("The agent is still working. Wait, or stop it first."), { statusCode: 409 });
 		const blocked = this.#guard?.(state.engine, state.parent?.sessionId ?? sessionId);
 		if (blocked) throw Object.assign(new Error(blocked), { statusCode: 403 });

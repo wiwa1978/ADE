@@ -41,6 +41,54 @@ export const ConversationWorkspaceSchema = z.object({
 	removed: z.boolean().optional(),
 });
 
+export const SessionInteractionModeSchema = z.enum(["chat", "terminal"]);
+export type SessionInteractionMode = z.infer<typeof SessionInteractionModeSchema>;
+
+export const TERMINAL_HARNESS_IDS = [
+	"claude-code",
+	"codex",
+	"copilot",
+	"opencode",
+	"pi-cli",
+	"oh-my-pi",
+	"gemini",
+	"hermes",
+	"muse-code",
+	"devin",
+] as const;
+
+export const TerminalHarnessSchema = z.enum(TERMINAL_HARNESS_IDS);
+export type TerminalHarness = z.infer<typeof TerminalHarnessSchema>;
+
+export type HarnessCatalogEntry = {
+	id: TerminalHarness;
+	name: string;
+	command: string;
+	description: string;
+	modes: readonly SessionInteractionMode[];
+};
+
+export const HARNESS_CATALOG: readonly HarnessCatalogEntry[] = [
+	{ id: "claude-code", name: "Claude Code", command: "claude", description: "Anthropic's coding agent, using your Claude Code sign-in.", modes: ["chat", "terminal"] },
+	{ id: "codex", name: "Codex", command: "codex", description: "OpenAI's coding agent, using your Codex sign-in.", modes: ["chat", "terminal"] },
+	{ id: "copilot", name: "GitHub Copilot", command: "copilot", description: "GitHub Copilot CLI, using your GitHub Copilot sign-in.", modes: ["terminal"] },
+	{ id: "opencode", name: "OpenCode", command: "opencode", description: "Open-source terminal coding agent with local and EU model support.", modes: ["terminal"] },
+	{ id: "pi-cli", name: "Pi CLI", command: "pi", description: "Interactive Pi coding agent TUI.", modes: ["terminal"] },
+	{ id: "oh-my-pi", name: "Oh My Pi", command: "omp", description: "Oh My Pi interactive coding harness.", modes: ["terminal"] },
+	{ id: "gemini", name: "Gemini CLI", command: "gemini", description: "Google's Gemini interactive coding CLI.", modes: ["terminal"] },
+	{ id: "hermes", name: "Hermes", command: "hermes", description: "Hermes interactive coding CLI.", modes: ["terminal"] },
+	{ id: "muse-code", name: "Muse Code", command: "muse", description: "Muse Code interactive coding CLI.", modes: ["terminal"] },
+	{ id: "devin", name: "Devin CLI", command: "devin", description: "Devin interactive coding CLI.", modes: ["terminal"] },
+];
+
+export function harnessEntry(id: TerminalHarness): HarnessCatalogEntry {
+	return HARNESS_CATALOG.find(entry => entry.id === id) ?? HARNESS_CATALOG[0];
+}
+
+export function harnessLabel(id: TerminalHarness): string {
+	return harnessEntry(id).name;
+}
+
 export const ConversationSchema = z.object({
 	id: z.string(),
 	mode: z.enum(["coding", "personal"]),
@@ -54,7 +102,8 @@ export const ConversationSchema = z.object({
 	createdAt: z.number().nullable().optional(),
 	updatedAt: z.number().nullable().optional(),
 	lastTurnStatus: z.enum(["pending", "completed", "failed", "blocked"]).nullable().optional(),
-	engine: z.enum(["claude-code", "codex"]).optional(),
+	engine: TerminalHarnessSchema.optional(),
+	interactionMode: SessionInteractionModeSchema.optional(),
 	attemptGroup: z.string().optional(),
 	blueprint: SessionBlueprintSummarySchema.optional(),
 	workspace: ConversationWorkspaceSchema.optional(),
