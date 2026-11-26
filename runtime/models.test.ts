@@ -55,6 +55,23 @@ test("compatible providers require HTTPS away from loopback and an explicit mode
 	assert.equal(local.availableModels[0].id, "local-model");
 });
 
+test("a CLI or unknown provider id uses the default API provider instead of failing health", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "ade-unknown-provider-"));
+	try {
+		const runtime = createRuntimeModels({ ADE_PROVIDER: "not-a-provider", OPENAI_API_KEY: "fixture-key" }, dir);
+		const fromCli = await runtime.config("claude");
+		assert.equal(fromCli.provider, "openai");
+		assert.equal(fromCli.configured, true);
+		const fromDefault = await runtime.config();
+		assert.equal(fromDefault.provider, "openai");
+		const unset = createRuntimeModels({}, dir);
+		const fallback = await unset.config("pi");
+		assert.equal(fallback.provider, "openai");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
 test("provider errors redact configured secrets and URL query values", () => {
 	const error = safeErrorMessage(
 		new Error("Request failed for https://models.example/v1?token=private-value"),

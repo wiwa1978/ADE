@@ -304,6 +304,9 @@ export function createRuntimeModels(environment: EnvMap, stateDirectory: string)
 		renameSync(temp, path);
 		return compatibleStatus();
 	}
+	const isKnownProvider = (candidate: string | undefined): candidate is string =>
+		Boolean(candidate && providers.some(provider => provider.id === candidate));
+
 	return {
 		fallback,
 		providers,
@@ -313,9 +316,9 @@ export function createRuntimeModels(environment: EnvMap, stateDirectory: string)
 		configureCompatible,
 		safeErrorMessage: redact,
 		signIn: createCopilotSignIn(models as unknown as Parameters<typeof createCopilotSignIn>[0]),
-		/** The provider to use when none is chosen: ADE_PROVIDER, else the first provider with a working setup. */
+		/** The provider to use when none is chosen: a known ADE_PROVIDER, else the first provider with a working setup. */
 		async defaultProvider(): Promise<string> {
-			if (environment.ADE_PROVIDER) return environment.ADE_PROVIDER;
+			if (isKnownProvider(environment.ADE_PROVIDER)) return environment.ADE_PROVIDER;
 			for (const { id } of providers) {
 				try {
 					if ((await this.config(id)).configured) return id;
@@ -323,14 +326,13 @@ export function createRuntimeModels(environment: EnvMap, stateDirectory: string)
 					// try the next provider
 				}
 			}
-			return fallback;
+			return isKnownProvider(fallback) ? fallback : "openai";
 		},
-		async config(id?: string) {
+		async config(requestedId?: string) {
 			if (credentialChange) await credentialChange;
-			id ??= await this.defaultProvider();
-			if (!providers.some(provider => provider.id === id)) {
-				throw badRequest("Unknown model provider.");
-			}
+			// A CLI tool id, an empty selection, or a stale saved id is not an API provider.
+			// Use the configured default so the app stays up instead of reporting "Unknown model provider."
+			const id: string = isKnownProvider(requestedId) ? requestedId : await this.defaultProvider();
 			let config: ProviderConfigBase = (id === "radius" ? await radiusConfig() : other.get(id)) ?? {
 				provider: id,
 				configured: false,
