@@ -29,6 +29,7 @@ export function registerCapabilityRoutes(router: Router, { host }: RouteDeps): v
 		if (body.enabled !== null && typeof body.enabled !== "boolean") throw badRequest("Use true, false or null (inherit).");
 		if (scope === "project" && typeof body.projectId !== "string") throw badRequest("A project setting needs a project.");
 		host.capabilities.set(scope, scope === "project" ? body.projectId as string : null, body.kind as CapabilityKind, body.key, body.enabled);
+		host.events.emit("capabilities.update", { scope, projectId: scope === "project" ? body.projectId as string : null });
 		ctx.json(200, { ok: true });
 	}, { originError: "Use ADE to change what is on." });
 
@@ -40,7 +41,9 @@ export function registerCapabilityRoutes(router: Router, { host }: RouteDeps): v
 	router.post("/api/skills/sources/confirm", async (ctx) => {
 		const body = await ctx.readBody() as { previewId?: unknown } | null;
 		if (typeof body?.previewId !== "string") throw badRequest("Missing preview.");
-		ctx.json(200, { source: host.skillLibrary.confirm(body.previewId) });
+		const source = host.skillLibrary.confirm(body.previewId);
+		host.events.emit("capabilities.update", { scope: "global", projectId: null });
+		ctx.json(200, { source });
 	}, { originError: "Use ADE to import skills." });
 
 	router.post("/api/skills/sources/discard", async (ctx) => {
@@ -54,17 +57,22 @@ export function registerCapabilityRoutes(router: Router, { host }: RouteDeps): v
 	});
 
 	router.post("/api/skills/sources/:id/update", async (ctx) => {
-		ctx.json(200, { source: await host.skillLibrary.update(ctx.params.id) });
+		const source = await host.skillLibrary.update(ctx.params.id);
+		host.events.emit("capabilities.update", { scope: "global", projectId: null });
+		ctx.json(200, { source });
 	}, { originError: "Use ADE to update skills." });
 
 	router.delete("/api/skills/sources/:id", (ctx) => {
 		host.skillLibrary.remove(ctx.params.id);
+		host.events.emit("capabilities.update", { scope: "global", projectId: null });
 		ctx.json(200, { sources: host.skillLibrary.list() });
 	}, { originError: "Use ADE to remove skills." });
 
 	// --- Skills written in ADE (~/.ade/skills) ---
 	router.post("/api/skills/user", async (ctx) => {
-		ctx.json(200, host.skillLibrary.createUserSkill(await ctx.readBody() ?? {}));
+		const result = host.skillLibrary.createUserSkill(await ctx.readBody() ?? {});
+		host.events.emit("capabilities.update", { scope: "global", projectId: null });
+		ctx.json(200, result);
 	}, { originError: "Use ADE to write skills." });
 
 	router.get("/api/skills/user", (ctx) => {
@@ -73,11 +81,14 @@ export function registerCapabilityRoutes(router: Router, { host }: RouteDeps): v
 
 	router.put("/api/skills/user", async (ctx) => {
 		const body = await ctx.readBody() as { path?: unknown; content?: unknown } | null;
-		ctx.json(200, host.skillLibrary.writeUserSkill(body?.path, body?.content));
+		const result = host.skillLibrary.writeUserSkill(body?.path, body?.content);
+		host.events.emit("capabilities.update", { scope: "global", projectId: null });
+		ctx.json(200, result);
 	}, { originError: "Use ADE to write skills." });
 
 	router.delete("/api/skills/user", (ctx) => {
 		host.skillLibrary.deleteUserSkill(ctx.url.searchParams.get("path"));
+		host.events.emit("capabilities.update", { scope: "global", projectId: null });
 		ctx.json(200, { ok: true });
 	}, { originError: "Use ADE to remove skills." });
 

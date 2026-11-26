@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from "react"
-import { Pencil, Plug, Plus, Trash2, Unplug } from "lucide-react"
+import { useCallback, useContext, useEffect, useState } from "react"
+import { ChevronDown, ChevronRight, Pencil, Plug, Plus, Trash2, Unplug } from "lucide-react"
 import { request, requestJson } from "../api"
+import { ConfirmContext } from "@/components/ui/confirm-context"
+import { EventStreamContext } from "../hooks/useEventStream"
 import { useI18n } from "../i18n/I18nContext"
 import "./skills-tools.css"
 
@@ -15,7 +17,7 @@ type Preview = { previewId: string; url: string; commit: string | null; skills: 
 type Server = {
   id: string; key: string; name: string; transport: "stdio" | "http"; enabled: boolean
   command?: string; args?: string[]; env?: Record<string, string>; url?: string; headers?: Record<string, string>
-  status: "disconnected" | "connecting" | "connected" | "error"; error: string | null; tools: { name: string; enabled?: boolean }[]
+  status: "disconnected" | "connecting" | "connected" | "error"; error: string | null; tools: { name: string; description?: string; enabled?: boolean }[]
   origin: { kind: "ade" | "file" | "project"; label: string; path?: string }
   readOnly: boolean; active: boolean; globalSetting: boolean | null; projectSetting: boolean | null; needsTrust: boolean; shadowedBy: string | null
 }
@@ -45,6 +47,7 @@ function formatKvLines(map: Record<string, string> | undefined, sep: "=" | ":"):
  */
 export function SkillsToolsSettings({ projects, activeEnvironmentName, onRefreshMcp, fixedProjectId }: { projects: ProjectRef[]; activeEnvironmentName?: string; onRefreshMcp?: () => void; fixedProjectId?: string }) {
   const { t } = useI18n()
+  const stream = useContext(EventStreamContext)
   const [projectId, setProjectId] = useState(fixedProjectId ?? "")
   const scopeQuery = projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""
   const [skills, setSkills] = useState<Skill[]>([])
@@ -53,7 +56,15 @@ export function SkillsToolsSettings({ projects, activeEnvironmentName, onRefresh
   const [error, setError] = useState("")
   const [reload, setReload] = useState(0)
   const [editingServer, setEditingServer] = useState<Server | null>(null)
+  const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({})
   const refresh = useCallback(() => setReload(value => value + 1), [])
+
+  useEffect(() => {
+    if (!stream) return
+    const unsubCap = stream.subscribe("capabilities.update", refresh)
+    const unsubMcp = stream.subscribe("mcp.update", refresh)
+    return () => { unsubCap(); unsubMcp() }
+  }, [stream, refresh])
 
   useEffect(() => {
     let alive = true
@@ -126,10 +137,33 @@ export function SkillsToolsSettings({ projects, activeEnvironmentName, onRefresh
                 <strong>{server.name}</strong>
                 <span className="ade-st-pill">{server.origin.label}</span>
                 <span className="ade-st-pill">{server.transport}</span>
-                <span className="st-hint">{server.status === "connected" ? (server.tools.length === 1 ? t("tools.oneTool") : t("tools.toolCount", { count: server.tools.length })) : server.error || ""}</span>
+                {server.status === "connected" ? (
+                  <button
+                    type="button"
+                    className="ade-st-tools-btn"
+                    aria-expanded={Boolean(expandedTools[server.id])}
+                    title={t("tools.inspectTools")}
+                    onClick={() => setExpandedTools(cur => ({ ...cur, [server.id]: !cur[server.id] }))}
+                  >
+                    {expandedTools[server.id] ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+                    {server.tools.length === 1 ? t("tools.oneTool") : t("tools.toolCount", { count: server.tools.length })}
+                  </button>
+                ) : (
+                  server.error ? <span className="st-hint">{server.error}</span> : null
+                )}
                 {server.origin.path ? <code className="ade-st-path">{server.origin.path}</code> : null}
                 {server.shadowedBy ? <span className="st-hint">{t("tools.shadowed")}</span> : null}
                 {server.readOnly ? <span className="st-hint">{t("tools.readOnly", { origin: server.origin.label })}</span> : null}
+                {expandedTools[server.id] && server.tools.length > 0 ? (
+                  <ul className="ade-st-tools-list">
+                    {server.tools.map(tool => (
+                      <li key={tool.name}>
+                        <code>{tool.name}</code>
+                        {tool.description ? <span className="st-hint">{tool.description}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
                 {server.tools.length ? (
                   <ul className="ade-st-tool-switches">
                     {server.tools.map(tool => (
@@ -184,22 +218,61 @@ function SkillList({ skills, projectId, stateHint, ownSetting, shownActive, setC
   attempt: Attempt
 }) {
   const { t } = useI18n()
+  const confirmCtx = useContext(ConfirmContext)
   const [filter, setFilter] = useState("")
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "off" | "shadowed">("all")
+  const [originFilter, setOriginFilter] = useState<"all" | "project" | "git" | "ade" | "tool">("all")
   const [editingPath, setEditingPath] = useState<string | null>(null)
   const [editingContent, setEditingContent] = useState("")
   const effective = skills.filter(skill => !skill.shadowedBy)
   const needle = filter.trim().toLowerCase()
-  const shown = needle ? skills.filter(skill => `${skill.name} ${skill.description} ${skill.origin.label} ${skill.path}`.toLowerCase().includes(needle)) : skills
+  const shown = skills.filter(skill => {
+    if (originFilter !== "all" && skill.origin.kind !== originFilter) return false
+    if (statusFilter === "shadowed" && !skill.shadowedBy) return false
+    if (statusFilter === "active" && (skill.shadowedBy || !shownActive(skill.state))) return false
+    if (statusFilter === "off" && (skill.shadowedBy || shownActive(skill.state))) return false
+    if (needle && !`${skill.name} ${skill.description} ${skill.origin.label} ${skill.path}`.toLowerCase().includes(needle)) return false
+    return true
+  })
   const activeCount = effective.filter(skill => shownActive(skill.state)).length
   const openEdit = (path: string) => void attempt(async () => {
     const data = await request<{ path: string; content: string }>(`/api/skills/user?path=${encodeURIComponent(path)}`)
     setEditingPath(data.path)
     setEditingContent(data.content)
   })
+  const deleteSkill = async (skill: Skill) => {
+    const promptText = t("skills.deleteConfirm", { name: skill.name })
+    const ok = confirmCtx
+      ? await confirmCtx.confirm({ title: t("skills.deleteTitle"), description: promptText, confirmLabel: t("skills.delete"), destructive: true })
+      : (typeof window === "undefined" || typeof window.confirm !== "function" ? true : window.confirm(promptText))
+    if (!ok) return
+    await attempt(() => request(`/api/skills/user?path=${encodeURIComponent(skill.path)}`, { method: "DELETE" }))
+  }
   return (
     <section className="ade-st-card" aria-label={t("skills.title")}>
       <h3>{t("skills.title")} <span className="st-hint">{t("skills.count", { active: activeCount, total: effective.length })}</span></h3>
-      {skills.length === 0 ? <p className="st-hint">{t("skills.empty")}</p> : <input className="st-input ade-st-filter" value={filter} onChange={event => setFilter(event.target.value)} placeholder={t("skills.search")} aria-label={t("skills.search")} />}
+      {skills.length === 0 ? <p className="st-hint">{t("skills.empty")}</p> : (
+        <>
+          <input className="st-input ade-st-filter" value={filter} onChange={event => setFilter(event.target.value)} placeholder={t("skills.search")} aria-label={t("skills.search")} />
+          <div className="ade-st-filters">
+            {([
+              ["all", t("skills.filterAll")],
+              ["active", t("skills.filterActive")],
+              ["off", t("skills.filterOff")],
+              ["shadowed", t("skills.filterShadowed")],
+            ] as const).map(([id, label]) => (
+              <button key={id} type="button" className={`ade-st-chip ${statusFilter === id ? "is-active" : ""}`} onClick={() => setStatusFilter(id)}>{label}</button>
+            ))}
+            <select className="st-select" value={originFilter} onChange={event => setOriginFilter(event.target.value as typeof originFilter)} aria-label={t("skills.allOrigins")}>
+              <option value="all">{t("skills.allOrigins")}</option>
+              <option value="project">{t("skills.originProject")}</option>
+              <option value="git">{t("skills.originGit")}</option>
+              <option value="ade">{t("skills.originAde")}</option>
+              <option value="tool">{t("skills.originTool")}</option>
+            </select>
+          </div>
+        </>
+      )}
       {skills.length > 0 && shown.length === 0 ? <p className="st-hint">{t("skills.noMatch")}</p> : null}
       <ul className="ade-st-list">
         {shown.map(skill => (
@@ -229,7 +302,7 @@ function SkillList({ skills, projectId, stateHint, ownSetting, shownActive, setC
               <div className="ade-st-actions">
                 {skill.origin.kind === "ade" ? <>
                   <button type="button" className="st-prov-icon-btn" aria-label={t("skills.edit")} title={t("skills.edit")} onClick={() => openEdit(skill.path)}><Pencil className="size-3.5" /></button>
-                  <button type="button" className="st-prov-icon-btn" aria-label={t("skills.delete")} onClick={() => { if (window.confirm(t("skills.deleteConfirm", { name: skill.name }))) void attempt(() => request(`/api/skills/user?path=${encodeURIComponent(skill.path)}`, { method: "DELETE" })) }}><Trash2 className="size-3.5" /></button>
+                  <button type="button" className="st-prov-icon-btn" aria-label={t("skills.delete")} onClick={() => void deleteSkill(skill)}><Trash2 className="size-3.5" /></button>
                 </> : null}
                 <Switch label={t("skills.toggle", { name: skill.name })} on={shownActive(skill.state)} onChange={on => void setCapability("skill", skill.name, on)} />
                 {projectId && ownSetting(skill.state) !== null ? <button type="button" className="ade-st-link" onClick={() => void setCapability("skill", skill.name, null)}>{t("skills.inherit")}</button> : null}

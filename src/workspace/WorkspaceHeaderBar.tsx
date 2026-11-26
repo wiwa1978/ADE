@@ -3,6 +3,7 @@ import { ExternalLink, GitBranch } from "lucide-react"
 import type {
   BrowserState,
   Conversation,
+  ConversationTimelineSnapshot,
   PendingApproval,
   SessionArtifact,
   SubagentInfo,
@@ -11,6 +12,7 @@ import type {
 } from "../app-types"
 import type { PullRequestInfo } from "../panels/PullRequestPanel"
 import { useI18n } from "../i18n/I18nContext"
+import { SessionCapabilitiesChip } from "./SessionCapabilitiesChip"
 
 export function WorkspaceHeaderBar({
   session,
@@ -23,11 +25,15 @@ export function WorkspaceHeaderBar({
   onOpenProject,
   stateLabel,
   onOpenAttempts,
+  timeline,
+  onOpenCapabilitiesSettings,
 }: {
   session: Conversation
   isBusy: boolean
   hasWorkspace?: boolean
   approvals: PendingApproval[]
+  timeline?: ConversationTimelineSnapshot | null
+  onOpenCapabilitiesSettings?: () => void
   subagents?: SubagentInfo[]
   gitSummary?: WorkspaceGitSummary
   browserState?: BrowserState
@@ -114,6 +120,11 @@ export function WorkspaceHeaderBar({
             #{session.githubIssue.number} <ExternalLink className="size-2.5" />
           </button>
         ) : null}
+        <SessionCapabilitiesChip
+          projectId={session.projectId}
+          timeline={timeline}
+          onOpenSettings={onOpenCapabilitiesSettings}
+        />
       </div>
 
     </header>

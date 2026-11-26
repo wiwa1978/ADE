@@ -30,3 +30,16 @@
 .ade-st-preview-list label { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; cursor: pointer; }
 .ade-st-trust { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 10px; border-radius: 8px; background: rgb(217 155 56 / 0.12); font-size: 12.5px; }
 .ade-st-filter { width: 100% !important; }
+.ade-st-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ade-st-chip { border: 1px solid rgb(var(--border)); background: transparent; color: rgb(var(--muted)); border-radius: 999px; padding: 2px 10px; font-size: 11.5px; cursor: pointer; }
+.ade-st-chip.is-active { background: rgb(var(--foreground) / 0.1); color: rgb(var(--foreground)); border-color: rgb(var(--foreground) / 0.25); }
+.ade-st-tools-btn { border: 0; background: rgb(var(--foreground) / 0.06); color: inherit; border-radius: 999px; padding: 1px 8px; font-size: 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.ade-st-tools-list { flex-basis: 100%; list-style: none; margin: 6px 0 0; padding: 8px 10px; border-radius: 8px; background: rgb(var(--foreground) / 0.04); display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; }
+.ade-st-tools-list li { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+.ade-cap-wrap { position: relative; display: inline-flex; align-items: center; }
+.ade-cap-popover { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; width: 320px; max-height: 360px; overflow-y: auto; border: 1px solid rgb(var(--border)); border-radius: 12px; background: rgb(var(--background)); box-shadow: 0 12px 32px rgb(0 0 0 / 0.22); padding: 12px; display: flex; flex-direction: column; gap: 10px; font-size: 12.5px; }
+.ade-cap-popover-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ade-cap-popover h4 { margin: 0; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; color: rgb(var(--muted)); }
+.ade-cap-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ade-cap-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0; }
+.ade-cap-used { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; background: rgb(60 170 100 / 0.18); color: rgb(var(--foreground)); white-space: nowrap; }

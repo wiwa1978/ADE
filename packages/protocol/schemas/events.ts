@@ -24,6 +24,7 @@ export const RuntimeEventTypeSchema = z.enum([
 	"browser.frame",
 	"diff.update",
 	"mcp.update",
+	"capabilities.update",
 	"factory.event",
 ]);
 
@@ -85,6 +86,10 @@ export const RuntimeEventPayloadSchemas = {
 	"mcp.update": z.object({
 		servers: z.array(z.record(z.string(), z.unknown())),
 	}),
+	"capabilities.update": z.object({
+		scope: z.enum(["global", "project"]).optional(),
+		projectId: z.string().nullable().optional(),
+	}),
 	"factory.event": CaptainEventSchema,
 } as const;
 
@@ -113,6 +118,7 @@ export const RuntimeEventSchema = z.discriminatedUnion("type", [
 	z.object({ ...eventBase, type: z.literal("browser.frame"), payload: RuntimeEventPayloadSchemas["browser.frame"] }),
 	z.object({ ...eventBase, type: z.literal("diff.update"), payload: RuntimeEventPayloadSchemas["diff.update"] }),
 	z.object({ ...eventBase, type: z.literal("mcp.update"), payload: RuntimeEventPayloadSchemas["mcp.update"] }),
+	z.object({ ...eventBase, type: z.literal("capabilities.update"), payload: RuntimeEventPayloadSchemas["capabilities.update"] }),
 	z.object({ ...eventBase, type: z.literal("factory.event"), payload: RuntimeEventPayloadSchemas["factory.event"] }),
 ]);
 

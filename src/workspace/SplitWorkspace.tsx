@@ -49,15 +49,24 @@ export function SplitWorkspace(props: SplitWorkspaceProps) {
   const blueprint = session.blueprint ?? null
   const { stages, setStages } = useSessionStages(hasWorkspace ? session.id : null, `${JSON.stringify(blueprint)}:${session.status}`)
 
+  const simple = useViewMode() === "simple"
+  const [prevSessionId, setPrevSessionId] = useState(session.id)
+  if (prevSessionId !== session.id) {
+    setPrevSessionId(session.id)
+    setDrawerTab(session.blueprint ? "stages" : "terminal")
+  }
+
   const showStagesTab = Boolean(blueprint) || (drawerTab === "stages" && Boolean(stages))
   const activeDrawerTab = showStagesTab ? drawerTab : "terminal"
   if (activeDrawerTab === "terminal" && bottomTerminalOpen && !terminalStarted) setTerminalStarted(true)
 
-  const waitingKey = blueprint?.stage?.status === "awaiting_approval" ? `${session.id}:${blueprint.stage.id}` : null
+  const stageStatus = blueprint?.stage?.status
+  const waitingKey = stageStatus === "awaiting_approval" || stageStatus === "failed" ? `${session.id}:${blueprint?.stage?.id}:${stageStatus}` : null
   const [prevWaitingKey, setPrevWaitingKey] = useState(waitingKey)
   if (prevWaitingKey !== waitingKey) {
     setPrevWaitingKey(waitingKey)
-    if (waitingKey) {
+    // In Simple view, awaiting_approval is already shown inline as GateCard above the composer; auto-open drawer for Full view or failed stages.
+    if (waitingKey && (!simple || stageStatus === "failed")) {
       setBottomTerminalMounted(true)
       setBottomTerminalOpen(true)
       setDrawerTab("stages")
@@ -157,7 +166,6 @@ export function SplitWorkspace(props: SplitWorkspaceProps) {
     }
   }, [session.id, beside, onRefreshGit, confirm, alert])
 
-  const simple = useViewMode() === "simple"
   // Simple view keeps only the panels that show who is working; the rest wait for Full view.
   const showBeside = beside.showBeside && (!simple || (beside.activeBesideTab !== null && SIMPLE_PANEL_KINDS.has(beside.activeBesideTab.kind)))
   const activeKind = showBeside ? beside.activeBesideTab?.kind ?? null : null
@@ -199,6 +207,7 @@ export function SplitWorkspace(props: SplitWorkspaceProps) {
           session={session} isBusy={isBusy} approvals={approvals} runStatus={hasWorkspace ? runStatus : null}
           projectName={projectName} onOpenProject={onOpenProject} stateLabel={stateLabel}
           onOpenAttempts={onOpenAttempts} onOpenExternalBrowser={onOpenExternalBrowser} onOpenRun={beside.openRun}
+          timeline={timeline} onOpenCapabilitiesSettings={onOpenSettings}
         />
       }
       aboveComposer={simple ? (
