@@ -357,7 +357,7 @@ export function registerSessionRoutes(
 		const timeline = engines.get(sessionId) ? engines.snapshot(sessionId) : await host.getTimeline(sessionId);
 		const workspace = host.getWorkspacePath(sessionId);
 		const project = session.projectId ? host.projects().find(item => item?.id === session.projectId)?.name ?? null : null;
-		const agent = session.engine === "claude-code" ? "Claude Code" : session.engine === "codex" ? "Codex" : "ADE agent";
+		const agent = session.engine === "claude-code" ? "Claude Code" : session.engine === "codex" ? "Codex" : session.engine === "opencode" ? "OpenCode" : "ADE agent";
 		const format = ctx.url.searchParams.get("format") === "json" ? "json" : "md";
 		const body = redactForCwd(format === "json"
 			? JSON.stringify({ session: { id: session.id, title: session.label, project, branch: session.workspace?.branch ?? null, agent }, exportedAt: new Date().toISOString(), items: timeline.items, usage: timeline.usage ?? null }, null, 2)

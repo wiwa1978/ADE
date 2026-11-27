@@ -13,6 +13,7 @@ import type { RuntimeEventBus } from "./events.ts";
 import { redact, secretEnv } from "./project-secrets.ts";
 import { claudeDenyRules } from "./guardrails.ts";
 import { commandInvocation, q, sessionTarget, stopOnTarget } from "./execution-targets.ts";
+import type { EgressCredentialProxy } from "./egress-proxy.ts";
 import { HARNESS_CATALOG, TerminalHarnessSchema, type TerminalHarness } from "@ade/protocol";
 
 export type EngineId = TerminalHarness;
@@ -194,6 +195,56 @@ export function applyEvent(engine: EngineId, state: EngineSession, turn: { assis
 		}
 		return;
 	}
+	if (engine === "opencode") {
+		const sessionId = asString(event.sessionID) ?? asString(event.session_id);
+		if (sessionId && !state.externalId) state.externalId = sessionId;
+		const part = isRecord(event.part) ? event.part : null;
+		if (eventType === "text") {
+			const text = asString(part?.text) ?? asString(event.text);
+			if (text) assistant.text += (assistant.text ? "\n\n" : "") + text;
+		} else if (eventType === "reasoning") {
+			const text = asString(part?.text) ?? asString(event.text);
+			if (text) assistant.thinking += text;
+		} else if (eventType === "tool_use" || eventType === "tool") {
+			const callId = asString(part?.callID) ?? asString(part?.id) ?? asString(event.id) ?? randomUUID();
+			let call = findTool(callId);
+			const stateObj = isRecord(part?.state) ? part.state : null;
+			if (!call) {
+				call = {
+					callId,
+					name: asString(part?.tool) ?? asString(event.name) ?? "tool",
+					arguments: isRecord(stateObj?.input) ? stateObj.input : (isRecord(part?.input) ? part.input : {}),
+					status: "running",
+					output: "",
+					isError: false,
+				};
+				assistant.toolCalls.push(call);
+			}
+			const status = asString(stateObj?.status);
+			const output = stringifyToolContent(stateObj?.output ?? stateObj?.error ?? part?.output);
+			if (output) call.output = output.slice(0, 20000);
+			if (status === "completed") {
+				call.isError = false;
+				call.status = "done";
+			} else if (status === "error") {
+				call.isError = true;
+				call.status = "error";
+			}
+		} else if (eventType === "step_finish") {
+			const tokens = isRecord(part?.tokens) ? part.tokens : (isRecord(event.tokens) ? event.tokens : null);
+			if (tokens) {
+				state.usage.inputTokens += asFiniteNumber(tokens.input);
+				state.usage.outputTokens += asFiniteNumber(tokens.output);
+			}
+			state.usage.totalCost += asFiniteNumber(part?.cost ?? event.cost);
+		} else if (eventType === "error") {
+			state.lastStatus = "failed";
+			const errObj = isRecord(event.error) ? event.error : null;
+			const message = asString(errObj?.message) ?? asString(event.message);
+			if (message) assistant.text += `${assistant.text ? "\n\n" : ""}${message}`;
+		}
+		return;
+	}
 	// Codex
 	const threadId = asString(event.thread_id);
 	if (eventType === "thread.started" && threadId) state.externalId = threadId;
@@ -279,6 +330,13 @@ export function engineArgs(engine: EngineId, prompt: string, externalId: string 
 		args.push("--", prompt);
 		return args;
 	}
+	if (engine === "opencode") {
+		const args = ["run", "--format", "json"];
+		if (externalId) args.push("--session", externalId);
+		if (model) args.push("--model", model);
+		args.push("--", prompt);
+		return args;
+	}
 	// In a container, VM or WSL the machine itself is the sandbox, and Codex's own sandbox often
 	// can't start there, so it only stays on for read-only ("ask") sessions.
 	const sandbox = policy === "auto-all" || (contained && policy !== "ask") ? ["--dangerously-bypass-approvals-and-sandbox"] : ["-s", policy === "ask" ? "read-only" : "workspace-write"];
@@ -311,10 +369,16 @@ export class EngineManager {
 	#environment: NodeJS.ProcessEnv;
 
 	#guard: ((engine: string, sessionId?: string) => string | null) | null = null;
+	#egressProxy: EgressCredentialProxy | null = null;
 
 	/** EU-only mode: why an engine may not be used (null when it may). */
 	setGuard(guard: (engine: string, sessionId?: string) => string | null) {
 		this.#guard = guard;
+	}
+
+	/** Host-side egress proxy so real API keys never enter external CLI processes. */
+	setEgressProxy(proxy: EgressCredentialProxy | null) {
+		this.#egressProxy = proxy;
 	}
 
 	constructor({ stateDirectory, events, environment = process.env }: { stateDirectory: string; events?: RuntimeEventBus; environment?: NodeJS.ProcessEnv }) {
@@ -515,20 +579,29 @@ export class EngineManager {
 		const target = sessionTarget(targetSession);
 		const args = engineArgs(state.engine, content, state.externalId, policy, model, target === "local" ? gitWritableDirs(cwd) : [], target !== "local", mcpConfigPath);
 		const env: Record<string, string> = { ...secrets, NO_COLOR: "1", IS_SANDBOX: "1" };
-		// Sessions that run in Docker, WSL2, on an SSH host or a Boat.dev VM run the agent CLI there.
+		// When the host egress credential proxy is active, inject opaque per-session proxy tokens
+		// and strip raw provider API keys so the agent CLI never sees real credentials.
+		const proxyEnv = this.#egressProxy?.running ? this.#egressProxy.envForSession(targetSession) : {};
+		const baseEnv: NodeJS.ProcessEnv = { ...this.#environment };
+		if (Object.keys(proxyEnv).length > 0) {
+			if (proxyEnv.ANTHROPIC_API_KEY) delete baseEnv.ANTHROPIC_API_KEY;
+			if (proxyEnv.OPENAI_API_KEY) delete baseEnv.OPENAI_API_KEY;
+			Object.assign(env, proxyEnv);
+		}
+		// Sessions that run in Docker, Podman, WSL2, on an SSH host or a Boat.dev VM run the agent CLI there.
 		// It's installed with npm on first use if missing; it signs in with ANTHROPIC_API_KEY /
 		// CLAUDE_CODE_OAUTH_TOKEN / OPENAI_API_KEY (as project secrets) or its own sign-in on that machine.
 		let remote: ReturnType<typeof commandInvocation> = null;
 		if (target !== "local") {
-			const pkg = state.engine === "claude-code" ? "@anthropic-ai/claude-code" : "@openai/codex";
+			const pkg = state.engine === "claude-code" ? "@anthropic-ai/claude-code" : state.engine === "opencode" ? "opencode-ai" : "@openai/codex";
 			const install = `command -v ${command} >/dev/null 2>&1 || npm install -g ${pkg} >/dev/null 2>&1 || { echo "ADE: ${engineInfo[state.engine].name} isn't installed on this machine and couldn't be installed with npm (npm install -g ${pkg})." >&2; exit 127; }`;
-			const signIn = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "CODEX_API_KEY"].filter(name => this.#environment[name] || secrets[name]);
-			for (const name of signIn) if (!env[name] && this.#environment[name]) env[name] = String(this.#environment[name]);
-			remote = commandInvocation(targetSession, cwd, `${install}; ${command} ${args.map(q).join(" ")}`, [...Object.keys(secrets), ...signIn, "NO_COLOR", "IS_SANDBOX"], { pidFile: this.#pidFile(sessionId) });
+			const signIn = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "CODEX_API_KEY", "MISTRAL_API_KEY", "OLLAMA_HOST"].filter(name => baseEnv[name] || secrets[name]);
+			for (const name of signIn) if (!env[name] && baseEnv[name]) env[name] = String(baseEnv[name]);
+			remote = commandInvocation(targetSession, cwd, `${install}; ${command} ${args.map(q).join(" ")}`, [...Object.keys(secrets), ...Object.keys(proxyEnv), ...signIn, "NO_COLOR", "IS_SANDBOX"], { pidFile: this.#pidFile(sessionId) });
 		}
 		const child = spawn(remote?.file ?? command, remote?.args ?? args, {
 			cwd,
-			env: { ...this.#environment, ...env, ...remote?.env },
+			env: { ...baseEnv, ...env, ...remote?.env },
 			stdio: ["ignore", "pipe", "pipe"],
 			windowsHide: true,
 		});

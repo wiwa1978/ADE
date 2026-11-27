@@ -212,7 +212,7 @@ export function buildSwarmModel(input: SwarmInput): SwarmOverviewModel {
       name: sub.name || "Subagent",
       handle: toHandle(sub.name || `worker-${idx + 1}`),
       role: sub.role || "worker",
-      harness: sub.harness === "claude-code" ? "Claude Code" : sub.harness === "codex" ? "Codex" : "Pi",
+      harness: sub.harness === "claude-code" ? "Claude Code" : sub.harness === "codex" ? "Codex" : sub.harness === "opencode" ? "OpenCode" : "Pi",
       model: sub.model,
       mode: sub.mode ?? "readonly",
       branch: sub.branch ?? null,

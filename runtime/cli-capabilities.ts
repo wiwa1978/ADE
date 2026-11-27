@@ -6,12 +6,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { McpServerStatus } from "./mcp.ts";
 
-export type CliEngine = "claude-code" | "codex";
+export type CliEngine = "claude-code" | "codex" | "opencode";
 
 export type CliSkill = { name: string; dir: string };
 
 export function cliSkillsDir(workspace: string, engine: CliEngine): string {
-	return join(workspace, engine === "claude-code" ? ".claude" : ".codex", "skills");
+	const folder = engine === "claude-code" ? ".claude" : engine === "opencode" ? ".opencode" : ".codex";
+	return join(workspace, folder, "skills");
 }
 
 /** Copy active skills into the CLI's project skills folder. Returns how many folders were copied. */

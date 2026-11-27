@@ -20,6 +20,9 @@ import { SubagentScheduler } from "./scheduler.ts";
 import { AutomationStore } from "./automations.ts";
 import { Integrations, type SlackEvents } from "./integrations.ts";
 import { createAutomationRunner } from "./automation-runner.ts";
+import { EgressCredentialProxy } from "./egress-proxy.ts";
+import { InboundGateway } from "./inbound-gateway.ts";
+import { SessionBackupManager } from "./session-backup.ts";
 import type { LocalAgentHost } from "./host.ts";
 import type { WorktreeManager } from "./worktrees.ts";
 import type { createSessionGit } from "./session-git.ts";
@@ -52,9 +55,24 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	const scriptRunner = new ScriptRunner({ events: host.events });
 	const checkpoints = createCheckpoints();
 	const engines = new EngineManager({ stateDirectory, events: host.events });
+	const egressProxy = new EgressCredentialProxy({
+		eu: host.eu,
+		resolveCredential: provider => {
+			if (provider === "anthropic") {
+				return { apiKey: process.env.ANTHROPIC_API_KEY?.trim() || null, baseUrl: "https://api.anthropic.com" };
+			}
+			if (provider === "openai") {
+				return { apiKey: process.env.OPENAI_API_KEY?.trim() || null, baseUrl: "https://api.openai.com" };
+			}
+			const compatUrl = process.env.ADE_COMPATIBLE_URL?.trim() || "";
+			return { apiKey: process.env.ADE_COMPATIBLE_KEY?.trim() || null, baseUrl: compatUrl };
+		},
+	});
+	// Start the loopback egress credential proxy lazily; ignore bind errors in restricted sandboxes.
+	void egressProxy.start(0).then(() => { engines.setEgressProxy(egressProxy); }).catch(() => undefined);
 	/** Active skills go into the CLI's skills folder. Claude Code also gets only the MCP servers that are on. */
 	const cliMcpConfig = (sessionId: string, workspace: string, engine: EngineId) => {
-		if (engine !== "claude-code" && engine !== "codex") return null;
+		if (engine !== "claude-code" && engine !== "codex" && engine !== "opencode") return null;
 		const projectId = host.sessionProjectId(sessionId);
 		const scope = { workspace, projectId };
 		const skills = effectiveSkills(scanSkillLandscape({ workspace, sources: host.skillLibrary.list() }))
@@ -472,16 +490,18 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	});
 	const subagentModel = (engine: string) => {
 		const policy = subagentPolicies.get();
-		return (engine === "claude-code" ? policy.claudeModel : policy.codexModel) || null;
+		if (engine === "claude-code") return policy.claudeModel || null;
+		if (engine === "opencode") return policy.opencodeModel || null;
+		return policy.codexModel || null;
 	};
 	setExternalSubagentRunner({
 		installed(sessionId) {
 			const set = new Set<SubagentHarness>(["pi"]);
 			for (const engine of engines.available()) {
-				if ((engine.id === "claude-code" || engine.id === "codex") && engine.available) set.add(engine.id);
+				if ((engine.id === "claude-code" || engine.id === "codex" || engine.id === "opencode") && engine.available) set.add(engine.id);
 			}
 			// On a container, VM or WSL, ADE installs the CLI there with npm when it's first used.
-			if (sessionTarget(sessionId) !== "local") { set.add("claude-code"); set.add("codex"); }
+			if (sessionTarget(sessionId) !== "local") { set.add("claude-code"); set.add("codex"); set.add("opencode"); }
 			return set;
 		},
 		start({ sessionId, conversationId, harness, cwd, task, readOnly }) {
@@ -534,6 +554,34 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 
 	// Background agents: scheduled and issue-triggered automations (R11).
 	const automations = new AutomationStore(stateDirectory);
+	const inboundGateway = new InboundGateway(stateDirectory);
+	const sessionBackup = new SessionBackupManager(stateDirectory);
+	// Auto-backup sessions to the configured git backup repo after completed turns.
+	if (host.events?.subscribe) {
+		unsubscribers.push(host.events.subscribe((event) => {
+			if (!sessionBackup.status().enabled) return;
+			if (event.type !== "sessions.changed") return;
+			const payload = event.payload as { id?: string; deleted?: boolean } | undefined;
+			const id = payload?.id;
+			if (!id || payload?.deleted) return;
+			const session = viewSessions().find(item => item.id === id);
+			if (!session || session.status === "working" || !session.messages.length) return;
+			void sessionBackup.backupSession({
+				session: {
+					id: session.id,
+					label: session.label,
+					projectId: session.projectId ?? null,
+					engine: session.engine,
+					workspacePath: session.workspace?.path ?? null,
+					branch: session.workspace?.branch ?? null,
+					updatedAt: session.updatedAt ?? null,
+					messages: session.messages,
+				},
+				blueprint: host.blueprints.view(session.id),
+				team: host.team.state(session.id),
+			});
+		}));
+	}
 	const automationRunner = createAutomationRunner({
 		store: automations,
 		projects: () => host.projects?.() ?? [],
@@ -558,6 +606,7 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		usageWaiter.stop();
 		scriptRunner.stopAll();
 		engines.abortAll();
+		void egressProxy.close();
 		usage.flush();
 		automationRunner.stop();
 		for (const resolveResume of resumeSubagent.values()) resolveResume(false);
@@ -568,5 +617,5 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		projectOf.clear();
 		subagentStarts.clear();
 	};
-	return { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner, integrations, executionTargets, subagentPolicies, subagentKey, limitGuard, usageWaiter, scheduler, dispose };
+	return { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner, integrations, executionTargets, subagentPolicies, subagentKey, limitGuard, usageWaiter, scheduler, egressProxy, inboundGateway, sessionBackup, dispose };
 }

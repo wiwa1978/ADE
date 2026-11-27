@@ -184,7 +184,7 @@ export function createSubagentTools(opts: SubagentToolsOptions) {
 		name: "spawn_subagent",
 		description: "Spawn a new subagent (1 or more per session) with its own conversation and live UI pane. Set background=true to run concurrently while you continue working or spawn multiple parallel subagents. Modes: 'readonly' (inspect/search only), 'workspace' (edit/run in current workspace), or 'worktree' (edit/run in a dedicated isolated Git worktree)." + harnessChoiceText(subagentPolicy(), installedHarnesses()),
 		parameters: obj({
-			harness: opt(str({ description: "Which agent runs this subagent: 'pi', 'claude-code' or 'codex' (see the tool description)." })),
+			harness: opt(str({ description: "Which agent runs this subagent: 'pi', 'claude-code', 'codex', or 'opencode' (see the tool description)." })),
 			name: str({ description: "Short descriptive name (e.g. 'Backend API', 'Test Runner', 'UI Reviewer')" }),
 			role: opt(str({ description: "2-5 word role title (e.g. 'Codebase Researcher', 'Frontend Builder')" })),
 			task: str({ description: "Clear, actionable assignment for the subagent" }),

@@ -75,7 +75,7 @@ export const EnvironmentActivateRequestSchema = z.object({
 
 // --- Execution Targets ---
 
-export const RunTargetSchema = z.enum(["local", "docker", "wsl", "ssh", "boat", "cloud"]);
+export const RunTargetSchema = z.enum(["local", "docker", "podman", "wsl", "ssh", "boat", "cloud"]);
 export const VmSizeSchema = z.enum(["small", "medium", "large"]);
 
 export const TargetSettingsRequestSchema = z.object({
@@ -91,14 +91,15 @@ export const TargetSettingsRequestSchema = z.object({
 
 // --- Subagent Policy & Limits ---
 
-export const SubagentHarnessSchema = z.enum(["pi", "claude-code", "codex"]);
+export const SubagentHarnessSchema = z.enum(["pi", "claude-code", "codex", "opencode"]);
 
 export const SubagentPolicyRequestSchema = z.object({
 	allowed: z.array(SubagentHarnessSchema).optional(),
-	choice: z.enum(["agent", "pi", "claude-code", "codex"]).optional(),
+	choice: z.enum(["agent", "pi", "claude-code", "codex", "opencode"]).optional(),
 	piModel: z.string().max(120).optional(),
 	claudeModel: z.string().max(120).optional(),
 	codexModel: z.string().max(120).optional(),
+	opencodeModel: z.string().max(120).optional(),
 });
 
 export const LimitsRequestSchema = z.object({

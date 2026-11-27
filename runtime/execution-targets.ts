@@ -29,8 +29,11 @@ import { getFreePort } from "./net-utils.ts";
 const execute = promisify(execFile);
 const EXEC_BRIDGE_PATH = fileURLToPath(new URL("./cloud-providers/exec-bridge.ts", import.meta.url));
 
-export type RunTarget = "local" | "docker" | "wsl" | "ssh" | "boat" | "cloud";
-export const RUN_TARGETS: RunTarget[] = ["local", "docker", "wsl", "ssh", "boat", "cloud"];
+export type RunTarget = "local" | "docker" | "podman" | "wsl" | "ssh" | "boat" | "cloud";
+export const RUN_TARGETS: RunTarget[] = ["local", "docker", "podman", "wsl", "ssh", "boat", "cloud"];
+export function isContainerTarget(target: RunTarget): target is "docker" | "podman" {
+	return target === "docker" || target === "podman";
+}
 export const DEFAULT_DOCKER_IMAGE = "node:22-bookworm";
 export const DEFAULT_REMOTE_ROOT = "ade-workspaces";
 export const DEFAULT_IDLE_SLEEP_MINUTES = 15;
@@ -106,6 +109,18 @@ const defaultDocker: DockerRunner = async (args, options = {}) => {
 		const detail = String(err?.stderr || err?.message || "").trim().split("\n").filter(Boolean).slice(-2).join(" ");
 		if (/Cannot connect to the Docker daemon|Is the docker daemon running|docker.sock/i.test(detail)) throw httpError(503, "Docker isn't running. Start Docker Desktop and try again.");
 		throw httpError(502, detail || `docker ${args[0]} failed.`);
+	}
+};
+
+const defaultPodman: DockerRunner = async (args, options = {}) => {
+	try {
+		const { stdout } = await execute("podman", args, { timeout: options.timeout ?? 60_000, maxBuffer: 8 * 1024 * 1024, windowsHide: true });
+		return stdout;
+	} catch (error) {
+		const err = error as { code?: unknown; stderr?: unknown; message?: unknown };
+		if (err?.code === "ENOENT") throw httpError(503, "Podman isn't installed on this computer. Install Podman for rootless container isolation without sudo.");
+		const detail = String(err?.stderr || err?.message || "").trim().split("\n").filter(Boolean).slice(-2).join(" ");
+		throw httpError(502, detail || `podman ${args[0]} failed.`);
 	}
 };
 
@@ -269,7 +284,7 @@ function rsyncProtectArgsFlag(): string {
 	return cachedRsyncProtectArgs ? "--protect-args " : "";
 }
 
-const RunTargetSchema = z.enum(["local", "docker", "wsl", "ssh", "boat", "cloud"]);
+const RunTargetSchema = z.enum(["local", "docker", "podman", "wsl", "ssh", "boat", "cloud"]);
 const TargetStateSchema = z.enum(["absent", "preparing", "running", "sleeping", "stopped", "failed"]);
 const VmSizeSchema = z.enum(["small", "medium", "large"]);
 const TargetSettingsSchema = z.object({
@@ -397,6 +412,7 @@ export class ExecutionTargets {
 	#stateDirectory: string;
 	#data: Stored;
 	#docker: DockerRunner;
+	#podman: DockerRunner;
 	#run: CommandRunner;
 	#worktreesRoot: string | null;
 	#boat: (() => BoatApi | null) | null;
@@ -409,6 +425,7 @@ export class ExecutionTargets {
 
 	constructor(stateDirectory: string, options: {
 		docker?: DockerRunner;
+		podman?: DockerRunner;
 		run?: CommandRunner;
 		worktreesRoot?: string | null;
 		boat?: () => BoatApi | null;
@@ -419,6 +436,7 @@ export class ExecutionTargets {
 		this.#stateDirectory = stateDirectory;
 		this.#file = join(stateDirectory, "execution-targets.json");
 		this.#docker = options.docker ?? defaultDocker;
+		this.#podman = options.podman ?? defaultPodman;
 		this.#run = options.run ?? defaultRun;
 		this.#worktreesRoot = options.worktreesRoot ?? null;
 		this.#boat = options.boat ?? null;
@@ -450,9 +468,13 @@ export class ExecutionTargets {
 
 	/** Which targets this computer can offer (WSL2 only on Windows; SSH and Cloud VMs on macOS/Linux). */
 	available(): RunTarget[] {
-		return (["local", "docker", "wsl", "ssh", "cloud"] as RunTarget[])
+		return (["local", "docker", "podman", "wsl", "ssh", "cloud"] as RunTarget[])
 			.filter(target => target !== "wsl" || this.#platform === "win32")
 			.filter(target => !((target === "ssh" || target === "cloud") && this.#platform === "win32"));
+	}
+
+	#containerRun(target: "docker" | "podman", args: string[], options?: { timeout?: number }) {
+		return target === "podman" ? this.#podman(args, options) : this.#docker(args, options);
 	}
 
 	#resolveCloudProviderId(record: Pick<TargetSettings, "target" | "cloudProvider">): CloudProviderId {
@@ -580,7 +602,7 @@ export class ExecutionTargets {
 		const next = this.#update(sessionId, { ...settings, ...(changedMachine ? { state: settings.target === "local" ? "absent" : "preparing", message: settings.target === "local" ? "" : "Preparing…" } : {}) });
 		if (changedMachine) {
 			void this.#release(previous).then(() => {
-				if (changedMachine && previous.target === "docker") this.#update(sessionId, { container: null, mounts: [] });
+				if (changedMachine && isContainerTarget(previous.target)) this.#update(sessionId, { container: null, mounts: [] });
 				if (changedMachine && isCloudTarget(previous.target) && (!isCloudTarget(settings.target) || settings.cloudProvider !== previous.cloudProvider || settings.vmSize !== previous.vmSize)) {
 					this.#update(sessionId, { boatId: null, vmId: null, vmCheckpoint: null, sshEndpoint: null });
 				}
@@ -592,7 +614,7 @@ export class ExecutionTargets {
 
 	/** Stop what a previous target was using (container or VM) when a session moves elsewhere. */
 	async #release(previous: SessionTarget) {
-		if (previous.target === "docker" && previous.container) await this.#docker(["rm", "-f", previous.container]).catch(() => undefined);
+		if (isContainerTarget(previous.target) && previous.container) await this.#containerRun(previous.target, ["rm", "-f", previous.container]).catch(() => undefined);
 	}
 
 	/** Make sure a session's target is ready: container running, SSH host reachable, Cloud VM awake. */
@@ -675,7 +697,7 @@ export class ExecutionTargets {
 	async #ensure(sessionId: string, paths: { workspace: string; repository?: string | null }): Promise<SessionTarget> {
 		const record = this.session(sessionId);
 		try {
-			if (record.target === "docker") return await this.#ensureDocker(sessionId, record, paths);
+			if (isContainerTarget(record.target)) return await this.#ensureDocker(sessionId, record, paths);
 			if (record.target === "wsl") {
 				const list = (await this.#run("wsl.exe", ["-l", "-q"], { timeout: 15_000 })).replace(/\0/g, "").split(/\r?\n/).map(line => line.trim()).filter(Boolean);
 				if (record.wslDistro && !list.includes(record.wslDistro)) throw new Error(`WSL distribution ${record.wslDistro} isn't installed. Installed: ${list.join(", ") || "none"}.`);
@@ -700,15 +722,16 @@ export class ExecutionTargets {
 	}
 
 	async #ensureDocker(sessionId: string, record: SessionTarget, paths: { workspace: string; repository?: string | null }) {
+		const runtime: "docker" | "podman" = record.target === "podman" ? "podman" : "docker";
 		if (record.container) {
-			const state = (await this.#docker(["inspect", "-f", "{{.State.Running}}", record.container]).catch(() => "missing")).trim();
+			const state = (await this.#containerRun(runtime, ["inspect", "-f", "{{.State.Running}}", record.container]).catch(() => "missing")).trim();
 			if (state === "true") return this.#update(sessionId, { state: "running", message: "" });
 			if (state === "false") {
-				await this.#docker(["start", record.container]);
+				await this.#containerRun(runtime, ["start", record.container]);
 				return this.#update(sessionId, { state: "running", message: "" });
 			}
 		}
-		this.#update(sessionId, { state: "preparing", message: `Pulling ${record.image} if needed and starting the container…` });
+		this.#update(sessionId, { state: "preparing", message: `Pulling ${record.image} if needed and starting the ${runtime === "podman" ? "rootless Podman" : "Docker"} container…` });
 		const workspace = realpathSync.native(paths.workspace);
 		const mounts = new Set<string>([workspace]);
 		// The worktree's Git metadata lives in the main repository; mount it so git works inside.
@@ -720,7 +743,7 @@ export class ExecutionTargets {
 		}
 		// Subagents create their own worktrees next to the session's; mount that folder too.
 		if (this.#worktreesRoot && existsSync(this.#worktreesRoot)) mounts.add(realpathSync.native(this.#worktreesRoot));
-		// Claude Code and Codex keep their sign-in and conversations here; mount them read-only so they work inside.
+		// Claude Code, Codex and OpenCode keep their sign-in and conversations here; mount them read-only so they work inside.
 		const home = homedir();
 		const safeExistingReal = (path: string): string | null => {
 			try {
@@ -729,7 +752,7 @@ export class ExecutionTargets {
 				return null;
 			}
 		};
-		const agentHomes = [join(home, ".codex"), join(home, ".claude")]
+		const agentHomes = [join(home, ".codex"), join(home, ".claude"), join(home, ".opencode")]
 			.map(safeExistingReal)
 			.filter((path): path is string => Boolean(path));
 		const agentFiles = [join(home, ".claude.json")]
@@ -738,9 +761,11 @@ export class ExecutionTargets {
 		const list = [...mounts].sort((a, b) => a.length - b.length).filter((path, index, all) => !all.slice(0, index).some(parent => inside(path, parent)));
 		const port = record.port ?? await getFreePort();
 		const name = `ade-${sessionId.replace(/[^a-z0-9]/gi, "").slice(0, 12)}`;
-		await this.#docker(["rm", "-f", name]).catch(() => undefined);
-		const user = this.#platform === "linux" && typeof process.getuid === "function" ? ["--user", `${process.getuid()}:${process.getgid?.() ?? process.getuid()}`] : [];
-		await this.#docker([
+		await this.#containerRun(runtime, ["rm", "-f", name]).catch(() => undefined);
+		const user = runtime === "podman"
+			? (this.#platform === "linux" ? ["--userns=keep-id"] : [])
+			: (this.#platform === "linux" && typeof process.getuid === "function" ? ["--user", `${process.getuid()}:${process.getgid?.() ?? process.getuid()}`] : []);
+		await this.#containerRun(runtime, [
 			"run", "-d", "--init", "--name", name,
 			"--cap-drop=ALL",
 			"--security-opt=no-new-privileges:true",
@@ -856,8 +881,8 @@ export class ExecutionTargets {
 
 	async status(sessionId: string) {
 		const record = this.session(sessionId);
-		if (record.target !== "docker" || !record.container || record.state === "preparing") return record;
-		const running = (await this.#docker(["inspect", "-f", "{{.State.Running}}", record.container]).catch(() => "missing")).trim();
+		if (!isContainerTarget(record.target) || !record.container || record.state === "preparing") return record;
+		const running = (await this.#containerRun(record.target, ["inspect", "-f", "{{.State.Running}}", record.container]).catch(() => "missing")).trim();
 		const state: TargetState = running === "true" ? "running" : running === "false" ? "stopped" : "absent";
 		if (state !== record.state && record.state !== "failed") this.#update(sessionId, { state });
 		return this.session(sessionId);
@@ -867,7 +892,7 @@ export class ExecutionTargets {
 	async remove(sessionId: string) {
 		const record = this.#data.sessions[sessionId];
 		if (!record) return;
-		if (record.container) await this.#docker(["rm", "-f", record.container]).catch(() => undefined);
+		if (record.container && isContainerTarget(record.target)) await this.#containerRun(record.target, ["rm", "-f", record.container]).catch(() => undefined);
 		const vmId = record.vmId ?? record.boatId;
 		if (vmId) {
 			const providerId = this.#resolveCloudProviderId(record);
@@ -881,6 +906,14 @@ export class ExecutionTargets {
 	async dockerAvailable() {
 		try {
 			return { available: true, version: (await this.#docker(["version", "--format", "{{.Server.Version}}"], { timeout: 10_000 })).trim(), message: "" };
+		} catch (error) {
+			return { available: false, version: null, message: error instanceof Error ? error.message : String(error) };
+		}
+	}
+
+	async podmanAvailable() {
+		try {
+			return { available: true, version: (await this.#podman(["version", "--format", "{{.Client.Version}}"], { timeout: 10_000 })).trim(), message: "" };
 		} catch (error) {
 			return { available: false, version: null, message: error instanceof Error ? error.message : String(error) };
 		}
@@ -1015,9 +1048,9 @@ export class ExecutionTargets {
 		if (full.state === "failed" || full.state === "preparing" || full.state === "absent" || full.state === "sleeping") return failing(this.#unavailable(full));
 		this.touchActivity(sessionId!);
 		const pid = options.pidFile ? `echo $$ > ${q(options.pidFile)}; ` : "";
-		if (full.target === "docker") {
+		if (isContainerTarget(full.target)) {
 			if (!full.container || !this.#covers(full, cwd)) return failing(this.#unavailable(full, cwd));
-			return { file: "docker", args: dockerExecArgs(full.container, cwd, `${pid}${command}`, envNames) };
+			return { file: full.target, args: dockerExecArgs(full.container, cwd, `${pid}${command}`, envNames) };
 		}
 		if (full.target === "wsl") {
 			const args = [...(full.wslDistro ? ["-d", full.wslDistro] : []), "--cd", toWslPath(cwd), "--", "bash", "-lc", `${pid}${command}`];
@@ -1040,9 +1073,9 @@ export class ExecutionTargets {
 		const explain = (text: string) => ({ file: "/bin/sh", args: ["-c", `echo ${q(text)}; exec sleep 3600`] });
 		if (full.state === "failed" || full.state === "preparing" || full.state === "absent" || full.state === "sleeping") return explain(this.#unavailable(full));
 		this.touchActivity(sessionId!);
-		if (full.target === "docker") {
+		if (isContainerTarget(full.target)) {
 			if (!full.container || !this.#covers(full, cwd)) return explain(this.#unavailable(full, cwd));
-			return { file: "docker", args: dockerShellArgs(full.container, cwd, envNames) };
+			return { file: full.target, args: dockerShellArgs(full.container, cwd, envNames) };
 		}
 		if (full.target === "wsl") {
 			return { file: "wsl.exe", args: [...(full.wslDistro ? ["-d", full.wslDistro] : []), "--cd", toWslPath(cwd)], env: { WSLENV: wslEnv(envNames, process.env.WSLENV) } };
@@ -1058,8 +1091,8 @@ export class ExecutionTargets {
 	stopProcess(sessionId: string, pidFile: string, cwd: string, workspaces: string[] = []) {
 		const record = this.session(sessionId);
 		const script = killTreeScript(pidFile);
-		if (record.target === "docker" && record.container) {
-			execFile("docker", ["exec", record.container, "sh", "-c", script], { timeout: 10_000 }, () => undefined);
+		if (isContainerTarget(record.target) && record.container) {
+			execFile(record.target, ["exec", record.container, "sh", "-c", script], { timeout: 10_000 }, () => undefined);
 		} else if (record.target === "wsl") {
 			execFile("wsl.exe", [...(record.wslDistro ? ["-d", record.wslDistro] : []), "--", "sh", "-c", script], { timeout: 10_000 }, () => undefined);
 		} else if (isCloudTarget(record.target) && this.#cloudTransport(this.#resolveCloudProviderId(record)) === "exec") {
@@ -1094,15 +1127,17 @@ export class ExecutionTargets {
 	#unavailable(record: SessionTarget, cwd?: string) {
 		const where = record.target === "docker"
 			? "Docker"
-			: record.target === "wsl"
-				? "WSL2"
-				: isCloudTarget(record.target)
-					? `a ${this.#cloudLabel(this.#resolveCloudProviderId(record))} VM`
-					: `SSH host ${record.sshHost}`;
+			: record.target === "podman"
+				? "Podman"
+				: record.target === "wsl"
+					? "WSL2"
+					: isCloudTarget(record.target)
+						? `a ${this.#cloudLabel(this.#resolveCloudProviderId(record))} VM`
+						: `SSH host ${record.sshHost}`;
 		if (record.state === "preparing") return `ADE: this session runs on ${where}, which is still starting. Try again in a moment.`;
 		if (record.state === "sleeping") return `ADE: this session runs on ${where}, which is asleep. Open Run to wake it or send a message.`;
 		if (record.state === "failed") return `ADE: this session runs on ${where}, but it isn't available: ${record.message}`;
-		if (cwd && record.target === "docker" && record.container && !this.#covers(record, cwd)) return `ADE: ${cwd} is not mounted in this session's Docker container.`;
+		if (cwd && isContainerTarget(record.target) && record.container && !this.#covers(record, cwd)) return `ADE: ${cwd} is not mounted in this session's ${where} container.`;
 		return `ADE: this session runs on ${where}, but it isn't running. Open Run to start it.`;
 	}
 }
@@ -1140,7 +1175,7 @@ export function terminalInvocation(cwd: string, envNames: string[]) {
 /** The port the session's Run script should use: Docker's published port (SSH forwards a local one). */
 export function sessionPort(sessionId: string) {
 	const record = current?.session(sessionId);
-	return record?.target === "docker" ? record.port : null;
+	return record && isContainerTarget(record.target) ? record.port : null;
 }
 
 export function sessionTarget(sessionId: string | null | undefined): RunTarget {

@@ -18,7 +18,7 @@ export const ContextIsolationSchema = z.enum(["elephant", "goldfish"]);
 
 export const ApprovalGateModeSchema = z.enum(["never", "before", "after"]);
 
-export const WorkerHarnessSchema = z.enum(["pi", "claude-code", "codex"]);
+export const WorkerHarnessSchema = z.enum(["pi", "claude-code", "codex", "opencode"]);
 
 export const BlueprintStageSchema = z.object({
 	id: z.string(),

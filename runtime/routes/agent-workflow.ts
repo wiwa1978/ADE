@@ -6,7 +6,7 @@ import type { Router } from "../router.ts";
 import type { RouteDeps } from "./context.ts";
 import { readInstructions, searchWorkspaceFiles, writeInstructions } from "../agent-context.ts";
 import { harnessGuidance } from "../subagent-policy.ts";
-import { sessionBlueprintOptions, VIBE_BLUEPRINT_ID } from "@ade/blueprints";
+import { listStarterRecipes, sessionBlueprintOptions, VIBE_BLUEPRINT_ID } from "@ade/blueprints";
 import { resolveSessionBlueprint } from "../session-blueprints.ts";
 import { buildBrief } from "../session-brief.ts";
 import { getWorkspaceGitSummary } from "../workspace-files.ts";
@@ -37,7 +37,7 @@ import {
 
 export function registerAgentWorkflowRoutes(
 	router: Router,
-	{ host, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, usage, secrets, automations, automationRunner, integrations, executionTargets, subagentPolicies, limitGuard, usageWaiter, subagentKey, scheduler, sendToAgent }: RouteDeps,
+	{ host, worktreeManager, inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, usage, secrets, automations, automationRunner, integrations, executionTargets, subagentPolicies, limitGuard, usageWaiter, subagentKey, scheduler, sendToAgent, prepareWorktree, egressProxy, inboundGateway, sessionBackup }: RouteDeps,
 ): void {
 	/** The team board is kept per session id: only real sessions get one. */
 	const requireSession = (id: string) => {
@@ -47,6 +47,114 @@ export function registerAgentWorkflowRoutes(
 	// --- Ways of working: Vibe or a blueprint, per project (default) and per session ---
 	router.get("/api/blueprints/session-options", (ctx) => {
 		ctx.json(200, { blueprints: sessionBlueprintOptions() });
+	});
+
+	router.get("/api/recipes", (ctx) => {
+		ctx.json(200, { recipes: listStarterRecipes() });
+	});
+
+	router.get("/api/egress-proxy/status", (ctx) => {
+		ctx.json(200, egressProxy ? egressProxy.status() : { running: false, host: "127.0.0.1", port: null, activeGrants: 0, sessions: [] });
+	});
+
+	// --- Thin inbound chat & webhook gateway ("Calvin" pattern) ---
+	router.get("/api/inbound-gateway", (ctx) => {
+		ctx.json(200, inboundGateway ? inboundGateway.status() : { enabled: false, configured: false, secretHint: null, defaultProjectId: null, allowedChannels: [], mappedThreads: 0, recentEvents: [] });
+	});
+
+	router.put("/api/inbound-gateway", async (ctx) => {
+		if (!inboundGateway) throw notFound("Inbound gateway is not enabled on this host.");
+		const body = await ctx.readBody();
+		ctx.json(200, inboundGateway.update({
+			enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
+			defaultProjectId: body.defaultProjectId === null ? null : typeof body.defaultProjectId === "string" ? body.defaultProjectId : undefined,
+			allowedChannels: Array.isArray(body.allowedChannels) ? body.allowedChannels.map(String) : undefined,
+			rotateSecret: body.rotateSecret === true,
+		}));
+	}, { originError: "Use ADE to configure the inbound gateway." });
+
+	const handleInbound = async (source: "webhook" | "slack" | "matrix" | "mattermost", ctx: Parameters<Parameters<Router["post"]>[1]>[0]) => {
+		if (!inboundGateway) throw notFound("Inbound gateway is not enabled on this host.");
+		const body = await ctx.readBody(65_536);
+		// Slack URL verification runs before auth only if explicitly challenged with valid token/sig
+		inboundGateway.verifyAuth(ctx.request.headers, JSON.stringify(body));
+		const result = await inboundGateway.handle(source, body, {
+			eu: host.eu,
+			createSession: async ({ projectId, prompt, title }) => {
+				const project = (host.projects?.() ?? []).find(p => p?.id === projectId);
+				if (!project?.repository) throw badRequest("Target project must have a configured repository.");
+				const created = await host.createCodingTask({
+					projectId: project.id,
+					kind: "worktree",
+					repository: project.repository,
+					title,
+				}, worktreeManager);
+				if (!created) throw badRequest("Could not create coding session.");
+				prepareWorktree(created);
+				await sendToAgent(created.id, prompt, { async: true });
+				return { sessionId: created.id };
+			},
+			steerSession: async (sessionId, text) => {
+				await sendToAgent(sessionId, text, { async: true });
+			},
+			decideStage: async (sessionId, decision, feedback) => {
+				const message = host.blueprints.decide(sessionId, decision, feedback);
+				if (message) await sendToAgent(sessionId, message, { async: true });
+				return message;
+			},
+		});
+		ctx.json(200, result.challenge ? { challenge: result.challenge } : result);
+	};
+
+	router.post("/api/inbound/webhook", (ctx) => handleInbound("webhook", ctx), { requireAppOrigin: false });
+	router.post("/api/inbound/slack", (ctx) => handleInbound("slack", ctx), { requireAppOrigin: false });
+	router.post("/api/inbound/matrix", (ctx) => handleInbound("matrix", ctx), { requireAppOrigin: false });
+	router.post("/api/inbound/mattermost", (ctx) => handleInbound("mattermost", ctx), { requireAppOrigin: false });
+
+	// --- Git-backed session state backups ---
+	router.get("/api/session-backups", (ctx) => {
+		ctx.json(200, sessionBackup
+			? { status: sessionBackup.status(), backups: sessionBackup.listBackups() }
+			: { status: { enabled: false }, backups: [] });
+	});
+
+	router.put("/api/session-backups/config", async (ctx) => {
+		if (!sessionBackup) throw notFound("Session backups are not enabled on this host.");
+		const body = await ctx.readBody();
+		const status = sessionBackup.update({
+			enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
+			repoPath: typeof body.repoPath === "string" ? body.repoPath : undefined,
+			remoteUrl: typeof body.remoteUrl === "string" ? body.remoteUrl : undefined,
+			branch: typeof body.branch === "string" ? body.branch : undefined,
+			autoPush: typeof body.autoPush === "boolean" ? body.autoPush : undefined,
+		});
+		ctx.json(200, { status, backups: sessionBackup.listBackups() });
+	}, { originError: "Use ADE to configure session backups." });
+
+	router.post("/api/session-backups/:id", async (ctx) => {
+		if (!sessionBackup) throw notFound("Session backups are not enabled on this host.");
+		const session = viewSessions().find(item => item.id === ctx.params.id);
+		if (!session) throw notFound("Session not found.");
+		const result = await sessionBackup.backupSession({
+			session: {
+				id: session.id,
+				label: session.label,
+				projectId: session.projectId ?? null,
+				engine: session.engine,
+				workspacePath: session.workspace?.path ?? null,
+				branch: session.workspace?.branch ?? null,
+				updatedAt: session.updatedAt ?? null,
+				messages: session.messages,
+			},
+			blueprint: host.blueprints.view(session.id),
+			team: host.team.state(session.id),
+		});
+		ctx.json(200, { ...result, status: sessionBackup.status() });
+	}, { originError: "Use ADE to back up sessions." });
+
+	router.get("/api/session-backups/:id", (ctx) => {
+		if (!sessionBackup) throw notFound("Session backups are not enabled on this host.");
+		ctx.json(200, sessionBackup.readBackup(ctx.params.id));
 	});
 
 	router.get("/api/sessions/:id/stages", (ctx) => {
@@ -273,18 +381,26 @@ export function registerAgentWorkflowRoutes(
 		ctx.json(200, { policy: subagentPolicies.set(input) });
 	}, { originError: "Use ADE to change subagent settings." });
 
-	// --- Where sessions run: this computer or a Docker container ---
+	// --- Where sessions run: this computer, Docker, or rootless Podman ---
 	router.get("/api/docker", async (ctx) => {
 		ctx.json(200, await executionTargets.dockerAvailable());
 	});
 
+	router.get("/api/podman", async (ctx) => {
+		ctx.json(200, await executionTargets.podmanAvailable());
+	});
+
 	// Which run targets this computer offers, and whether each is set up.
 	router.get("/api/run-targets", async (ctx) => {
-		const docker = await executionTargets.dockerAvailable();
+		const [docker, podman] = await Promise.all([
+			executionTargets.dockerAvailable(),
+			executionTargets.podmanAvailable(),
+		]);
 		const status = integrations.status();
 		ctx.json(200, {
 			available: executionTargets.available(),
 			docker,
+			podman,
 			boat: { configured: status.boat.configured },
 			cloudProviders: status.cloudProviders,
 		});

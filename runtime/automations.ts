@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import { badRequest, notFound } from "./http-error.ts";
 
-export type AutomationAgent = "pi" | "claude-code" | "codex";
+export type AutomationAgent = "pi" | "claude-code" | "codex" | "opencode";
 
 export type AutomationTrigger =
 	| { type: "schedule"; every: "hourly" | "daily" | "weekdays" | "weekly"; at: string; day?: number }

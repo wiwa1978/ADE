@@ -143,3 +143,13 @@ export function sessionBlueprintOptions(): SessionBlueprintOption[] {
 export function isSessionBlueprint(id: string) {
   return id === VIBE_BLUEPRINT_ID || BLUEPRINT_MAP.has(id);
 }
+
+export {
+  STARTER_RECIPES,
+  listStarterRecipes,
+  getStarterRecipe,
+  validateStarterRecipes,
+  type StarterRecipe,
+  type StarterRecipeCategory,
+  type StarterRecipeTrigger,
+} from "./recipes.ts";

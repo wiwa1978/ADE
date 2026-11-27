@@ -6,8 +6,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import { badRequest } from "./http-error.ts";
 
-export type SubagentHarness = "pi" | "claude-code" | "codex";
-export const SUBAGENT_HARNESSES: SubagentHarness[] = ["pi", "claude-code", "codex"];
+export type SubagentHarness = "pi" | "claude-code" | "codex" | "opencode";
+export const SUBAGENT_HARNESSES: SubagentHarness[] = ["pi", "claude-code", "codex", "opencode"];
 
 export type SubagentPolicy = {
 	/** Harnesses subagents may use. Pi is always allowed: it's the fallback. */
@@ -16,20 +16,22 @@ export type SubagentPolicy = {
 	choice: "agent" | SubagentHarness;
 	/** Model for Pi subagents as "provider/model"; empty = the main agent's model. */
 	piModel: string;
-	/** Model passed to Claude Code (--model) and Codex (-m); empty = their own default. */
+	/** Model passed to Claude Code (--model), Codex (-m), and OpenCode (--model); empty = their own default. */
 	claudeModel: string;
 	codexModel: string;
+	opencodeModel: string;
 };
 
-export const DEFAULT_SUBAGENT_POLICY: SubagentPolicy = { allowed: [...SUBAGENT_HARNESSES], choice: "agent", piModel: "", claudeModel: "", codexModel: "" };
+export const DEFAULT_SUBAGENT_POLICY: SubagentPolicy = { allowed: [...SUBAGENT_HARNESSES], choice: "agent", piModel: "", claudeModel: "", codexModel: "", opencodeModel: "" };
 
-export const harnessNames: Record<SubagentHarness, string> = { pi: "ADE agent (Pi)", "claude-code": "Claude Code", codex: "Codex" };
+export const harnessNames: Record<SubagentHarness, string> = { pi: "ADE agent (Pi)", "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
 
 /** What each harness is good at, shown to the main agent when it chooses. */
 export const harnessGuidance: Record<SubagentHarness, string> = {
 	pi: "the ADE agent itself (durable: survives restarts, can be messaged mid-task). Best for research, reading and explaining code, planning, reviews, small edits, and tasks that need ADE's own tools such as the browser.",
 	"claude-code": "Anthropic's Claude Code. Best for larger features and refactors across many files, following a repository's conventions, and careful work in big codebases.",
 	codex: "OpenAI's Codex. Best for well-specified code changes, fixing failing tests or builds, and tasks that mostly run commands to verify their work.",
+	opencode: "OpenCode (open-source CLI agent). Best for provider-agnostic coding tasks and EU/local model workflows (Mistral, Scaleway, Ollama).",
 };
 
 function sanitize(input: unknown, base: SubagentPolicy): SubagentPolicy {
@@ -41,7 +43,7 @@ function sanitize(input: unknown, base: SubagentPolicy): SubagentPolicy {
 	const choice = value.choice === undefined ? base.choice : value.choice === "agent" || SUBAGENT_HARNESSES.includes(value.choice as SubagentHarness) ? value.choice as SubagentPolicy["choice"] : null;
 	if (!choice) throw badRequest("Choose who picks the subagent harness: the main agent, or one fixed harness.");
 	if (choice !== "agent" && !allowed.includes(choice)) throw badRequest(`${harnessNames[choice]} must be allowed to be the fixed choice.`);
-	const text = (key: "piModel" | "claudeModel" | "codexModel") => {
+	const text = (key: "piModel" | "claudeModel" | "codexModel" | "opencodeModel") => {
 		if (value[key] === undefined) return base[key];
 		const model = typeof value[key] === "string" ? (value[key] as string).trim() : "";
 		if (model.length > 120 || /[\s'"`$\\]/.test(model)) throw badRequest("Enter a model name without spaces or quotes.");
@@ -49,7 +51,7 @@ function sanitize(input: unknown, base: SubagentPolicy): SubagentPolicy {
 	};
 	const piModel = text("piModel");
 	if (piModel && !/^[\w.-]+\/[\w.:/-]+$/.test(piModel)) throw badRequest("Pi subagent model must look like provider/model, e.g. anthropic/claude-sonnet-5-5.");
-	return { allowed, choice, piModel, claudeModel: text("claudeModel"), codexModel: text("codexModel") };
+	return { allowed, choice, piModel, claudeModel: text("claudeModel"), codexModel: text("codexModel"), opencodeModel: text("opencodeModel") };
 }
 
 export class SubagentPolicyStore {
@@ -96,7 +98,7 @@ export function resolveHarness(requested: unknown, policy: SubagentPolicy, insta
 		return { harness: "pi", note: `${harnessNames[policy.choice]} is set as the subagent harness but isn't installed, so this subagent runs on Pi.` };
 	}
 	const wanted = typeof requested === "string" ? requested.trim().toLowerCase().replace(/\s+/g, "-") : "";
-	const normalized = (wanted === "claude" ? "claude-code" : wanted) as SubagentHarness;
+	const normalized = (wanted === "claude" ? "claude-code" : wanted === "open-code" ? "opencode" : wanted) as SubagentHarness;
 	if (!wanted || wanted === "auto") return { harness: "pi", note: "" };
 	if (!SUBAGENT_HARNESSES.includes(normalized)) return { harness: "pi", note: `Unknown harness "${wanted}"; using Pi.` };
 	if (usable.includes(normalized)) return { harness: normalized, note: "" };

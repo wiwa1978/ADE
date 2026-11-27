@@ -56,8 +56,8 @@ export function ProjectRunOnSettings({ projectId }: { projectId: string }) {
         })}
       </div>
       <p className="hint">{runTargetDescriptions[draft.target]}</p>
-      {draft.target === "docker" ? (
-        <label>{t("prjx.cfg.runOn.dockerImage")}
+      {draft.target === "docker" || draft.target === "podman" ? (
+        <label>{draft.target === "podman" ? "Podman image" : t("prjx.cfg.runOn.dockerImage")}
           <input value={draft.image} onChange={event => set({ image: event.target.value })} placeholder="node:22-bookworm" spellCheck={false} disabled={saving} />
           <small className="hint">{t("prjx.cfg.runOn.dockerHint")}</small>
         </label>
@@ -135,6 +135,7 @@ export function ProjectRunOnSettings({ projectId }: { projectId: string }) {
         )
       })() : null}
       {draft.target === "docker" && info && !info.docker.available ? <p className="hint">{info.docker.message}</p> : null}
+      {draft.target === "podman" && info?.podman && !info.podman.available ? <p className="hint">{info.podman.message}</p> : null}
       <div className="form-actions">
         <button type="button" className="action-button" disabled={!dirty || saving} onClick={() => void save()}>{saving ? t("prjx.cfg.saving") : t("prjx.cfg.runOn.saveButton")}</button>
         {message ? <span className="hint" role="status">{message}</span> : null}

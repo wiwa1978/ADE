@@ -76,7 +76,7 @@ export type WorkerTaskSpec = {
 	role: string;
 	prompt: string;
 	model: ModelRef;
-	harness: "pi" | "claude-code" | "codex";
+	harness: "pi" | "claude-code" | "codex" | "opencode";
 	allowedToolGroups: string[];
 	microSkillsContext?: string;
 };

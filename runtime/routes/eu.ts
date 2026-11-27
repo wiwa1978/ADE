@@ -18,9 +18,10 @@ export function registerEuRoutes(router: Router, { host }: RouteDeps): void {
 		for (const provider of catalog.providers) {
 			if (provider.kind !== "cli") add("provider", provider.id, provider.name, host.eu.regionOfProvider(provider.id));
 		}
-		// The agent CLIs ADE can run a session or subagent on (they send your code to US servers).
-		add("engine", "claude-code", "Claude Code", "non-eu");
-		add("engine", "codex", "Codex", "non-eu");
+		// The agent CLIs ADE can run a session or subagent on.
+		add("engine", "claude-code", "Claude Code", host.eu.engineRegion("claude-code"));
+		add("engine", "codex", "Codex", host.eu.engineRegion("codex"));
+		add("engine", "opencode", "OpenCode", host.eu.engineRegion("opencode"));
 		for (const server of host.mcp.list()) add("mcp", server.id, server.name, server.transport === "http" && server.url ? hostRegion(server.url, false) : "local");
 		ctx.json(200, { settings, items });
 	});

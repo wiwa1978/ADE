@@ -44,6 +44,49 @@ export function shortBlueprintName(name: string) {
   return name.replace(/\s*\(.*\)\s*$/, "")
 }
 
+export type StarterRecipeTrigger =
+  | { type: "manual" }
+  | { type: "schedule"; every: "hourly" | "daily" | "weekdays" | "weekly"; at: string; day?: number }
+  | { type: "issue-label"; label: string }
+
+export type StarterRecipeOption = {
+  id: string
+  name: string
+  summary: string
+  category: "bugs" | "quality" | "security" | "maintenance"
+  blueprintId: string
+  prompt: string
+  automationPrompt?: string
+  suggestedTrigger: StarterRecipeTrigger
+  requiresGitHub?: boolean
+}
+
+let cachedRecipes: StarterRecipeOption[] | null = null
+let pendingRecipes: Promise<StarterRecipeOption[]> | null = null
+
+function loadRecipes() {
+  pendingRecipes ??= request<{ recipes: StarterRecipeOption[] }>("/api/recipes")
+    .then(result => {
+      const list = Array.isArray(result?.recipes) ? result.recipes : []
+      if (list.length) cachedRecipes = list
+      return list
+    })
+    .finally(() => { pendingRecipes = null })
+  return pendingRecipes
+}
+
+/** Task-shaped starter recipes built on top of blueprints and automations. */
+export function useStarterRecipes() {
+  const [recipes, setRecipes] = useState<StarterRecipeOption[]>(cachedRecipes ?? [])
+  useEffect(() => {
+    if (cachedRecipes) return
+    let cancelled = false
+    void loadRecipes().then(result => { if (!cancelled) setRecipes(result) }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [])
+  return recipes
+}
+
 /** "7 stages · you approve 2" */
 export function stagesLine(option: BlueprintOption) {
   if (!option.stages.length) return t("stg.noStagesShort")

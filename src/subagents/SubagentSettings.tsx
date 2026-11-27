@@ -3,8 +3,8 @@ import { request, requestJson } from "../api"
 import type { ProviderCatalogEntry } from "../app-types"
 import { useI18n } from "../i18n/I18nContext"
 
-type Harness = "pi" | "claude-code" | "codex"
-type Policy = { allowed: Harness[]; choice: "agent" | Harness; piModel: string; claudeModel: string; codexModel: string }
+type Harness = "pi" | "claude-code" | "codex" | "opencode"
+type Policy = { allowed: Harness[]; choice: "agent" | Harness; piModel: string; claudeModel: string; codexModel: string; opencodeModel: string }
 type Info = { policy: Policy; harnesses: Array<{ id: Harness; name: string; installed: boolean }>; guidance: Record<Harness, string> }
 
 /**
@@ -108,6 +108,7 @@ export function SubagentSettings({ modelCatalog }: { modelCatalog: ProviderCatal
           </div>
           <ModelField label="Claude Code" value={policy.claudeModel} placeholder={t("stx.sub.claudeDefault")} onSave={value => void save({ claudeModel: value })} />
           <ModelField label="Codex" value={policy.codexModel} placeholder={t("stx.sub.codexDefault")} onSave={value => void save({ codexModel: value })} />
+          <ModelField label="OpenCode" value={policy.opencodeModel ?? ""} placeholder="OpenCode default (e.g. mistral/devstral-latest)" onSave={value => void save({ opencodeModel: value })} />
         </div>
         {error ? <p className="st-error" role="alert">{error}</p> : saved ? <p className="st-section-desc" role="status">{saved}</p> : null}
       </section>

@@ -1,5 +1,6 @@
-import { Server, Settings2 } from "lucide-react"
+import { Server, Settings2, Sparkles } from "lucide-react"
 import { Banner, Button, FolderPathInput } from "../../components/ui/index.ts"
+import { useStarterRecipes } from "../blueprints/blueprint-options"
 import type { ApprovalPolicy, GitHubIssue, ProviderCatalogEntry, SkillsAndRulesCatalog } from "../app-types"
 import type { Project } from "../ProjectsView"
 import { ComposerDock } from "../composer/ComposerDock"
@@ -64,6 +65,7 @@ export function NewSessionView({
   initialIssue?: GitHubIssue | null
 }) {
   const { t } = useI18n()
+  const recipes = useStarterRecipes()
   const form = useNewSessionForm({
     projects,
     selectedProjectId,
@@ -240,6 +242,30 @@ export function NewSessionView({
             onChange: form.setSessionTitle,
           }}
         />
+        {!form.prompt.trim() && recipes.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, marginTop: 12, paddingInline: 16 }}>
+            <span className="ade-muted ade-xs" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+              <Sparkles className="size-3.5" /> Starter recipes
+            </span>
+            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 6, maxWidth: 640 }}>
+              {recipes.map(recipe => (
+                <Button
+                  key={recipe.id}
+                  variant="chip"
+                  size="xs"
+                  title={recipe.summary}
+                  onClick={() => {
+                    if (!form.sessionTitle.trim()) form.setSessionTitle(recipe.name)
+                    if (!form.blueprintLocked) form.setBlueprintChoice(recipe.blueprintId)
+                    form.setPrompt(recipe.prompt)
+                  }}
+                >
+                  {recipe.name}
+                </Button>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
     </ConversationLayout>
   )

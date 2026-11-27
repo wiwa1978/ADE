@@ -87,8 +87,15 @@ export class EuPolicy {
 		if (reason) throw forbidden(reason);
 	}
 
-	/** Claude Code and Codex send your code to US servers. */
+	/** Where an agent CLI sends code: Pi is local, OpenCode follows the configured EU/local compatible endpoint, Claude Code and Codex use US servers. */
+	engineRegion(id: string): Region {
+		if (id === "pi") return "local";
+		if (id === "opencode") return this.regionOfProvider("compatible");
+		return "non-eu";
+	}
+
+	/** Claude Code and Codex send your code to US servers; OpenCode is allowed when configured with a local or EU endpoint. */
 	engineBlock(id: string, forceEuOnly = false): string | null {
-		return id === "pi" ? null : this.blockReason("engine", id, "non-eu", forceEuOnly);
+		return id === "pi" ? null : this.blockReason("engine", id, this.engineRegion(id), forceEuOnly);
 	}
 }

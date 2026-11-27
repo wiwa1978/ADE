@@ -72,7 +72,7 @@ export const HARNESS_CATALOG: readonly HarnessCatalogEntry[] = [
 	{ id: "claude-code", name: "Claude Code", command: "claude", description: "Anthropic's coding agent, using your Claude Code sign-in.", modes: ["chat", "terminal"] },
 	{ id: "codex", name: "Codex", command: "codex", description: "OpenAI's coding agent, using your Codex sign-in.", modes: ["chat", "terminal"] },
 	{ id: "copilot", name: "GitHub Copilot", command: "copilot", description: "GitHub Copilot CLI, using your GitHub Copilot sign-in.", modes: ["terminal"] },
-	{ id: "opencode", name: "OpenCode", command: "opencode", description: "Open-source terminal coding agent with local and EU model support.", modes: ["terminal"] },
+	{ id: "opencode", name: "OpenCode", command: "opencode", description: "Open-source coding agent with local and EU model support.", modes: ["chat", "terminal"] },
 	{ id: "pi-cli", name: "Pi CLI", command: "pi", description: "Interactive Pi coding agent TUI.", modes: ["terminal"] },
 	{ id: "oh-my-pi", name: "Oh My Pi", command: "omp", description: "Oh My Pi interactive coding harness.", modes: ["terminal"] },
 	{ id: "gemini", name: "Gemini CLI", command: "gemini", description: "Google's Gemini interactive coding CLI.", modes: ["terminal"] },

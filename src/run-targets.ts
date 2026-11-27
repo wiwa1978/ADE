@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { request } from "./api"
 
-export type RunTarget = "local" | "docker" | "wsl" | "ssh" | "boat" | "cloud"
+export type RunTarget = "local" | "docker" | "podman" | "wsl" | "ssh" | "boat" | "cloud"
 export type VmSize = "small" | "medium" | "large"
 export type TargetSettings = {
   target: RunTarget
@@ -44,6 +44,7 @@ export type CloudProviderInfo = {
 export const runTargetLabels: Record<RunTarget, string> = {
   local: "This Mac",
   docker: "Docker",
+  podman: "Podman (rootless)",
   wsl: "WSL2",
   ssh: "SSH host",
   boat: "Boat.dev",
@@ -52,7 +53,8 @@ export const runTargetLabels: Record<RunTarget, string> = {
 
 export const runTargetDescriptions: Record<RunTarget, string> = {
   local: "Commands run directly on this computer, in the session's folder.",
-  docker: "Commands, terminals, scripts and agents run in a container of their own.",
+  docker: "Commands, terminals, scripts and agents run in a Docker container of their own.",
+  podman: "Commands, terminals, scripts and agents run in a rootless Podman container (no sudo or root daemon).",
   wsl: "Commands run in a Linux distribution on this Windows computer.",
   ssh: "The workspace is copied to another machine over SSH before each command and back after it. Git stays on this computer.",
   boat: "A Boat.dev cloud VM per session, reached over SSH. Billed by Boat while it runs.",
@@ -66,6 +68,7 @@ export function targetLabel(target: RunTarget) {
 export type RunTargetsInfo = {
   available: RunTarget[]
   docker: { available: boolean; version: string | null; message: string }
+  podman?: { available: boolean; version: string | null; message: string }
   boat: { configured: boolean }
   cloudProviders?: CloudProviderInfo[]
 }
@@ -89,6 +92,7 @@ export function configuredCloudProviders(info: RunTargetsInfo | null): CloudProv
 export function targetUnavailable(target: RunTarget, info: RunTargetsInfo | null, settings?: Partial<TargetSettings> | null) {
   if (!info) return ""
   if (target === "docker" && info.docker && !info.docker.available) return info.docker.message
+  if (target === "podman" && info.podman && !info.podman.available) return info.podman.message
   if (target === "boat" && info.boat && !info.boat.configured) return "Add a Boat.dev API key in Settings → Integrations first."
   if (target === "cloud") {
     const providers = info.cloudProviders ?? []

@@ -58,6 +58,12 @@ export type RouteDeps = {
 	prepareWorktree: (session: Conversation) => void;
 	/** Phone pairing & remote mobile bridge manager. */
 	mobilePairing?: import("../mobile-pairing.ts").MobilePairingManager;
+	/** Host-side egress credential proxy for external CLI agents. */
+	egressProxy?: import("../egress-proxy.ts").EgressCredentialProxy;
+	/** Thin inbound chat & webhook gateway ("Calvin" pattern). */
+	inboundGateway?: import("../inbound-gateway.ts").InboundGateway;
+	/** Git-backed session state backups. */
+	sessionBackup?: import("../session-backup.ts").SessionBackupManager;
 };
 
 export function requireWorkspace(host: LocalAgentHost, sessionId: string): string {

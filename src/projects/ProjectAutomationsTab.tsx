@@ -1,8 +1,9 @@
 import { useCallback, useContext, useState, type FormEvent } from "react"
-import { CalendarClock, Play, Plus, Tag, Trash2 } from "lucide-react"
+import { CalendarClock, Play, Plus, Sparkles, Tag, Trash2 } from "lucide-react"
 import { request } from "../api"
 import { Badge, Banner, Button, EmptyState, IconButton, Input, Switch, Textarea } from "@/components/ui"
 import { ConfirmContext } from "@/components/ui/confirm-context"
+import { useStarterRecipes, type StarterRecipeOption } from "../blueprints/blueprint-options"
 import { usePolling } from "../hooks/usePolling"
 import { useI18n, type I18nContextValue } from "../i18n/I18nContext"
 import { relativeTime } from "../session-state"
@@ -11,7 +12,7 @@ type Trigger =
   | { type: "schedule"; every: "hourly" | "daily" | "weekdays" | "weekly"; at: string; day?: number }
   | { type: "issue-label"; label: string }
 type Run = { at: number; sessionId: string | null; reason: string; error?: string }
-type Automation = { id: string; name: string; prompt: string; agent: "pi" | "claude-code" | "codex"; trigger: Trigger; enabled: boolean; lastRunAt: number | null; runs: Run[] }
+type Automation = { id: string; name: string; prompt: string; agent: "pi" | "claude-code" | "codex" | "opencode"; trigger: Trigger; enabled: boolean; lastRunAt: number | null; runs: Run[] }
 
 const DAY_KEYS = [
   "prjx.auto.day.0",
@@ -46,10 +47,26 @@ export function ProjectAutomationsTab({
 }) {
   const { t } = useI18n()
   const confirmCtx = useContext(ConfirmContext)
+  const recipes = useStarterRecipes()
   const [items, setItems] = useState<Automation[] | null>(null)
   const [form, setForm] = useState<typeof BLANK | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState("")
+
+  const applyRecipe = (recipe: StarterRecipeOption) => {
+    const useIssueLabel = recipe.suggestedTrigger.type === "issue-label" && hasGitHub
+    const sched = recipe.suggestedTrigger.type === "schedule" ? recipe.suggestedTrigger : null
+    setForm({
+      ...BLANK,
+      name: recipe.name,
+      prompt: useIssueLabel ? (recipe.automationPrompt ?? recipe.prompt) : recipe.prompt,
+      triggerType: useIssueLabel ? "issue-label" : "schedule",
+      every: sched?.every ?? "daily",
+      at: sched?.at ?? "09:00",
+      day: sched?.day ?? 1,
+      label: recipe.suggestedTrigger.type === "issue-label" ? recipe.suggestedTrigger.label : "agent",
+    })
+  }
 
   const loadAutomations = useCallback(async (signal: AbortSignal) => {
     try {
@@ -111,6 +128,27 @@ export function ProjectAutomationsTab({
         {!form ? <Button variant="primary" size="md" onClick={() => setForm({ ...BLANK })}><Plus /> {t("prjx.auto.newAutomation")}</Button> : null}
       </header>
       {error ? <Banner tone="error">{error}</Banner> : null}
+
+      {!form && recipes.length > 0 ? (
+        <section className="ade-recipe-strip" aria-label="Starter recipes" style={{ marginBottom: 14 }}>
+          <div className="ade-xs ade-muted" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+            <Sparkles className="size-3.5" /> <span>Starter recipes — click to pre-fill an automation</span>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {recipes.map(recipe => (
+              <Button
+                key={recipe.id}
+                variant="chip"
+                size="xs"
+                title={recipe.summary}
+                onClick={() => applyRecipe(recipe)}
+              >
+                {recipe.name}
+              </Button>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {form ? (
         <form className="ade-automation-form" onSubmit={event => void save(event)}>

@@ -126,7 +126,7 @@ test("WSL2: Windows paths and environment are translated, and it's only offered 
 		assert.throws(() => mac.setTarget("s1", { target: "wsl" }, { workspace: dir }), /only available on Windows/);
 
 		const windows = new ExecutionTargets(dir, { platform: "win32", run: async () => "Ubuntu\r\nDebian\r\n" });
-		assert.deepEqual(windows.available(), ["local", "docker", "wsl"]);
+		assert.deepEqual(windows.available(), ["local", "docker", "podman", "wsl"]);
 		windows.setTarget("s1", { target: "wsl", wslDistro: "Ubuntu" }, { workspace: dir });
 		await settle();
 		await windows.ensure("s1", { workspace: dir });

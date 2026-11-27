@@ -43,10 +43,10 @@ type AppOverlaysProps = {
     repository: string
     prompt: string
     githubIssue?: GitHubIssue
-    engine: "pi" | "claude-code" | "codex"
+    engine: "pi" | "claude-code" | "codex" | "opencode"
     startFrom?: StartFrom
     title?: string
-    attempts?: Array<"pi" | "claude-code" | "codex">
+    attempts?: Array<"pi" | "claude-code" | "codex" | "opencode">
     runOn?: RunTarget
   }) => Promise<string | null | void>
   onCloseEnvPalette: () => void

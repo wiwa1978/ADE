@@ -6,6 +6,8 @@
 //   node scripts/ade-server.ts status    <ssh-host>   service state, version and health
 //   node scripts/ade-server.ts logs      <ssh-host>   the service's recent output
 //   node scripts/ade-server.ts uninstall <ssh-host> --yes   remove everything ADE created there
+//   node scripts/ade-server.ts cloud-init --ssh-key=<pubkey> [--tailscale-key=<key>] [--hostname=<name>] [--out=<file>]
+//                                         generate a hardened outbound-only EU cloud-init.yaml
 //
 // Everything lives in ~/.ade-server on the server (code in app/, sessions and settings in state/)
 // plus one systemd user service (~/.config/systemd/user/ade-server.service). No sudo, nothing
@@ -14,8 +16,10 @@
 //
 // Needs on the server: Node.js 24+, git, rsync, and build tools (make, g++, python3) for node-pty.
 import { execFileSync, spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { renderEuCloudInit } from "../deploy/eu-vps/cloud-init.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const [command, host, ...rest] = process.argv.slice(2);
@@ -24,8 +28,30 @@ const SERVICE = "ade-server";
 
 function usage(message?: string): never {
 	if (message) console.error(message);
-	console.error("Usage: node scripts/ade-server.ts <install|update|status|logs|uninstall> <ssh-host> [--yes]");
+	console.error("Usage: node scripts/ade-server.ts <install|update|status|logs|uninstall|cloud-init> <ssh-host|options>");
 	process.exit(1);
+}
+
+if (command === "cloud-init") {
+	const flags = [host, ...rest].filter((v): v is string => typeof v === "string");
+	const flag = (name: string) => flags.find(arg => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
+	const sshPublicKey = flag("ssh-key") ?? "";
+	if (!sshPublicKey) usage("Provide --ssh-key=\"ssh-ed25519 ...\" to generate cloud-init.yaml.");
+	const yaml = renderEuCloudInit({
+		sshPublicKey,
+		hostname: flag("hostname"),
+		username: flag("user"),
+		tailscaleAuthKey: flag("tailscale-key"),
+		allowPublicSsh: flags.includes("--allow-public-ssh") ? true : undefined,
+	});
+	const out = flag("out");
+	if (out) {
+		writeFileSync(out, yaml, "utf8");
+		console.log(`Wrote EU cloud-init config to ${out}`);
+	} else {
+		process.stdout.write(yaml);
+	}
+	process.exit(0);
 }
 
 if (!command || !host) usage();
@@ -171,8 +197,9 @@ echo "Disk used by ADE: $(du -sh ~/.ade-server 2>/dev/null | cut -f1)"
 systemctl --user disable --now ${SERVICE} >/dev/null 2>&1 || true
 rm -f ~/.config/systemd/user/${SERVICE}.service
 systemctl --user daemon-reload
-# Containers ADE started for Docker sessions on this server.
+# Containers ADE started for Docker or rootless Podman sessions on this server.
 if command -v docker >/dev/null; then ids=$(docker ps -aq --filter label=ade.session 2>/dev/null || true); [ -n "$ids" ] && docker rm -f $ids >/dev/null || true; fi
+if command -v podman >/dev/null; then ids=$(podman ps -aq --filter label=ade.session 2>/dev/null || true); [ -n "$ids" ] && podman rm -f $ids >/dev/null || true; fi
 rm -rf ~/.ade-server
 echo "Removed the ADE service and ~/.ade-server from $(hostname)."
 `);
