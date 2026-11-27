@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react"
-import { FolderPlus, Inbox, LayoutDashboard, PanelLeft, Search, Settings2, Smartphone, Sparkles } from "lucide-react"
+import { Activity, FolderPlus, Inbox, LayoutDashboard, PanelLeft, Search, Settings2, Smartphone, Sparkles } from "lucide-react"
 import type { Conversation, RuntimeHealth } from "../app-types"
 import type { Project } from "../ProjectsView"
 import type { InboxEntry } from "../session-state"
@@ -38,6 +38,7 @@ type AppSidebarProps = {
   onOpenCreateWorktree?: () => void
   onOpenCommandCenter: () => void
   onOpenInbox: () => void
+  onOpenObservatory?: () => void
   onOpenAddProject: (initialSource?: AddProjectSource) => void
   onMarkAllRead?: () => void
   onClearCompleted?: () => void
@@ -130,6 +131,11 @@ export const AppSidebar = memo(function AppSidebar(props: AppSidebarProps) {
         <Inbox className="size-[18px]" />
         {props.inboxCount > 0 ? <span className="ade-rail-badge">{props.inboxCount}</span> : null}
       </RailButton>
+      {viewMode === "full" && props.onOpenObservatory ? (
+        <RailButton tip={setTip} label={t("sidebar.observatory")} description={t("sidebar.observatoryDesc")} active={props.selection.kind === "observatory"} onClick={props.onOpenObservatory}>
+          <Activity className="size-[18px]" />
+        </RailButton>
+      ) : null}
       <RailButton tip={setTip} label={t("sidebar.addProject")} description={t("sidebar.addProjectDesc")} shortcut={addProjectBadge} onClick={() => props.onOpenAddProject()}>
         <FolderPlus className="size-[18px]" />
       </RailButton>

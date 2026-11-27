@@ -2,6 +2,7 @@ import { useMemo, type RefObject } from "react"
 import { Sparkles } from "lucide-react"
 import { useViewMode } from "../view-mode"
 import { InboxView } from "../inbox/InboxView"
+import { ObservatoryView } from "../observatory/ObservatoryView"
 import { sessionStateInfo, type InboxEntry } from "../session-state"
 import { request, requestJson } from "../api"
 import type { Conversation, EnvironmentDirectory, GitHubIssue, StartFrom, ProviderCatalogEntry, RuntimeHealth, Screen, SessionArtifact, WorkspaceTab } from "../app-types"
@@ -155,6 +156,8 @@ export function AppMainColumn(props: AppMainColumnProps) {
           monthlyBudget={settings.monthlyBudget}
           onOpenUsage={() => props.onOpenSettingsSection("usage")}
         />
+      ) : screen === "observatory" ? (
+        <ObservatoryView onOpenSession={props.onOpenSession} />
       ) : screen === "settings" ? (
         <SettingsView
           sessionLabels={Object.fromEntries(sessions.map(item => [item.id, item.label]))}

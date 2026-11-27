@@ -29,6 +29,7 @@ import { badRequest, conflict, notFound } from "../http-error.ts";
 import { logger } from "../log.ts";
 import type { McpManager } from "../mcp.ts";
 import type { CapabilitySettings } from "../capabilities.ts";
+import type { Observatory } from "../observatory.ts";
 import { createSearchTools } from "../search-tools.ts";
 import { createShellTools, type ProcessManager } from "../shell-tools.ts";
 import { buildSkillsAndRulesPrompt, createSkillsExtension, discoverSkillsAndRules } from "../skills.ts";
@@ -67,6 +68,7 @@ export class SessionManager {
 	#eu?: EuPolicy;
 	#routing?: ModelRouting;
 	#capabilities?: CapabilitySettings;
+	#observatory?: Observatory;
 	/** The model each open session's Captain runs on this turn (the reviewer picks a different family from it). */
 	#rootModels = new Map<string, ModelChoice>();
 	#sessions = new Map<string, OpenSession>();
@@ -92,6 +94,7 @@ export class SessionManager {
 		eu?: EuPolicy;
 		routing?: ModelRouting;
 		capabilities?: CapabilitySettings;
+		observatory?: Observatory;
 	}) {
 		this.#stateDirectory = opts.stateDirectory;
 		this.#events = opts.events;
@@ -111,6 +114,7 @@ export class SessionManager {
 		this.#eu = opts.eu;
 		this.#routing = opts.routing;
 		this.#capabilities = opts.capabilities;
+		this.#observatory = opts.observatory;
 	}
 
 	setWorktreeManager(manager: WorktreeManager): void {
@@ -301,6 +305,7 @@ export class SessionManager {
 
 			let harnessRef: Harness | null = null;
 			registry.install(this.#approvals.createExtension(key, () => harnessRef));
+			if (this.#observatory) registry.install(this.#observatory.createExtension(key));
 
 			const workspaceDir = task?.workspace ?? undefined;
 			const harness = await Harness.open(

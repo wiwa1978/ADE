@@ -274,6 +274,32 @@ export const HOST_MIGRATIONS: readonly SchemaMigration[] = [
 			`);
 		},
 	},
+	{
+		version: 8,
+		name: "observatory_tool_runs",
+		up(db) {
+			// Read-only telemetry projection for ADE Observatory (Live Fleet, Stall Detection, Task Trace).
+			// Privacy boundary: stores only tool/program metadata, stage id, status, exit code, and timestamps —
+			// never prompts, message bodies, command arguments, tool outputs, or secrets.
+			db.exec(`
+				CREATE TABLE IF NOT EXISTS observatory_tool_runs (
+					id TEXT PRIMARY KEY,
+					sessionId TEXT NOT NULL,
+					conversationId TEXT NOT NULL,
+					stageId TEXT,
+					toolName TEXT NOT NULL,
+					program TEXT,
+					category TEXT NOT NULL,
+					status TEXT NOT NULL CHECK(status IN ('running','done','error')),
+					exitCode INTEGER,
+					startedAt INTEGER NOT NULL,
+					endedAt INTEGER
+				);
+				CREATE INDEX IF NOT EXISTS idx_obs_tool_runs_session_started ON observatory_tool_runs (sessionId, startedAt);
+				CREATE INDEX IF NOT EXISTS idx_obs_tool_runs_started ON observatory_tool_runs (startedAt);
+			`);
+		},
+	},
 ];
 
 export const LATEST_HOST_SCHEMA_VERSION = HOST_MIGRATIONS[HOST_MIGRATIONS.length - 1].version;

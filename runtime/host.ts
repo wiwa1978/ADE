@@ -33,6 +33,7 @@ import { syncClaimedAgentTask } from "./agent-tasks.ts";
 import { EuPolicy, hostRegion } from "./eu-policy.ts";
 import { ModelRouting } from "./model-routing.ts";
 import { TeamBoard } from "./team-board.ts";
+import { Observatory } from "./observatory.ts";
 
 const startFromService = createStartFrom();
 
@@ -65,6 +66,8 @@ export class LocalAgentHost {
 	readonly routing: ModelRouting;
 	/** Each session's team board: tasks, plans, posts, file claims and the flow events. */
 	readonly team: TeamBoard;
+	/** Read-only tool/turn telemetry for ADE Observatory (Live Fleet, Stall Detection, Task Trace). */
+	readonly observatory: Observatory;
 
 	constructor({ stateDirectory, environment = process.env, modelConfigFactory, githubIssueFetcher = fetch, worktreeManager, skillsHome }: {
 		stateDirectory: string;
@@ -95,6 +98,8 @@ export class LocalAgentHost {
 		this.approvals.setGate((sessionId, toolName, args, isLead) => this.blueprints.toolBlockReason(sessionId, toolName, args, isLead));
 		this.blueprints.setWorkspace(sessionId => this.#tasks.getWorkspacePath(sessionId));
 		this.team = new TeamBoard(stateDirectory, this.events);
+		this.observatory = new Observatory(this.#db);
+		this.observatory.setStageResolver(sessionId => this.blueprints.summary(sessionId)?.stage?.id ?? null);
 		this.#models = new ModelConfigService({ db: this.#db, stateDirectory, environment, modelConfigFactory });
 		this.eu = new EuPolicy(stateDirectory, () => this.#models.compatibleUrl());
 		this.routing = new ModelRouting(async () => (await this.#models.modelCatalog()).providers.map(provider => ({ id: provider.id, configured: provider.configured, defaultModel: provider.defaultModel, models: provider.models })), this.eu);
@@ -132,6 +137,7 @@ export class LocalAgentHost {
 			eu: this.eu,
 			routing: this.routing,
 			capabilities: this.capabilities,
+			observatory: this.observatory,
 		});
 		this.#turnExecutor = new TurnExecutor({
 			db: this.#db,

@@ -382,7 +382,8 @@ function AppInner({ settingsHook }: { settingsHook: ReturnType<typeof useSetting
   const sidebarSelection = useMemo<SidebarSelection>(
     () =>
       screen === "inbox" ? { kind: "inbox" }
-        : screen === "settings" ? { kind: "settings" }
+        : screen === "observatory" ? { kind: "observatory" }
+          : screen === "settings" ? { kind: "settings" }
           : screen === "project" && selectedProjectId ? { kind: "project", projectId: selectedProjectId }
             : screen === "work" && newSessionOpen ? { kind: "new-session" }
               : screen === "work" ? { kind: "session", sessionId: sess.activeSession.id }
@@ -406,6 +407,7 @@ function AppInner({ settingsHook }: { settingsHook: ReturnType<typeof useSetting
   const handleOpenCreateWorktree = useCallback(() => setCreateWorktreeOpen(true), [])
   const handleOpenCommandCenter = useCallback(() => setCommandOpen(true), [])
   const handleOpenInbox = useCallback(() => setScreen("inbox"), [])
+  const handleOpenObservatory = useCallback(() => setScreen("observatory"), [])
   const handleOpenAddProject = useCallback((src?: AddProjectSource) => {
     setAddProjectInitialSource(src ?? "menu")
     setAddProjectOpen(true)
@@ -556,6 +558,7 @@ function AppInner({ settingsHook }: { settingsHook: ReturnType<typeof useSetting
           onOpenCreateWorktree={handleOpenCreateWorktree}
           onOpenCommandCenter={handleOpenCommandCenter}
           onOpenInbox={handleOpenInbox}
+          onOpenObservatory={handleOpenObservatory}
           onOpenAddProject={handleOpenAddProject}
           onMarkAllRead={handleMarkAllRead}
           onClearCompleted={handleClearCompleted}

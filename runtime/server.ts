@@ -32,6 +32,7 @@ import { registerAgentWorkflowRoutes } from "./routes/agent-workflow.ts";
 import { registerMobileRoutes } from "./routes/mobile.ts";
 import { registerBoardRoutes } from "./routes/board.ts";
 import { registerAgentTaskRoutes } from "./routes/agent-tasks.ts";
+import { registerObservatoryRoutes } from "./routes/observatory.ts";
 import { createAgentWorkflow } from "./agent-workflow.ts";
 import { MobilePairingManager } from "./mobile-pairing.ts";
 
@@ -183,6 +184,7 @@ export function createRuntimeRouters(deps: RouteDeps): { envRouter: Router; main
 	registerMobileRoutes(mainRouter, deps);
 	registerBoardRoutes(mainRouter, deps);
 	registerAgentTaskRoutes(mainRouter, deps);
+	registerObservatoryRoutes(mainRouter, deps);
 
 	return { envRouter, mainRouter };
 }
