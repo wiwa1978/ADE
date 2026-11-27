@@ -19,10 +19,17 @@ export type RunStatus = {
   setup: ScriptState["status"]; run: ScriptState["status"]; check?: ScriptState["status"]
   url: string | null; docker?: TargetState | null; target?: RunTarget
 }
-type SessionTarget = TargetSettings & { container: string | null; port: number | null; boatId: string | null; state: TargetState; message: string }
+type SessionTarget = TargetSettings & {
+  container: string | null
+  port: number | null
+  boatId: string | null
+  vmId: string | null
+  state: TargetState
+  message: string
+}
 
 const statusText: Record<ScriptState["status"], string> = { idle: "Not started", running: "Running", succeeded: "Finished", failed: "Failed", stopped: "Stopped" }
-const stateText: Record<TargetState, string> = { absent: "Not started", preparing: "Starting…", running: "Ready", stopped: "Stopped", failed: "Not available" }
+const stateText: Record<TargetState, string> = { absent: "Not started", preparing: "Starting…", running: "Ready", sleeping: "Sleeping", stopped: "Stopped", failed: "Not available" }
 
 /** "Runs on" for a session: switch where its commands run, see the machine's state, start it again. */
 function RunOnControls({ sessionId, busy }: { sessionId: string; busy: boolean }) {
@@ -49,10 +56,13 @@ function RunOnControls({ sessionId, busy }: { sessionId: string; busy: boolean }
 
   if (!target) return null
   const remote = target.target !== "local"
+  const isCloud = target.target === "cloud" || target.target === "boat"
+  const activeVmId = target.vmId ?? target.boatId
+  const providerMeta = info?.cloudProviders?.find(p => p.id === (target.target === "boat" ? "boat" : target.cloudProvider))
   const detail = target.target === "docker"
     ? <><code>{target.image}</code>{target.container ? <> · <code>{target.container}</code></> : null}{target.port ? <> · Run uses port {target.port}</> : null}</>
     : target.target === "ssh" ? <><code>{target.sshHost}</code> · <code>{target.remoteRoot}</code></>
-      : target.target === "boat" ? <>{target.boatId ? <code>{target.boatId}</code> : "VM not created yet"}</>
+      : isCloud ? <>{providerMeta?.label ?? (target.cloudProvider || "Cloud VM")}{target.vmSize ? <> · {target.vmSize}</> : null}{activeVmId ? <> · <code>{activeVmId}</code></> : " · VM not created yet"}</>
         : target.target === "wsl" ? <code>{target.wslDistro || "default distribution"}</code> : null
 
   return (
@@ -62,8 +72,9 @@ function RunOnControls({ sessionId, busy }: { sessionId: string; busy: boolean }
         <div className="ade-segmented" role="radiogroup" aria-label="Runs on">
           {(info?.available ?? ["local", "docker"]).map(option => {
             const blocked = targetUnavailable(option, info)
+            const active = target.target === option || (option === "cloud" && target.target === "boat")
             return (
-              <button key={option} type="button" role="radio" aria-checked={target.target === option} className={target.target === option ? "is-active" : ""}
+              <button key={option} type="button" role="radio" aria-checked={active} className={active ? "is-active" : ""}
                 disabled={working || busy || Boolean(blocked)} title={blocked || runTargetDescriptions[option]}
                 onClick={() => void call("PUT", "run-on", { target: option })}>
                 {targetLabel(option)}
@@ -73,10 +84,20 @@ function RunOnControls({ sessionId, busy }: { sessionId: string; busy: boolean }
         </div>
         {remote ? (
           <>
-            <Badge dot tone={target.state === "running" ? "ok" : target.state === "failed" ? "error" : target.state === "preparing" ? "warn" : "neutral"}>
+            <Badge dot tone={target.state === "running" ? "ok" : target.state === "failed" ? "error" : target.state === "preparing" || target.state === "sleeping" ? "warn" : "neutral"}>
               {stateText[target.state]}
             </Badge>
-            {target.state !== "preparing" && target.state !== "running" ? (
+            {isCloud && target.state === "running" && activeVmId ? (
+              <Button variant="chip" size="xs" loading={working} disabled={busy} onClick={() => void call("POST", "run-on/sleep", {})}>
+                Sleep
+              </Button>
+            ) : null}
+            {isCloud && target.state === "sleeping" ? (
+              <Button variant="chip" size="xs" loading={working} onClick={() => void call("POST", "run-on/wake", {})}>
+                {working ? "Waking…" : "Wake"}
+              </Button>
+            ) : null}
+            {target.state !== "preparing" && target.state !== "running" && target.state !== "sleeping" ? (
               <Button variant="chip" size="xs" loading={working} onClick={() => void call("POST", "run-on/restart", {})}>
                 {working ? "Starting…" : "Start again"}
               </Button>

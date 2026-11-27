@@ -75,7 +75,8 @@ export const EnvironmentActivateRequestSchema = z.object({
 
 // --- Execution Targets ---
 
-export const RunTargetSchema = z.enum(["local", "docker", "wsl", "ssh", "boat"]);
+export const RunTargetSchema = z.enum(["local", "docker", "wsl", "ssh", "boat", "cloud"]);
+export const VmSizeSchema = z.enum(["small", "medium", "large"]);
 
 export const TargetSettingsRequestSchema = z.object({
 	target: RunTargetSchema.optional(),
@@ -83,6 +84,9 @@ export const TargetSettingsRequestSchema = z.object({
 	wslDistro: z.string().optional(),
 	sshHost: z.string().optional(),
 	remoteRoot: z.string().optional(),
+	cloudProvider: z.string().max(64).optional(),
+	vmSize: VmSizeSchema.optional(),
+	idleSleepMinutes: z.number().finite().min(0).max(24 * 60).optional(),
 });
 
 // --- Subagent Policy & Limits ---

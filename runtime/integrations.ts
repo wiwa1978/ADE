@@ -6,6 +6,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSy
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { createBoatApi } from "./boat.ts";
+import { defaultCloudProviders, type CloudProviderId, type CloudProviderInfo, type CloudProviderRegistry, type CloudVmDriver } from "./cloud-providers/index.ts";
 import { createSecretStore, isSecretStoreAvailable, type SecretStore } from "./copilot-auth.ts";
 import { badRequest, httpError } from "./http-error.ts";
 
@@ -22,6 +23,7 @@ const StoredIntegrationsSchema = z.object({
 	slack: z.object({ webhook: z.string(), events: SlackEventsSchema }).optional(),
 	linear: z.object({ apiKey: z.string(), viewer: z.string().nullable() }).optional(),
 	boat: z.object({ apiKey: z.string() }).optional(),
+	cloudProviders: z.record(z.string(), z.record(z.string(), z.string())).optional(),
 });
 
 type Stored = z.infer<typeof StoredIntegrationsSchema>;
@@ -30,6 +32,7 @@ export type IntegrationStatus = {
 	slack: { configured: boolean; events: SlackEvents };
 	linear: { configured: boolean; viewer: string | null };
 	boat: { configured: boolean };
+	cloudProviders: CloudProviderInfo[];
 };
 
 export type LinearIssue = { id: string; identifier: string; title: string; description: string; url: string; state: string; team: string };
@@ -69,6 +72,7 @@ export function validateWebhook(value: unknown, opts?: { allowLoopback?: boolean
 export type IntegrationsOptions = {
 	fetch?: Fetch;
 	secretStore?: SecretStore | null;
+	cloudProviders?: CloudProviderRegistry;
 };
 
 export class Integrations {
@@ -76,15 +80,18 @@ export class Integrations {
 	#data: Stored;
 	#fetch: Fetch;
 	#secretStore: SecretStore | null;
+	#cloudRegistry: CloudProviderRegistry;
 
 	constructor(stateDirectory: string, fetchOrOptions: Fetch | IntegrationsOptions = fetch) {
 		this.#file = join(stateDirectory, "integrations.json");
 		if (typeof fetchOrOptions === "function") {
 			this.#fetch = fetchOrOptions;
 			this.#secretStore = null;
+			this.#cloudRegistry = defaultCloudProviders;
 		} else {
 			this.#fetch = fetchOrOptions.fetch ?? fetch;
 			this.#secretStore = fetchOrOptions.secretStore ?? null;
+			this.#cloudRegistry = fetchOrOptions.cloudProviders ?? defaultCloudProviders;
 		}
 		this.#data = this.#load();
 	}
@@ -138,7 +145,8 @@ export class Integrations {
 		return {
 			slack: { configured: Boolean(this.#data.slack?.webhook), events: this.#data.slack?.events ?? DEFAULT_EVENTS },
 			linear: { configured: Boolean(this.#data.linear?.apiKey), viewer: this.#data.linear?.viewer ?? null },
-			boat: { configured: Boolean(this.#data.boat?.apiKey) },
+			boat: { configured: Boolean(this.#cloudValues("boat")?.apiKey) },
+			cloudProviders: this.cloudProviderStatuses(),
 		};
 	}
 
@@ -201,24 +209,71 @@ export class Integrations {
 		return this.status();
 	}
 
-	// --- Boat.dev (cloud VMs to run sessions on) ---
+	// --- Cloud VM Providers (Boat.dev, Daytona, E2B, and any registered provider) ---
 
-	async setBoat(apiKey: unknown) {
-		if (typeof apiKey !== "string" || !/^(boat|box)_[A-Za-z0-9_-]{8,200}$/.test(apiKey.trim())) throw badRequest("Paste a Boat.dev API key (it starts with boat_). Create one with `boat api-key create ade --preset full-sandbox` or in the Boat dashboard.");
-		await createBoatApi(apiKey.trim(), this.#fetch).check();
-		this.#data.boat = { apiKey: apiKey.trim() };
+	#cloudValues(providerId: CloudProviderId): Record<string, string> | null {
+		const saved = this.#data.cloudProviders?.[providerId];
+		if (saved && Object.values(saved).some(v => v.trim().length > 0)) return saved;
+		// Backward compatibility: honor legacy `boat.apiKey` storage.
+		if (providerId === "boat" && this.#data.boat?.apiKey) return { apiKey: this.#data.boat.apiKey };
+		return null;
+	}
+
+	cloudProviderStatuses(): CloudProviderInfo[] {
+		return this.#cloudRegistry.describeAll(id => Boolean(this.#cloudValues(id)));
+	}
+
+	cloudProviderValues(providerId: CloudProviderId): Record<string, string> | null {
+		const values = this.#cloudValues(providerId);
+		return values ? { ...values } : null;
+	}
+
+	cloudDriver(providerId: CloudProviderId): CloudVmDriver | null {
+		const def = this.#cloudRegistry.get(providerId);
+		const values = this.#cloudValues(providerId);
+		if (!def || !values) return null;
+		return def.open(values, this.#fetch);
+	}
+
+	async setCloudProvider(providerId: CloudProviderId, rawValues: Record<string, string>) {
+		const def = this.#cloudRegistry.get(providerId);
+		if (!def) throw httpError(404, `Unknown cloud VM provider "${providerId}".`);
+		const cleaned: Record<string, string> = {};
+		for (const field of def.fields) {
+			const val = typeof rawValues[field.key] === "string" ? rawValues[field.key].trim() : "";
+			if (field.required && !val) throw badRequest(`${def.label}: ${field.label} is required.`);
+			if (val) cleaned[field.key] = val;
+		}
+		def.validate?.(cleaned);
+		await def.open(cleaned, this.#fetch).verify();
+		this.#data.cloudProviders = { ...(this.#data.cloudProviders ?? {}), [providerId]: cleaned };
+		if (providerId === "boat" && cleaned.apiKey) this.#data.boat = { apiKey: cleaned.apiKey };
 		this.#save();
 		return this.status();
+	}
+
+	removeCloudProvider(providerId: CloudProviderId) {
+		if (!this.#cloudRegistry.has(providerId)) throw httpError(404, `Unknown cloud VM provider "${providerId}".`);
+		if (this.#data.cloudProviders) delete this.#data.cloudProviders[providerId];
+		if (providerId === "boat") delete this.#data.boat;
+		this.#save();
+		return this.status();
+	}
+
+	// --- Boat.dev (legacy alias to cloudProviders["boat"]) ---
+
+	async setBoat(apiKey: unknown) {
+		if (typeof apiKey !== "string") throw badRequest("Paste a Boat.dev API key (it starts with boat_).");
+		return this.setCloudProvider("boat", { apiKey });
 	}
 
 	removeBoat() {
-		delete this.#data.boat;
-		this.#save();
-		return this.status();
+		return this.removeCloudProvider("boat");
 	}
 
 	boatApi() {
-		return this.#data.boat?.apiKey ? createBoatApi(this.#data.boat.apiKey, this.#fetch) : null;
+		const key = this.#cloudValues("boat")?.apiKey;
+		return key ? createBoatApi(key, this.#fetch) : null;
 	}
 
 	removeLinear() {

@@ -105,8 +105,16 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 	}, sessionGit);
 	/** New worktree sessions: copy configured files from the project checkout, then run the setup script. */
 	const integrations = new Integrations(stateDirectory);
-	// Where each session's commands run: this computer, Docker, WSL2, an SSH host or a Boat.dev VM.
-	const executionTargets = new ExecutionTargets(stateDirectory, { worktreesRoot: worktreeManager?.root ?? null, boat: () => integrations.boatApi() });
+	// Where each session's commands run: this computer, Docker, WSL2, an SSH host or a Cloud VM.
+	const executionTargets = new ExecutionTargets(stateDirectory, {
+		worktreesRoot: worktreeManager?.root ?? null,
+		boat: () => integrations.boatApi(),
+		cloud: {
+			driver: id => integrations.cloudDriver(id),
+			values: id => integrations.cloudProviderValues(id),
+			configuredIds: () => integrations.cloudProviderStatuses().filter(p => p.configured).map(p => p.id),
+		},
+	});
 	setExecutionTargets(
 		executionTargets,
 		cwd => executionTargets.sessionForPath(cwd, sessionWorkspaces()),
@@ -118,8 +126,10 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		},
 	);
 	// Containers stop when the computer restarts; start them again for Docker sessions that are still open.
+	// Cloud VMs stay asleep until a command or message wakes them.
 	for (const session of sessionWorkspaces()) {
-		if (executionTargets.isDocker(session.id) && session.path && !session.archivedAt) {
+		const target = executionTargets.session(session.id);
+		if (target.target === "docker" && session.path && !session.archivedAt) {
 			void executionTargets.ensure(session.id, { workspace: session.path, repository: session.repository }).catch(() => undefined);
 		}
 	}
@@ -150,7 +160,10 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		// Once today's budget is spent, nothing new starts (automations and hand-backs included).
 		limitGuard.assertCanStart();
 		const workspace = host.getWorkspacePath(sessionId);
-		if (workspace) await checkpoints.create(sessionId, workspace, content).catch(() => null);
+		if (workspace) {
+			await executionTargets.wakeIfSleeping(sessionId, { workspace }).catch(() => undefined);
+			await checkpoints.create(sessionId, workspace, content).catch(() => null);
+		}
 		inbox.invalidate(sessionId);
 		if (engines.get(sessionId)) {
 			if (!workspace) throw Object.assign(new Error("Session has no ready workspace."), { statusCode: 404 });
@@ -418,8 +431,8 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 		},
 	});
 	scheduler.start();
-	/** Runs on this machine's memory: here, in Docker or in WSL2 (not on an SSH host or Boat.dev VM). */
-	const countsHere = (sessionId: string) => !["ssh", "boat"].includes(sessionTarget(sessionId));
+	/** Runs on this machine's memory: here, in Docker or in WSL2 (not on an SSH host or Cloud VM). */
+	const countsHere = (sessionId: string) => !["ssh", "boat", "cloud"].includes(sessionTarget(sessionId));
 	const subagentStarts = new Map<string, Promise<boolean>>();
 	const cleanupSessionState = (sessionId: string) => {
 		agentBusy.delete(sessionId);
@@ -534,10 +547,12 @@ export function createAgentWorkflow({ host, worktreeManager, sessionGit }: {
 			notify("automations", sessionId, (label, project) => `🤖 Automation started *${label}* (${project}).`);
 		},
 	});
+	executionTargets.startIdleSweep(60_000, sessionId => Boolean(agentBusy.get(sessionId)));
 	const dispose = () => {
 		for (const unsub of unsubscribers.splice(0)) unsub();
 		for (const timer of pendingTimers) clearTimeout(timer);
 		pendingTimers.clear();
+		executionTargets.stopIdleSweep();
 		limitGuard.stopTimer();
 		scheduler.stop();
 		usageWaiter.stop();

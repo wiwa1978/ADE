@@ -368,7 +368,7 @@ export class ScriptRunner {
 		};
 		// The pid file lets Stop end the script and its children over there (killing the local client alone doesn't).
 		const pidFile = `/tmp/ade-${kind}-${sessionId.slice(0, 12)}.pid`;
-		const inContainer = docker ? commandInvocation(sessionId, cwd, command, Object.keys(env), { pidFile, background: kind === "run", forwardPort: kind === "run" && (target === "ssh" || target === "boat") ? port : null }) : null;
+		const inContainer = docker ? commandInvocation(sessionId, cwd, command, Object.keys(env), { pidFile, background: kind === "run", forwardPort: kind === "run" && (target === "ssh" || target === "boat" || target === "cloud") ? port : null }) : null;
 		const shell = process.platform === "win32" ? this.#environment.COMSPEC || "cmd.exe" : this.#environment.SHELL || "/bin/sh";
 		const args = process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-lc", command];
 		const child = spawn(inContainer?.file ?? shell, inContainer?.args ?? args, {

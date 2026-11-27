@@ -14,6 +14,7 @@ import {
 	BrowserViewportRequestSchema,
 	ChatThreadCreateRequestSchema,
 	CheckpointCreateRequestSchema,
+	CloudProviderConfigRequestSchema,
 	CodingTaskCreateRequestSchema,
 	CopilotAuthRequestSchema,
 	EnvironmentActivateRequestSchema,
@@ -407,6 +408,10 @@ export function validateLinearIntegration(body: Record<string, unknown>) {
 
 export function validateBoatIntegration(body: Record<string, unknown>) {
 	return parseWithSchema(BoatIntegrationRequestSchema, body);
+}
+
+export function validateCloudProviderConfig(body: Record<string, unknown>) {
+	return parseWithSchema(CloudProviderConfigRequestSchema, body);
 }
 
 export function validateAutomationCreate(body: Record<string, unknown>) {

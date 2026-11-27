@@ -267,7 +267,13 @@ export function registerSessionRoutes(
 			if (session?.workspace?.path && session.workspace.kind !== "none") {
 				const fallback = executionTargets.projectDefault(session.projectId);
 				const target = input.runOn ?? fallback.target;
-				if (target !== "local") executionTargets.setTarget(session.id, { ...fallback, target, ...(input.dockerImage !== undefined ? { image: input.dockerImage } : {}) }, { workspace: session.workspace.path, repository: session.workspace.repository });
+				if (target !== "local") executionTargets.setTarget(session.id, {
+					...fallback,
+					target,
+					...(input.dockerImage !== undefined ? { image: input.dockerImage } : {}),
+					...(input.cloudProvider !== undefined ? { cloudProvider: input.cloudProvider } : {}),
+					...(input.vmSize !== undefined ? { vmSize: input.vmSize } : {}),
+				}, { workspace: session.workspace.path, repository: session.workspace.repository });
 			}
 			if (session) prepareWorktree(session);
 			ctx.json(200, { session });

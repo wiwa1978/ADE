@@ -15,6 +15,7 @@ import {
 	validateAutomationUpdate,
 	validateBoatIntegration,
 	validateCheckpointCreate,
+	validateCloudProviderConfig,
 	validateLimits,
 	validateLinearIntegration,
 	validateProjectInstructionsWrite,
@@ -280,7 +281,13 @@ export function registerAgentWorkflowRoutes(
 	// Which run targets this computer offers, and whether each is set up.
 	router.get("/api/run-targets", async (ctx) => {
 		const docker = await executionTargets.dockerAvailable();
-		ctx.json(200, { available: executionTargets.available(), docker, boat: { configured: integrations.status().boat.configured } });
+		const status = integrations.status();
+		ctx.json(200, {
+			available: executionTargets.available(),
+			docker,
+			boat: { configured: status.boat.configured },
+			cloudProviders: status.cloudProviders,
+		});
 	});
 
 	router.get("/api/projects/:id/run-on", (ctx) => {
@@ -314,6 +321,33 @@ export function registerAgentWorkflowRoutes(
 		const repository = host.sessions().find(item => item.id === ctx.params.id)?.workspace?.repository ?? null;
 		ctx.json(200, await executionTargets.ensure(ctx.params.id, { workspace, repository }));
 	}, { originError: "Use ADE to change where sessions run." });
+
+	router.post("/api/sessions/:id/run-on/sleep", async (ctx) => {
+		await ctx.readBody();
+		if (viewSessions().find(item => item.id === ctx.params.id)?.status === "working") {
+			throw conflict("Wait for the agent to finish before putting the VM to sleep.");
+		}
+		ctx.json(200, await executionTargets.sleep(ctx.params.id));
+	}, { originError: "Use ADE to sleep a session's VM." });
+
+	router.post("/api/sessions/:id/run-on/wake", async (ctx) => {
+		const workspace = ctx.requireWorkspace(ctx.params.id);
+		await ctx.readBody();
+		const repository = host.sessions().find(item => item.id === ctx.params.id)?.workspace?.repository ?? null;
+		ctx.json(200, await executionTargets.ensure(ctx.params.id, { workspace, repository }));
+	}, { originError: "Use ADE to wake a session's VM." });
+
+	// --- Cloud VM Providers ---
+	router.get("/api/cloud-providers", (ctx) => {
+		ctx.json(200, { providers: integrations.cloudProviderStatuses() });
+	});
+	router.put("/api/cloud-providers/:id", async (ctx) => {
+		const input = validateCloudProviderConfig(await ctx.readBody());
+		ctx.json(200, await integrations.setCloudProvider(ctx.params.id, input.values));
+	}, { originError: "Use ADE to configure cloud VM providers." });
+	router.delete("/api/cloud-providers/:id", (ctx) => {
+		ctx.json(200, integrations.removeCloudProvider(ctx.params.id));
+	}, { originError: "Use ADE to remove cloud VM providers." });
 
 	// --- Integrations: Slack notifications and Linear issues ---
 	router.get("/api/integrations", (ctx) => {

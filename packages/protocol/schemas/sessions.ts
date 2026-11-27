@@ -187,8 +187,10 @@ export const CodingTaskCreateRequestSchema = z.object({
 	attemptGroup: z.string().optional(),
 	blueprintId: z.string().optional(),
 	initialMessage: CodingTaskInitialMessageSchema.nullable().optional(),
-	runOn: z.enum(["local", "docker", "wsl", "ssh", "boat"]).optional(),
+	runOn: z.enum(["local", "docker", "wsl", "ssh", "boat", "cloud"]).optional(),
 	dockerImage: z.string().optional(),
+	cloudProvider: z.string().max(64).optional(),
+	vmSize: z.enum(["small", "medium", "large"]).optional(),
 });
 
 export const SessionPrCreateRequestSchema = z.object({

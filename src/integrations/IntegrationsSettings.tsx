@@ -3,8 +3,15 @@ import { request } from "../api"
 import { useI18n } from "../i18n/I18nContext"
 import type { TranslationKey } from "../i18n"
 
+import type { CloudProviderInfo } from "../run-targets"
+
 type SlackEvents = { finished: boolean; needsApproval: boolean; failed: boolean; automations: boolean }
-type Status = { slack: { configured: boolean; events: SlackEvents }; linear: { configured: boolean; viewer: string | null }; boat?: { configured: boolean } }
+type Status = {
+  slack: { configured: boolean; events: SlackEvents }
+  linear: { configured: boolean; viewer: string | null }
+  boat?: { configured: boolean }
+  cloudProviders?: CloudProviderInfo[]
+}
 
 const eventLabels: Array<[keyof SlackEvents, TranslationKey, TranslationKey]> = [
   ["needsApproval", "stx.int.event.needsApproval", "stx.int.event.needsApprovalDesc"],
@@ -19,9 +26,9 @@ export function IntegrationsSettings() {
   const [status, setStatus] = useState<Status | null>(null)
   const [webhook, setWebhook] = useState("")
   const [linearKey, setLinearKey] = useState("")
-  const [boatKey, setBoatKey] = useState("")
+  const [cloudForms, setCloudForms] = useState<Record<string, Record<string, string>>>({})
   const [busy, setBusy] = useState<string | null>(null)
-  const [message, setMessage] = useState<{ area: "slack" | "linear" | "boat"; text: string; error?: boolean } | null>(null)
+  const [message, setMessage] = useState<{ area: string; text: string; error?: boolean } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -29,7 +36,7 @@ export function IntegrationsSettings() {
     return () => { cancelled = true }
   }, [])
 
-  const call = async (area: "slack" | "linear" | "boat", name: string, path: string, method: string, body?: unknown, success?: string) => {
+  const call = async (area: string, name: string, path: string, method: string, body?: unknown, success?: string) => {
     setBusy(name)
     setMessage(null)
     try {
@@ -48,9 +55,13 @@ export function IntegrationsSettings() {
     }
   }
 
-  const note = (area: "slack" | "linear" | "boat") => message?.area === area
+  const note = (area: string) => message?.area === area
     ? <div className="st-row"><span className={message.error ? "st-error" : "st-row-title"} role="status">{message.text}</span></div>
     : null
+
+  const setCloudField = (providerId: string, key: string, value: string) => {
+    setCloudForms(prev => ({ ...prev, [providerId]: { ...(prev[providerId] ?? {}), [key]: value } }))
+  }
 
   return (
     <>
@@ -120,24 +131,82 @@ export function IntegrationsSettings() {
       </section>
 
       <section className="st-section">
-        <h2>Boat.dev</h2>
-        <p className="st-section-desc">{t("stx.int.boat.descBefore")} <code>boat api-key create ade --preset full-sandbox</code> {t("stx.int.boat.descMid")} <a href="https://boat.dev/dashboard?tab=api-keys" target="_blank" rel="noreferrer">{t("stx.int.boat.descLink")}</a>.</p>
-        <div className="st-card">
-          <div className="st-row">
-            <div className="st-row-text">
-              <span className="st-row-title">{status?.boat?.configured ? t("stx.int.connected") : t("stx.int.notConnected")}</span>
-              <p>{t("stx.int.boat.keyLocal")}</p>
+        <h2>Cloud VM Providers</h2>
+        <p className="st-section-desc">
+          Run agent sessions on isolated cloud VMs. Connect one or more providers to enable <strong>Cloud VM</strong> under <em>Run on</em>, choose VM sizes per project, and auto-sleep idle VMs.
+        </p>
+        {(status?.cloudProviders ?? []).map(provider => {
+          const area = `cloud:${provider.id}`
+          const values = cloudForms[provider.id] ?? {}
+          const missingRequired = provider.fields.some(field => field.required && !(values[field.key]?.trim()))
+          const sleepSummary = provider.features.sleep === "pause"
+            ? "Pauses idle VMs (keeps disk & RAM)"
+            : provider.features.sleep === "checkpoint"
+              ? "Checkpoints idle VMs (keeps disk)"
+              : "Stops idle VMs (keeps disk)"
+          return (
+            <div className="st-card" key={provider.id} style={{ marginBottom: "0.75rem" }}>
+              <div className="st-row">
+                <div className="st-row-text">
+                  <span className="st-row-title">
+                    <a href={provider.website} target="_blank" rel="noreferrer">{provider.label}</a>
+                    {" · "}
+                    {provider.configured ? t("stx.int.connected") : t("stx.int.notConnected")}
+                  </span>
+                  <p>{provider.description}</p>
+                  <p style={{ opacity: 0.75, fontSize: "0.85em" }}>
+                    {sleepSummary} · Sizes: {provider.sizes.small} / {provider.sizes.medium} / {provider.sizes.large}
+                  </p>
+                </div>
+                <div className="st-row-control">
+                  {provider.configured ? (
+                    <button
+                      type="button"
+                      className="st-button is-quiet"
+                      disabled={Boolean(busy)}
+                      onClick={() => void call(area, `remove-${provider.id}`, `/api/cloud-providers/${encodeURIComponent(provider.id)}`, "DELETE")}
+                    >
+                      {t("stx.int.disconnect")}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              <form
+                className="st-inline-form"
+                onSubmit={event => {
+                  event.preventDefault()
+                  void call(
+                    area,
+                    `save-${provider.id}`,
+                    `/api/cloud-providers/${encodeURIComponent(provider.id)}`,
+                    "PUT",
+                    { values },
+                    t("stx.int.connectedDone"),
+                  ).then(ok => {
+                    if (ok) setCloudForms(prev => ({ ...prev, [provider.id]: {} }))
+                  })
+                }}
+              >
+                {provider.fields.map(field => (
+                  <input
+                    key={field.key}
+                    type={field.kind === "secret" ? "password" : "text"}
+                    aria-label={`${provider.label} ${field.label}`}
+                    placeholder={field.placeholder || field.label}
+                    value={values[field.key] ?? ""}
+                    onChange={event => setCloudField(provider.id, field.key, event.target.value)}
+                    autoComplete="off"
+                    title={field.help}
+                  />
+                ))}
+                <button type="submit" className="st-button" disabled={missingRequired || Boolean(busy)}>
+                  {busy === `save-${provider.id}` ? t("stx.int.checking") : provider.configured ? t("stx.int.replace") : t("stx.int.connect")}
+                </button>
+              </form>
+              {note(area)}
             </div>
-            <div className="st-row-control">
-              {status?.boat?.configured ? <button type="button" className="st-button is-quiet" disabled={Boolean(busy)} onClick={() => void call("boat", "remove-boat", "/api/integrations/boat", "DELETE")}>{t("stx.int.disconnect")}</button> : null}
-            </div>
-          </div>
-          <form className="st-inline-form" onSubmit={event => { event.preventDefault(); void call("boat", "boat", "/api/integrations/boat", "PUT", { apiKey: boatKey }, t("stx.int.connectedDone")).then(ok => { if (ok) setBoatKey("") }) }}>
-            <input type="password" aria-label={t("stx.int.boat.keyAria")} placeholder="boat_…" value={boatKey} onChange={event => setBoatKey(event.target.value)} autoComplete="off" />
-            <button type="submit" className="st-button" disabled={!boatKey.trim() || Boolean(busy)}>{busy === "boat" ? t("stx.int.checking") : status?.boat?.configured ? t("stx.int.replace") : t("stx.int.connect")}</button>
-          </form>
-          {note("boat")}
-        </div>
+          )
+        })}
       </section>
     </>
   )

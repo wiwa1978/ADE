@@ -10,7 +10,7 @@ import { isErrorCode, logger } from "./log.ts";
 import { conflict, notFound } from "./http-error.ts";
 import { sanitizedEnv } from "./env-filter.ts";
 import { redact, secretEnv } from "./project-secrets.ts";
-import { commandInvocation, stopOnTarget } from "./execution-targets.ts";
+import { commandInvocation, stopOnTarget, wakeTargetIfSleeping } from "./execution-targets.ts";
 
 export type { ManagedProcessSummary };
 
@@ -291,6 +291,7 @@ export function createShellTools(opts: {
 			verifyWorkspace();
 			const command = args.command.trim();
 			if (!command) throw new Error("Provide a non-empty command.");
+			await wakeTargetIfSleeping(opts.sessionId, opts.workspace);
 			const { proc, done } = opts.processes.spawnCommand({
 				sessionId: opts.sessionId,
 				command,

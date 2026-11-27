@@ -56,6 +56,10 @@ export const BoatIntegrationRequestSchema = z.object({
 	apiKey: z.string().min(1, "Paste a Boat.dev API key.").max(250),
 });
 
+export const CloudProviderConfigRequestSchema = z.object({
+	values: z.record(z.string(), z.string().max(500)).default({}),
+});
+
 // --- Automations ---
 
 export const AutomationTriggerSchema = z.discriminatedUnion("type", [

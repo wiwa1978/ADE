@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { request, requestJson } from "../api"
 import { useI18n } from "../i18n/I18nContext"
-import { runTargetDescriptions, targetLabel, targetUnavailable, useRunTargets, type TargetSettings } from "../run-targets"
+import { configuredCloudProviders, runTargetDescriptions, targetLabel, targetUnavailable, useRunTargets, type TargetSettings, type VmSize } from "../run-targets"
 
 /** Project settings: where new sessions run by default, with the settings each target needs. */
 export function ProjectRunOnSettings({ projectId }: { projectId: string }) {
@@ -82,6 +82,58 @@ export function ProjectRunOnSettings({ projectId }: { projectId: string }) {
       {draft.target === "boat" ? (
         <p className="hint">{info?.boat.configured ? t("prjx.cfg.runOn.boatConfigured") : t("prjx.cfg.runOn.boatUnconfigured")}</p>
       ) : null}
+      {draft.target === "cloud" ? (() => {
+        const providers = info?.cloudProviders ?? []
+        const configured = configuredCloudProviders(info)
+        const selectedProvider = providers.find(p => p.id === draft.cloudProvider) ?? configured[0] ?? providers[0] ?? null
+        return (
+          <>
+            {configured.length === 0 ? (
+              <p className="hint">Connect a Cloud VM provider (Boat.dev, Daytona, or E2B) in Settings → Integrations first.</p>
+            ) : (
+              <>
+                <label>Cloud provider
+                  <select
+                    value={draft.cloudProvider || configured[0]?.id || ""}
+                    onChange={event => set({ cloudProvider: event.target.value })}
+                    disabled={saving}
+                  >
+                    {providers.map(provider => (
+                      <option key={provider.id} value={provider.id} disabled={!provider.configured}>
+                        {provider.label}{provider.configured ? "" : " (not connected)"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>VM size
+                  <select
+                    value={draft.vmSize || "medium"}
+                    onChange={event => set({ vmSize: event.target.value as VmSize })}
+                    disabled={saving}
+                  >
+                    {(["small", "medium", "large"] as VmSize[]).map(size => (
+                      <option key={size} value={size}>
+                        {size[0].toUpperCase() + size.slice(1)}{selectedProvider ? ` (${selectedProvider.sizes[size]})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>Auto-sleep idle VMs after (minutes)
+                  <input
+                    type="number"
+                    min={0}
+                    max={1440}
+                    value={draft.idleSleepMinutes ?? 15}
+                    onChange={event => set({ idleSleepMinutes: Math.max(0, Number(event.target.value) || 0) })}
+                    disabled={saving}
+                  />
+                  <small className="hint">0 disables auto-sleep. Sleeping VMs wake automatically on your next message.</small>
+                </label>
+              </>
+            )}
+          </>
+        )
+      })() : null}
       {draft.target === "docker" && info && !info.docker.available ? <p className="hint">{info.docker.message}</p> : null}
       <div className="form-actions">
         <button type="button" className="action-button" disabled={!dirty || saving} onClick={() => void save()}>{saving ? t("prjx.cfg.saving") : t("prjx.cfg.runOn.saveButton")}</button>

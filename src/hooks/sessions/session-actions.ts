@@ -21,7 +21,7 @@ export type StartNewSessionInput = {
   title?: string
   /** Best of N: one agent per attempt; each gets its own worktree and the same task. */
   attempts?: SessionEngineId[]
-  runOn?: "local" | "docker" | "wsl" | "ssh" | "boat"
+  runOn?: "local" | "docker" | "wsl" | "ssh" | "boat" | "cloud"
   blueprintId?: string
 }
 
