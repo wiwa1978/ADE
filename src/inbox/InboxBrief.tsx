@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { ArrowRight } from "lucide-react"
+import { Archive, ArrowRight, GitBranch } from "lucide-react"
 import { request, requestJson } from "../api"
 import { useI18n } from "../i18n/I18nContext"
 import "./inbox-brief.css"
@@ -16,7 +16,29 @@ export type SessionBrief = {
  * A session at a glance, beside the Inbox list: what was asked, what has been done, and what waits
  * for you. A line or two each, so you know what it is about without reading the thread.
  */
-export function InboxBrief({ sessionId, title, refreshKey, onOpen }: { sessionId: string; title: string; refreshKey: string; onOpen: () => void }) {
+export function InboxBrief({
+  sessionId,
+  title,
+  refreshKey,
+  projectName,
+  branch,
+  statusLabel,
+  updatedLabel,
+  canArchive = false,
+  onOpen,
+  onArchive,
+}: {
+  sessionId: string
+  title: string
+  refreshKey: string
+  projectName?: string
+  branch?: string | null
+  statusLabel?: string
+  updatedLabel?: string
+  canArchive?: boolean
+  onOpen: () => void
+  onArchive?: () => void
+}) {
   const { t } = useI18n()
   const [loaded, setLoaded] = useState<{ key: string; brief: SessionBrief | null; failed: boolean } | null>(null)
   const [reload, setReload] = useState(0)
@@ -65,9 +87,21 @@ export function InboxBrief({ sessionId, title, refreshKey, onOpen }: { sessionId
   const decideStage = (decision: "approve" | "request_changes") => act(() => requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/stages/decision`, "POST", { decision, feedback }))
   const decideCommand = (id: string, allow: boolean) => act(() => requestJson(`/api/approvals/${encodeURIComponent(id)}/resolve`, "POST", { allow }))
   return (
-    <aside className="ade-brief" aria-label={title} aria-busy={!brief || stale}>
+    <aside className="ade-brief" aria-label={title} aria-busy={!brief && !loaded?.failed || stale}>
       <h2 className="ade-brief-title ade-truncate" title={title}>{title}</h2>
-      {loaded?.failed && !brief ? <p className="ade-muted">{t("brief.error")}</p> : !brief ? <p className="ade-muted">{t("brief.loading")}</p> : (
+      {(projectName || branch || updatedLabel) ? (
+        <div className="ade-brief-meta">
+          {projectName ? <span>{projectName}</span> : null}
+          {branch ? <span>· <GitBranch className="inline size-3" /> {branch}</span> : null}
+          {updatedLabel ? <span>· {updatedLabel}</span> : null}
+        </div>
+      ) : null}
+      {loaded?.failed && !brief ? (
+        <section>
+          <h3>Status</h3>
+          <p>{statusLabel || "Idle"} — open the session to view its full conversation and workspace.</p>
+        </section>
+      ) : !brief ? <p className="ade-muted">{t("brief.loading")}</p> : (
         <div className={stale ? "is-stale" : ""}>
           <section>
             <h3>{t("brief.question")}</h3>
@@ -118,7 +152,14 @@ export function InboxBrief({ sessionId, title, refreshKey, onOpen }: { sessionId
           </section>
         </div>
       )}
-      <button type="button" className="sf-btn-primary ade-brief-open" onClick={onOpen}>{t("brief.open")} <ArrowRight className="size-3.5" /></button>
+      <div className="ade-brief-footer">
+        <button type="button" className="sf-btn-primary ade-brief-open" onClick={onOpen}>{t("brief.open")} <ArrowRight className="size-3.5" /></button>
+        {canArchive && onArchive ? (
+          <button type="button" className="ade-chip-btn" title={t("inbox.archiveSession")} onClick={onArchive}>
+            <Archive className="size-3.5" /> Archive
+          </button>
+        ) : null}
+      </div>
     </aside>
   )
 }

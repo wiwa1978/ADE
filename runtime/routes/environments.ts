@@ -1,4 +1,5 @@
 import type { Router } from "../router.ts";
+import { scanSshConfig } from "../ssh-config.ts";
 import { validateEnvironmentActivate, validateEnvironmentAdd } from "../validators.ts";
 import type { RouteDeps } from "./context.ts";
 
@@ -8,6 +9,11 @@ export function registerEnvironmentRoutes(router: Router, deps: RouteDeps): void
 
 	router.get("/api/environments", (ctx) => {
 		ctx.json(200, environments.list());
+	});
+
+	router.get("/api/environments/ssh-hosts", (ctx) => {
+		const configPath = ctx.url.searchParams.get("configPath") ?? undefined;
+		ctx.json(200, scanSshConfig(configPath));
 	});
 
 	router.post(

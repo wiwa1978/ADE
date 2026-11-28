@@ -92,7 +92,7 @@ export function InboxView({
                     <ExternalLink className="size-3.5" />
                   </button>
                 ) : null}
-                {state === "merged" ? (
+                {state !== "working" ? (
                   <button type="button" className="ade-icon-btn" title={t("inbox.archiveSession")} aria-label={t("inbox.archiveSessionAria", { label: session.label })} onClick={() => onArchive(session.id)}>
                     <Archive className="size-3.5" />
                   </button>
@@ -138,14 +138,51 @@ export function InboxView({
           <button type="button" className="sf-btn-primary" onClick={onNewSession}><Plus className="size-3.5" /> {t("inbox.newSession")}</button>
         </div>
       ) : (
-        <div className="ade-inbox-cols">
-          <div className="ade-inbox-list">
-            {group(t("inbox.needsYou"), needsYou, t("inbox.needsYouEmpty"))}
-            {group(t("inbox.working"), working, t("inbox.workingEmpty"))}
-            {group(t("inbox.everythingElse"), rest)}
+        <>
+          <div className="ade-inbox-stats" aria-label="Inbox summary">
+            <div className={`ade-inbox-stat ${needsYou.length > 0 ? "is-attention" : ""}`}>
+              <span className="ade-inbox-stat-label">{t("inbox.needsYou")}</span>
+              <strong className="ade-inbox-stat-value">{needsYou.length}</strong>
+            </div>
+            <div className="ade-inbox-stat">
+              <span className="ade-inbox-stat-label">{t("inbox.working")}</span>
+              <strong className="ade-inbox-stat-value">{working.length}</strong>
+            </div>
+            <div className="ade-inbox-stat">
+              <span className="ade-inbox-stat-label">Active sessions</span>
+              <strong className="ade-inbox-stat-value">{rows.length}</strong>
+            </div>
           </div>
-          {selected ? <InboxBrief sessionId={selected.session.id} title={selected.session.label} refreshKey={`${selected.entry?.state ?? ""}:${selected.session.updatedAt ?? 0}:${selected.entry?.pendingApprovals ?? 0}`} onOpen={() => onOpenSession(selected.session)} /> : null}
-        </div>
+          <div className="ade-inbox-cols">
+            <div className="ade-inbox-list">
+              {needsYou.length > 0 ? group(t("inbox.needsYou"), needsYou) : null}
+              {working.length > 0 ? group(t("inbox.working"), working) : null}
+              {rest.length > 0 ? group(t("inbox.everythingElse"), rest) : null}
+            </div>
+            {selected ? (() => {
+              const selProject = projects.find(p => p.id === selected.session.projectId)
+              const selState: SessionState = selected.entry?.state === "needs-approval"
+                ? "needs-approval"
+                : selected.session.status === "working"
+                  ? "working"
+                  : (selected.entry?.state ?? "idle")
+              return (
+                <InboxBrief
+                  sessionId={selected.session.id}
+                  title={selected.session.label}
+                  refreshKey={`${selected.entry?.state ?? ""}:${selected.session.updatedAt ?? 0}:${selected.entry?.pendingApprovals ?? 0}`}
+                  projectName={selProject ? selProject.name : selected.session.chatThread ? t("inbox.chat") : t("inbox.noProject")}
+                  branch={selected.session.workspace?.branch ?? null}
+                  statusLabel={sessionStateInfo[selState].label}
+                  updatedLabel={relativeTime(selected.session.updatedAt)}
+                  canArchive={selState !== "working"}
+                  onOpen={() => onOpenSession(selected.session)}
+                  onArchive={() => onArchive(selected.session.id)}
+                />
+              )
+            })() : null}
+          </div>
+        </>
       )}
     </main>
   )

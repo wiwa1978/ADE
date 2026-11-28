@@ -1,6 +1,6 @@
-import { useCallback, useState, type FormEvent } from "react"
-import { ArrowLeft, ClipboardPaste, Link2, Terminal, X, type LucideIcon } from "lucide-react"
-import { Badge, Banner, Button, IconButton, Input, useEscapeKey } from "@/components/ui"
+import { useCallback, useEffect, useState, type FormEvent } from "react"
+import { ArrowLeft, ClipboardPaste, Link2, RefreshCw, Terminal, X, type LucideIcon } from "lucide-react"
+import { Badge, Banner, Button, IconButton, Input, SettingsRow, SettingsSection, StatusPill, useEscapeKey } from "@/components/ui"
 import type { EnvironmentDirectory, EnvironmentSummary } from "./app-types"
 import { getCaptainEndpoint, request, setCaptainEndpoint } from "./api"
 import { useI18n } from "./i18n/I18nContext"
@@ -27,10 +27,12 @@ export function EnvironmentSettings({
   onEnvironmentChanged,
   disabled = false,
   autoOpenAdd = false,
+  embedded = false,
 }: {
   onEnvironmentChanged: (activeId: string, activeName: string, directory: EnvironmentDirectory) => void
   disabled?: boolean
   autoOpenAdd?: boolean
+  embedded?: boolean
 }) {
   const { t } = useI18n()
   const [data, setData] = useState<EnvironmentDirectory | null>(null)
@@ -46,9 +48,50 @@ export function EnvironmentSettings({
   const [sshHost, setSshHost] = useState("")
   const [sshPort, setSshPort] = useState("22")
   const [remotePort, setRemotePort] = useState("4319")
+  const [sshConfigPath, setSshConfigPath] = useState("")
+  const [sshScan, setSshScan] = useState<{
+    configPath: string
+    defaultPath: string
+    exists: boolean
+    hosts: Array<{ alias: string; hostName?: string; user?: string; port?: number }>
+  } | null>(null)
+  const [scanningSsh, setScanningSsh] = useState(false)
   const [directUrl, setDirectUrl] = useState(() => getCaptainEndpoint().baseUrl || "")
   const [directToken, setDirectToken] = useState(() => getCaptainEndpoint().authToken || "")
   const [pairingLink, setPairingLink] = useState("")
+
+  const scanSshHosts = useCallback(async (customPath?: string) => {
+    setScanningSsh(true)
+    try {
+      const q = customPath?.trim() ? `?configPath=${encodeURIComponent(customPath.trim())}` : ""
+      const res = await request<{
+        configPath: string
+        defaultPath: string
+        exists: boolean
+        hosts: Array<{ alias: string; hostName?: string; user?: string; port?: number }>
+      }>(`/api/environments/ssh-hosts${q}`)
+      setSshScan(res)
+    } catch {
+      setSshScan(null)
+    } finally {
+      setScanningSsh(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!addOpen || addMode !== "ssh") return
+    let cancelled = false
+    const q = sshConfigPath.trim() ? `?configPath=${encodeURIComponent(sshConfigPath.trim())}` : ""
+    void request<{
+      configPath: string
+      defaultPath: string
+      exists: boolean
+      hosts: Array<{ alias: string; hostName?: string; user?: string; port?: number }>
+    }>(`/api/environments/ssh-hosts${q}`)
+      .then(res => { if (!cancelled) setSshScan(res) })
+      .catch(() => { if (!cancelled) setSshScan(null) })
+    return () => { cancelled = true }
+  }, [addOpen, addMode, sshConfigPath])
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -99,8 +142,13 @@ export function EnvironmentSettings({
     if (busy || disabled) return
     setBusy("new"); setError("")
     try {
+      const customConfig = sshConfigPath.trim() && sshConfigPath.trim() !== sshScan?.defaultPath ? sshConfigPath.trim() : undefined
       const result = await postJson<{ environment: EnvironmentSummary }>("/api/environments", {
-        name, sshHost, sshPort: Number(sshPort), remotePort: Number(remotePort),
+        name,
+        sshHost,
+        sshPort: Number(sshPort),
+        remotePort: Number(remotePort),
+        ...(customConfig ? { sshConfigPath: customConfig } : {}),
       })
       const savedName = result.environment.name
       setName(""); setSshHost("")
@@ -144,8 +192,44 @@ export function EnvironmentSettings({
   const remoteEndpoint = getCaptainEndpoint()
   const activeModeMeta = ADD_MODES.find(m => m.id === addMode)
 
-  return (
-    <section className="settings-section environment-settings">
+  const listContent = embedded ? (
+    <>
+      {error && !addOpen ? <Banner tone="error">{error}</Banner> : null}
+      {notice ? <Banner tone="ok">{notice}</Banner> : null}
+      <SettingsSection title={t("settings.environments.hosts")} description={t("env.subtitle")}>
+        {remoteEndpoint.flavor === "remote" && remoteEndpoint.baseUrl ? (
+          <SettingsRow title={t("env.remoteHost")} description={remoteEndpoint.baseUrl}>
+            <StatusPill tone="ok">{t("env.remoteActive")}</StatusPill>
+            <Button variant="outline" size="sm" onClick={() => { setCaptainEndpoint({ flavor: "local", baseUrl: "" }); setNotice(t("env.switchedLocal")) }}>{t("common.disconnect")}</Button>
+          </SettingsRow>
+        ) : null}
+        {data?.environments.map(env => (
+          <SettingsRow
+            key={env.id}
+            title={env.name}
+            description={env.kind === "local" ? t("env.localDescription") : t("env.sshDescription", { host: env.sshHost ?? "", port: env.sshPort ?? "", remotePort: env.remotePort ?? "" })}
+          >
+            {env.active ? (
+              <StatusPill tone="ok">{t("env.active")}</StatusPill>
+            ) : env.status === "error" ? (
+              <StatusPill tone="error">{t("env.retryConnection")}</StatusPill>
+            ) : null}
+            {!(env.kind === "local" && env.active) ? (
+              <Button variant={env.active ? "outline" : "primary"} size="sm" loading={busy === env.id} disabled={disabled || Boolean(busy)} onClick={() => void activate(env)}>
+                {busy === env.id ? t("env.connecting") : env.active ? t("common.disconnect") : env.status === "error" ? t("env.retryConnection") : t("common.connect")}
+              </Button>
+            ) : null}
+            {env.kind === "ssh" ? <Button variant="ghost" size="sm" disabled={disabled || Boolean(busy)} onClick={() => void remove(env)}>{t("common.remove")}</Button> : null}
+          </SettingsRow>
+        ))}
+        {!data && !error ? <SettingsRow title={t("env.loading")} /> : null}
+        <SettingsRow title={t("env.addTitle")} description={t("env.addHint")}>
+          <Button variant="secondary" size="sm" disabled={disabled || Boolean(busy)} onClick={() => { setError(""); setModal(true, "choose") }}>{t("env.addHost")}</Button>
+        </SettingsRow>
+      </SettingsSection>
+    </>
+  ) : (
+    <>
       <div className="section-title"><h2>{t("env.title")}</h2><p>{t("env.subtitle")}</p></div>
       {error && !addOpen ? <Banner tone="error">{error}</Banner> : null}
       {notice ? <Banner tone="ok">{notice}</Banner> : null}
@@ -191,6 +275,12 @@ export function EnvironmentSettings({
         <div><strong>{t("env.addTitle")}</strong><p className="hint">{t("env.addHint")}</p></div>
         <Button variant="outline" size="sm" disabled={disabled || Boolean(busy)} onClick={() => { setError(""); setModal(true, "choose") }}>{t("env.addHost")}</Button>
       </div>
+    </>
+  )
+
+  return (
+    <section className={embedded ? undefined : "settings-section environment-settings"}>
+      {listContent}
 
       {addOpen ? (
         <div className="environment-modal-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) setModal(false) }}>
@@ -231,6 +321,62 @@ export function EnvironmentSettings({
             ) : (
               <form className="environment-form" onSubmit={addSsh}>
                 <p className="hint">{t("env.sshHint")}</p>
+                <label>
+                  SSH config file
+                  <div style={{ display: "flex", gap: "0.45rem", alignItems: "center" }}>
+                    <Input
+                      value={sshConfigPath}
+                      onChange={e => setSshConfigPath(e.target.value)}
+                      placeholder={sshScan?.defaultPath || "~/.ssh/config"}
+                      disabled={disabled || Boolean(busy)}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      loading={scanningSsh}
+                      disabled={disabled || Boolean(busy)}
+                      onClick={() => void scanSshHosts(sshConfigPath)}
+                    >
+                      <RefreshCw size={13} /> Scan
+                    </Button>
+                  </div>
+                </label>
+                {sshScan ? (
+                  <label>
+                    Pick from SSH config ({sshScan.hosts.length} found)
+                    <select
+                      className="st-select"
+                      aria-label="Pick from SSH config"
+                      value={sshScan.hosts.some(h => h.alias === sshHost) ? sshHost : ""}
+                      disabled={disabled || Boolean(busy) || sshScan.hosts.length === 0}
+                      onChange={event => {
+                        const alias = event.target.value
+                        if (!alias) return
+                        const match = sshScan.hosts.find(h => h.alias === alias)
+                        setSshHost(alias)
+                        if (!name.trim()) setName(alias)
+                        if (match?.port) setSshPort(String(match.port))
+                      }}
+                    >
+                      <option value="">
+                        {sshScan.hosts.length
+                          ? "Select a host from SSH config…"
+                          : sshScan.exists
+                            ? "No named Host entries found in this config"
+                            : `Config file not found (${sshScan.configPath})`}
+                      </option>
+                      {sshScan.hosts.map(host => {
+                        const detail = [host.user ? `${host.user}@${host.hostName ?? ""}` : host.hostName, host.port && host.port !== 22 ? `:${host.port}` : ""].filter(Boolean).join("")
+                        return (
+                          <option key={host.alias} value={host.alias}>
+                            {host.alias}{detail ? ` (${detail})` : ""}
+                          </option>
+                        )
+                      })}
+                    </select>
+                  </label>
+                ) : null}
                 <label>{t("env.envName")}<Input autoFocus value={name} onChange={e => setName(e.target.value)} maxLength={64} placeholder="HOME-DEVELOPMENT" required disabled={disabled || Boolean(busy)} /></label>
                 <label>{t("env.sshHost")}<Input value={sshHost} onChange={e => setSshHost(e.target.value)} maxLength={255} placeholder={t("env.sshHostPlaceholder")} required disabled={disabled || Boolean(busy)} /></label>
                 <div className="environment-ports">

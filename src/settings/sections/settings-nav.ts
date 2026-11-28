@@ -1,5 +1,5 @@
 import {
-  Bell, Blocks, Bot, Gauge, GitPullRequest, Globe, Palette, Puzzle, Server, Settings2, Smartphone, Sparkles, Terminal, Workflow, type LucideIcon,
+  Bell, Blocks, Bot, Gauge, GitPullRequest, Globe, Palette, Plug, Puzzle, Server, Settings2, Smartphone, Sparkles, Terminal, Workflow, type LucideIcon,
 } from "lucide-react"
 import type { Theme } from "../../appearance-palettes"
 import type {
@@ -13,7 +13,7 @@ import type { TranslationKey } from "../../i18n"
 
 /** Settings categories. Every category here changes something real; nothing is a placeholder. */
 export type SettingsCategory =
-  | "general" | "appearance" | "localization" | "models" | "agents" | "skills" | "usage" | "subagents" | "integrations" | "github" | "terminal" | "notifications" | "environments" | "mobile"
+  | "general" | "appearance" | "localization" | "models" | "agents" | "skills" | "mcp" | "usage" | "subagents" | "integrations" | "github" | "terminal" | "notifications" | "environments" | "mobile"
 
 export type SettingsViewProps = {
   settings: Settings
@@ -75,7 +75,8 @@ export const SETTINGS_GROUP_SPECS: readonly { labelKey: TranslationKey; items: r
     items: [
       { id: "models", labelKey: "settings.cat.models.label", icon: Sparkles, descKey: "settings.cat.models.desc", keywords: "openai anthropic claude copilot codex pi cursor opencode radius ollama compatible api key provider reasoning models" },
       { id: "agents", labelKey: "settings.cat.agents.label", icon: Bot, descKey: "settings.cat.agents.desc", keywords: "approval policy autopilot ask mcp skills rules permissions browser chrome limit cost budget overnight usage limit fallback queue concurrent rechten goedkeuringen" },
-      { id: "skills", labelKey: "settings.cat.skills.label", icon: Puzzle, descKey: "settings.cat.skills.desc", keywords: "skill skills mcp tool server tools git repository import trust claude codex cursor gemini .mcp.json vaardigheden toolservers" },
+      { id: "skills", labelKey: "skills.title", icon: Puzzle, descKey: "settings.cat.skills.desc", keywords: "skill skills git repository import claude codex cursor gemini vaardigheden" },
+      { id: "mcp", labelKey: "tools.title", icon: Plug, descKey: "tools.hint", keywords: "mcp tool server tools trust .mcp.json toolservers" },
       { id: "subagents", labelKey: "settings.cat.subagents.label", icon: Workflow, descKey: "settings.cat.subagents.desc", keywords: "harness claude code codex pi durable subagent model delegate" },
       { id: "usage", labelKey: "settings.cat.usage.label", icon: Gauge, descKey: "settings.cat.usage.desc", keywords: "cost spend tokens budget billing price money verbruik kosten" },
     ],

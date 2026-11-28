@@ -28,6 +28,20 @@ function mergeCliToolsIntoCatalog(
   return merged
 }
 
+const API_HEALTH_PROVIDERS = new Set(["openai", "anthropic", "copilot", "radius", "compatible"])
+
+async function fetchHealthSafe(provider: string | undefined): Promise<RuntimeHealth> {
+  if (provider && API_HEALTH_PROVIDERS.has(provider)) {
+    try {
+      return await request<RuntimeHealth>(`/api/health?provider=${encodeURIComponent(provider)}`)
+    } catch {
+      // Remote servers or older runtimes may reject an unfamiliar provider ID; fall back to default health.
+      return await request<RuntimeHealth>("/api/health")
+    }
+  }
+  return await request<RuntimeHealth>("/api/health")
+}
+
 export function useModelSelection(params: {
   settings: Settings
   environmentVersion: number
@@ -41,8 +55,7 @@ export function useModelSelection(params: {
 
   const loadHealth = useCallback(async () => {
     try {
-      const qs = settings.provider ? `?provider=${encodeURIComponent(settings.provider)}` : ""
-      const data = await request<RuntimeHealth>(`/api/health${qs}`)
+      const data = await fetchHealthSafe(settings.provider)
       setRuntime(data)
       setRuntimeError("")
     } catch (err) {
@@ -66,8 +79,7 @@ export function useModelSelection(params: {
 
   useEffect(() => {
     let cancelled = false
-    const qs = settings.provider ? `?provider=${encodeURIComponent(settings.provider)}` : ""
-    void request<RuntimeHealth>(`/api/health${qs}`)
+    void fetchHealthSafe(settings.provider)
       .then(data => {
         if (cancelled) return
         setRuntime(data)

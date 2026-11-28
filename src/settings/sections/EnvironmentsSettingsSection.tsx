@@ -26,15 +26,12 @@ export function EnvironmentsSettingsSection({
 
   return (
     <>
-      <SettingsSection title={t("settings.environments.hosts")} plain>
-        <div className="st-embedded">
-          <EnvironmentSettings
-            onEnvironmentChanged={onEnvironmentChanged}
-            disabled={disabled}
-            autoOpenAdd={autoOpenAddEnvironment}
-          />
-        </div>
-      </SettingsSection>
+      <EnvironmentSettings
+        onEnvironmentChanged={onEnvironmentChanged}
+        disabled={disabled}
+        autoOpenAdd={autoOpenAddEnvironment}
+        embedded
+      />
       <SettingsSection title={t("settings.environments.diagnostics")}>
         <SettingsRow title={t("settings.environments.activeEnv")}><span className="st-value">{activeEnvironmentName}</span></SettingsRow>
         <SettingsRow title={t("settings.environments.runtime")}>

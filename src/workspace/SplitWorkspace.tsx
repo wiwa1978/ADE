@@ -26,7 +26,7 @@ export function SplitWorkspace(props: SplitWorkspaceProps) {
   const {
     session, timeline, subagentTimelines, subagents, approvals, approvalPolicy, processes, gitSummary,
     artifacts, tasks, skillsCatalog, browserState, onBrowserStateChange, modelCatalog, selectedProvider,
-    selectedModel, onSelectModel, reasoning, onSelectReasoning, onOpenSettings, draft, onDraftChange,
+    selectedModel, onSelectModel, reasoning, onSelectReasoning, onOpenSettings, onOpenSkillsSettings, draft, onDraftChange,
     attachments, onAttachFiles, onRemoveAttachment, onSendMessage, onAskAgent, onOpenAttempts,
     onSteerSession, onAbortSession, onCompactSession, onResolveApproval, onChangeApprovalPolicy,
     onKillProcess, onRefreshProcesses, onRefreshGit, onMessageSubagent, onStopSubagent,
@@ -211,7 +211,7 @@ export function SplitWorkspace(props: SplitWorkspaceProps) {
           session={session} isBusy={isBusy} approvals={approvals} runStatus={hasWorkspace ? runStatus : null}
           projectName={projectName} onOpenProject={onOpenProject} stateLabel={stateLabel}
           onOpenAttempts={onOpenAttempts} onOpenExternalBrowser={onOpenExternalBrowser} onOpenRun={beside.openRun}
-          timeline={timeline} onOpenCapabilitiesSettings={onOpenSettings}
+          timeline={timeline} onOpenCapabilitiesSettings={onOpenSkillsSettings ?? onOpenSettings}
         />
       }
       aboveComposer={isTerminalSession ? undefined : simple ? (

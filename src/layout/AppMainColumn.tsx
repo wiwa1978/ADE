@@ -324,6 +324,7 @@ export function AppMainColumn(props: AppMainColumnProps) {
           onSelectModel={(provider, id) => update({ provider, model: id })}
           reasoning={settings.reasoning} onSelectReasoning={level => update({ reasoning: level })}
           onOpenSettings={() => props.onOpenSettingsSection("models")}
+          onOpenSkillsSettings={() => props.onOpenSettingsSection("skills")}
           draft={draft} onDraftChange={props.onDraftChange} attachments={attachments}
           onAttachFiles={props.onAttachFiles} onRemoveAttachment={props.onRemoveAttachment}
           onSendMessage={props.onSendMessage} onAskAgent={props.onAskAgent} onOpenAttempts={props.onOpenAttempts}

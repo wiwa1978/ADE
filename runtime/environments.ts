@@ -17,6 +17,7 @@ type SavedSshEnvironment = {
 	sshHost: string;
 	sshPort: number;
 	remotePort: number;
+	sshConfigPath?: string;
 };
 
 type ActiveTunnel = {
@@ -56,6 +57,15 @@ function validName(value: unknown): value is string {
 		});
 }
 
+function parseOptionalConfigPath(value: unknown): string | undefined {
+	if (value === undefined || value === null || value === "") return undefined;
+	if (typeof value !== "string") throw inputError("Enter a valid SSH config file path.");
+	const trimmed = value.trim();
+	if (!trimmed) return undefined;
+	if (trimmed.length > 500 || /[\0\r\n]/.test(trimmed)) throw inputError("Enter a valid SSH config file path.");
+	return trimmed;
+}
+
 function validateEnvironment(value: unknown): SavedSshEnvironment {
 	const rec = value as Partial<SavedSshEnvironment> | null;
 	if (!rec || typeof rec !== "object" || typeof rec.id !== "string" ||
@@ -63,12 +73,14 @@ function validateEnvironment(value: unknown): SavedSshEnvironment {
 		!validName(rec.name) || typeof rec.sshHost !== "string") {
 		throw new Error("The saved environment list is invalid. Inspect environments.json before changing it.");
 	}
+	const sshConfigPath = parseOptionalConfigPath(rec.sshConfigPath);
 	return {
 		id: rec.id,
 		name: rec.name,
 		sshHost: parseSshHost(rec.sshHost),
 		sshPort: validatePort(rec.sshPort, "SSH port", DEFAULT_SSH_PORT),
 		remotePort: validatePort(rec.remotePort, "ADE runtime port", DEFAULT_REMOTE_PORT),
+		...(sshConfigPath ? { sshConfigPath } : {}),
 	};
 }
 
@@ -180,7 +192,7 @@ export class EnvironmentManager {
 		};
 	}
 
-	add(input: { name?: unknown; sshHost?: unknown; sshPort?: unknown; remotePort?: unknown } | null | undefined) {
+	add(input: { name?: unknown; sshHost?: unknown; sshPort?: unknown; remotePort?: unknown; sshConfigPath?: unknown } | null | undefined) {
 		const name = typeof input?.name === "string" ? input.name.trim() : "";
 		if (!validName(name)) {
 			throw inputError("Give this environment a name of 1–64 printable characters.");
@@ -188,10 +200,18 @@ export class EnvironmentManager {
 		const sshHost = parseSshHost(input?.sshHost);
 		const sshPort = validatePort(input?.sshPort, "SSH port", DEFAULT_SSH_PORT);
 		const remotePort = validatePort(input?.remotePort, "ADE runtime port", DEFAULT_REMOTE_PORT);
+		const sshConfigPath = parseOptionalConfigPath(input?.sshConfigPath);
 		if (this.#environments.some(item => item.name.toLowerCase() === name.toLowerCase())) {
 			throw inputError("An environment with that name already exists.", 409);
 		}
-		const environment: SavedSshEnvironment = { id: randomUUID(), name, sshHost, sshPort, remotePort };
+		const environment: SavedSshEnvironment = {
+			id: randomUUID(),
+			name,
+			sshHost,
+			sshPort,
+			remotePort,
+			...(sshConfigPath ? { sshConfigPath } : {}),
+		};
 		this.#environments.push(environment);
 		this.#statuses.set(environment.id, "disconnected");
 		this.#save();
@@ -209,6 +229,7 @@ export class EnvironmentManager {
 			"-o", "ServerAliveInterval=30",
 			"-o", "ServerAliveCountMax=3",
 		];
+		if (environment.sshConfigPath) args.push("-F", environment.sshConfigPath);
 		if (environment.sshPort !== DEFAULT_SSH_PORT) args.push("-p", String(environment.sshPort));
 		args.push(environment.sshHost);
 		let child: ChildProcess;

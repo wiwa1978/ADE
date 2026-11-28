@@ -64,6 +64,7 @@ export const EnvironmentAddRequestSchema = z.object({
 	sshHost: z.string().optional(),
 	sshPort: z.number().finite().optional(),
 	remotePort: z.number().finite().optional(),
+	sshConfigPath: z.string().max(500).optional(),
 	host: z.string().optional(),
 	user: z.string().optional(),
 	port: z.number().finite().optional(),

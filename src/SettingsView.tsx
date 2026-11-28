@@ -35,6 +35,8 @@ export type { SettingsCategory }
 const SAMPLE_LOCALE_DATE = new Date(2026, 10, 24, 14, 30)
 
 const MODULE_FOR_CATEGORY: Partial<Record<SettingsCategory, string>> = {
+  skills: "skills-mcp",
+  mcp: "skills-mcp",
   usage: "usage-bar",
   terminal: "terminal",
   mobile: "mobile",
@@ -222,7 +224,8 @@ export function SettingsView({
             onAddApprovalRule={onAddApprovalRule}
           />
         )
-      case "skills": return <SkillsToolsSettings projects={projects} activeEnvironmentName={activeEnvironmentName} onRefreshMcp={onRefreshMcp} />
+      case "skills": return <SkillsToolsSettings section="skills" projects={projects} activeEnvironmentName={activeEnvironmentName} onRefreshMcp={onRefreshMcp} />
+      case "mcp": return <SkillsToolsSettings section="mcp" projects={projects} activeEnvironmentName={activeEnvironmentName} onRefreshMcp={onRefreshMcp} />
       case "github": return <GitHubSettings settings={settings} connections={connections} update={update} />
       case "terminal": return <TerminalSettings settings={settings} update={update} />
       case "notifications": return <NotificationsSettings settings={settings} update={update} />
@@ -286,7 +289,7 @@ export function SettingsView({
       <section className="st-main">
         <header className="st-topbar"><span>{t("settings.title")}</span><span aria-hidden="true">/</span><strong>{selected.label}</strong></header>
         <div className="st-scroll">
-          <div className={`st-content ${selectedCategory === "models" ? "is-wide" : ""}`}>
+          <div className={`st-content ${selectedCategory === "models" || selectedCategory === "skills" || selectedCategory === "mcp" ? "is-wide" : ""}`}>
             <h1>{selected.label}</h1>
             <p className="st-lede">{selected.description}</p>
             {error ? <Banner tone="error">{error}</Banner> : null}

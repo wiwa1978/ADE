@@ -26,7 +26,7 @@
 .st-topbar strong { color: rgb(var(--foreground)); font-weight: 500; }
 .st-scroll { flex: 1; overflow-y: auto; }
 .st-content { max-width: 780px; margin: 0 auto; padding: 32px 28px 72px; }
-.st-content.is-wide { max-width: 940px; }
+.st-content.is-wide { max-width: 1180px; }
 .st-content h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
 .st-lede { margin: 6px 0 4px; font-size: 13px; color: rgb(var(--muted)); }
 .st-banner { margin: 16px 0 0; padding: 9px 12px; border-radius: 8px; font-size: 12.5px; }

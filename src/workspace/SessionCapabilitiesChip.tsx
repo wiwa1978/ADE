@@ -4,6 +4,7 @@ import { request } from "../api"
 import type { ConversationTimelineSnapshot } from "../app-types"
 import { EventStreamContext } from "../hooks/useEventStream"
 import { useI18n } from "../i18n/I18nContext"
+import { usePlugins } from "../marketplace/usePlugins"
 import "../settings/skills-tools.css"
 
 type ActiveSkill = {
@@ -41,6 +42,7 @@ export function SessionCapabilitiesChip({
   onOpenSettings?: () => void
 }) {
   const { t } = useI18n()
+  const plugins = usePlugins()
   const stream = useContext(EventStreamContext)
   const [open, setOpen] = useState(false)
   const [skills, setSkills] = useState<ActiveSkill[] | null>(null)
@@ -109,6 +111,7 @@ export function SessionCapabilitiesChip({
     return { skillCounts, serverCounts }
   }, [timeline, servers])
 
+  if (!plugins.isModuleEnabled("skills-mcp")) return null
   if (skills === null || servers === null) return null
   if (skills.length === 0 && servers.length === 0) return null
 
@@ -119,7 +122,13 @@ export function SessionCapabilitiesChip({
         className="ade-pill"
         aria-expanded={open}
         title={t("session.cap.title")}
-        onClick={() => setOpen(v => !v)}
+        onClick={() => {
+          if (onOpenSettings) {
+            onOpenSettings()
+          } else {
+            setOpen(v => !v)
+          }
+        }}
       >
         <Layers className="size-3" />
         {t("session.cap.chip", { skills: skills.length, mcp: servers.length })}

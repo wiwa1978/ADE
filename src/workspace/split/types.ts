@@ -26,6 +26,7 @@ export type SplitWorkspaceProps = {
   reasoning: string
   onSelectReasoning: (level: string) => void
   onOpenSettings?: () => void
+  onOpenSkillsSettings?: () => void
   draft: string
   onDraftChange: (value: string) => void
   attachments: { id: string; name: string; content: string }[]

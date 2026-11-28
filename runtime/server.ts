@@ -169,6 +169,7 @@ async function proxyRemoteRequest(
 export function createRuntimeRouters(deps: RouteDeps): { envRouter: Router; mainRouter: Router } {
 	const envRouter = new Router();
 	registerEnvironmentRoutes(envRouter, deps);
+	registerPluginRoutes(envRouter, deps);
 
 	const mainRouter = new Router();
 	registerTerminalRoutes(mainRouter, deps);
@@ -187,7 +188,6 @@ export function createRuntimeRouters(deps: RouteDeps): { envRouter: Router; main
 	registerBoardRoutes(mainRouter, deps);
 	registerAgentTaskRoutes(mainRouter, deps);
 	registerObservatoryRoutes(mainRouter, deps);
-	registerPluginRoutes(mainRouter, deps);
 
 	return { envRouter, mainRouter };
 }
