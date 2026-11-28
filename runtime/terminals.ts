@@ -98,20 +98,29 @@ function terminalShell(environment: NodeJS.ProcessEnv): string {
 	return process.platform === "win32" ? environment.COMSPEC || "powershell.exe" : environment.SHELL || "/bin/sh";
 }
 
+export type TerminalProfileResolver = () => { file: string; args: string[]; env?: Record<string, string> } | null;
+
 export class TerminalManager {
 	#terminals = new Map<string, TerminalRecord>();
 	#spawn: typeof spawnPty;
 	#environment: NodeJS.ProcessEnv;
 	#maxOutputCharacters: number;
+	#profileResolver: TerminalProfileResolver | null;
 
-	constructor({ spawn = spawnPty, environment = process.env, maxOutputCharacters = MAX_OUTPUT_CHARACTERS }: {
+	constructor({ spawn = spawnPty, environment = process.env, maxOutputCharacters = MAX_OUTPUT_CHARACTERS, profileResolver = null }: {
 		spawn?: typeof spawnPty;
 		environment?: NodeJS.ProcessEnv;
 		maxOutputCharacters?: number;
+		profileResolver?: TerminalProfileResolver | null;
 	} = {}) {
 		this.#spawn = spawn;
 		this.#environment = environment;
 		this.#maxOutputCharacters = maxOutputCharacters;
+		this.#profileResolver = profileResolver;
+	}
+
+	setProfileResolver(resolver: TerminalProfileResolver | null) {
+		this.#profileResolver = resolver;
 	}
 
 	#pruneExited() {
@@ -170,15 +179,16 @@ export class TerminalManager {
 		const harnessSpec = harness ? HARNESS_COMMANDS[harness] : null;
 		// A plain shell terminal in a Docker session's workspace opens a shell inside its container.
 		const docker = harnessSpec ? null : terminalInvocation(cwd, [...Object.keys(secrets), "TERM", "COLORTERM"]);
-		const file = harnessSpec ? harnessSpec.command : (docker?.file ?? terminalShell(this.#environment));
+		const profile = !harnessSpec && !docker ? this.#profileResolver?.() ?? null : null;
+		const file = harnessSpec ? harnessSpec.command : (docker?.file ?? profile?.file ?? terminalShell(this.#environment));
 		const args = harnessSpec
 			? (initialPrompt ? harnessSpec.promptArgs(initialPrompt) : [])
-			: (docker?.args ?? []);
+			: (docker?.args ?? profile?.args ?? []);
 		let pty: IPty;
 		try {
 			pty = this.#spawn(file, args, {
 				name: "xterm-256color", cols, rows, cwd,
-				env: { ...this.#environment, ...secrets, TERM: "xterm-256color", COLORTERM: "truecolor", ...docker?.env } as Record<string, string>,
+				env: { ...this.#environment, ...secrets, TERM: "xterm-256color", COLORTERM: "truecolor", ...profile?.env, ...docker?.env } as Record<string, string>,
 			});
 		} catch {
 			throw inputError(

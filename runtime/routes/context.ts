@@ -58,6 +58,8 @@ export type RouteDeps = {
 	prepareWorktree: (session: Conversation) => void;
 	/** Phone pairing & remote mobile bridge manager. */
 	mobilePairing?: import("../mobile-pairing.ts").MobilePairingManager;
+	/** Modular Core Plugin toggles and Git-backed Marketplace catalog. */
+	plugins?: import("../plugins.ts").PluginManager;
 	/** Host-side egress credential proxy for external CLI agents. */
 	egressProxy?: import("../egress-proxy.ts").EgressCredentialProxy;
 	/** Thin inbound chat & webhook gateway ("Calvin" pattern). */

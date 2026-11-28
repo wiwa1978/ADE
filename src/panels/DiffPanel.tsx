@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { Check, FileCode2, GitCommit, Minus, Plus, RefreshCw, RotateCcw, Send } from "lucide-react"
+import { Check, FileCode2, GitCommit, Minus, Plus, RefreshCw, RotateCcw, Send, Sparkles } from "lucide-react"
 import { request, requestJson } from "../api"
 import { useConfirm } from "../../components/ui/index.ts"
 import { useI18n } from "../i18n/I18nContext"
@@ -8,6 +8,7 @@ import { DiffLines } from "./DiffLines"
 import { useDiffNotes } from "./diff-notes"
 import type { WorkspaceGitSummary } from "../app-types"
 import { CheckpointList } from "./CheckpointList"
+import { usePlugins } from "../marketplace/usePlugins"
 
 type BranchFile = { path: string; additions: number; deletions: number; status: "added" | "modified" | "deleted" | "renamed" }
 
@@ -32,8 +33,42 @@ export function DiffPanel({
 }) {
   const { t } = useI18n()
   const { confirm } = useConfirm()
+  const plugins = usePlugins()
+  const diffCommentsEnabled = plugins.isModuleEnabled("diff-comments")
+  const reviewerPlugin = (plugins.snapshot?.installed ?? []).find(p => p.id === "community.cross-model-reviewer" && p.enabled) ?? null
   const diffNotes = useDiffNotes(sessionId)
   const [sendingNotes, setSendingNotes] = useState(false)
+  const [reviewingDiff, setReviewingDiff] = useState(false)
+  const triggerDiffReview = async (scope: "working" | "branch", paths: string[]) => {
+    if (!onAskAgent || !reviewerPlugin || !paths.length) return
+    setReviewingDiff(true)
+    setError("")
+    try {
+      const focus = String(reviewerPlugin.settings.focus || "all")
+      const strictness = String(reviewerPlugin.settings.strictness || "standard")
+      const includeTests = reviewerPlugin.settings.includeTests !== false
+      const focusLine = focus === "security"
+        ? "Focus especially on security, auth boundaries, injection, and secret handling."
+        : focus === "correctness"
+          ? "Focus especially on logic bugs, race conditions, and edge cases."
+          : focus === "performance"
+            ? "Focus especially on performance bottlenecks, unnecessary work, and memory usage."
+            : "Review for correctness, security regressions, edge cases, and maintainability."
+      const prompt = [
+        `Act as an independent code reviewer (${strictness} bar) for the ${scope === "branch" ? "current branch changes" : "uncommitted working-tree changes"}.`,
+        focusLine,
+        includeTests ? "Flag any changed behavior missing automated test coverage." : "",
+        `Changed files (${paths.length}): ${paths.slice(0, 30).join(", ")}${paths.length > 30 ? " …" : ""}`,
+        "Inspect the diff and report concrete findings grouped by severity (Blocker / Warning / Nit) with exact file:line references. Do not edit files unless asked.",
+      ].filter(Boolean).join("\n")
+      await onAskAgent(prompt)
+      setNotice("Sent diff review request to the agent.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start diff review.")
+    } finally {
+      setReviewingDiff(false)
+    }
+  }
   const sendNotes = async () => {
     if (!onAskAgent || !diffNotes.notes.length) return
     setSendingNotes(true)
@@ -206,7 +241,7 @@ export function DiffPanel({
     )
   }
   const noteFiles = new Set(diffNotes.notes.map(note => note.path)).size
-  const notesBar = onAskAgent && diffNotes.notes.length ? (
+  const notesBar = diffCommentsEnabled && onAskAgent && diffNotes.notes.length ? (
     <div className="ade-notes-bar" role="status">
       <span>
         {t("pnlx.diff.notesForAgent", {
@@ -241,9 +276,9 @@ export function DiffPanel({
     <DiffLines
       diff={displayedDiffText}
       path={activeDiffPath ?? null}
-      notes={diffNotes.notes}
-      onAddNote={onAskAgent ? diffNotes.add : undefined}
-      onRemoveNote={diffNotes.remove}
+      notes={diffCommentsEnabled ? diffNotes.notes : []}
+      onAddNote={diffCommentsEnabled && onAskAgent ? diffNotes.add : undefined}
+      onRemoveNote={diffCommentsEnabled ? diffNotes.remove : undefined}
     />
   )
 
@@ -253,6 +288,17 @@ export function DiffPanel({
         <div className="ade-pane-toolbar">
           {modeToggle}
           <div className="ade-toolbar-actions">
+            {reviewerPlugin && onAskAgent && branchFiles && branchFiles.length > 0 ? (
+              <button
+                type="button"
+                className="ade-chip-btn"
+                disabled={reviewingDiff || agentBusy}
+                title="Run standalone cross-model review on branch changes"
+                onClick={() => void triggerDiffReview("branch", branchFiles.map(f => f.path))}
+              >
+                <Sparkles className="size-3" /> {reviewingDiff ? "Reviewing…" : "Review diff"}
+              </button>
+            ) : null}
             <button type="button" className="ade-icon-btn" onClick={() => void loadBranchFiles()} title={t("pnlx.diff.refreshBranchDiff")} aria-label={t("pnlx.diff.refreshBranchDiff")}>
               <RefreshCw className="size-3.5" />
             </button>
@@ -294,6 +340,17 @@ export function DiffPanel({
       <div className="ade-pane-toolbar">
         {modeToggle}
         <div className="ade-toolbar-actions">
+          {reviewerPlugin && onAskAgent && summary.files.length > 0 ? (
+            <button
+              type="button"
+              className="ade-chip-btn"
+              disabled={reviewingDiff || agentBusy}
+              title="Run standalone cross-model review on uncommitted changes"
+              onClick={() => void triggerDiffReview("working", summary.files.map(f => f.path))}
+            >
+              <Sparkles className="size-3" /> {reviewingDiff ? "Reviewing…" : "Review diff"}
+            </button>
+          ) : null}
           <button type="button" className="ade-chip-btn" disabled={busy || !summary.files.length} onClick={() => void stage([])}>
             <Plus className="size-3" /> {t("pnlx.diff.stageAll")}
           </button>

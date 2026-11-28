@@ -28,10 +28,17 @@ import {
 } from "./i18n"
 import { formatDateOnly } from "./i18n/formatting"
 import { useI18n } from "./i18n/I18nContext"
+import { usePlugins } from "./marketplace/usePlugins"
 
 export type { SettingsCategory }
 
 const SAMPLE_LOCALE_DATE = new Date(2026, 10, 24, 14, 30)
+
+const MODULE_FOR_CATEGORY: Partial<Record<SettingsCategory, string>> = {
+  usage: "usage-bar",
+  terminal: "terminal",
+  mobile: "mobile",
+}
 
 /** "Euro" for EUR, in the display language. */
 function currencyName(code: string, locale: string) {
@@ -46,6 +53,7 @@ export function SettingsView({
   projects, sessionLabels = {},
 }: SettingsViewProps) {
   const { t, meta, locale, preferences, formatNumber, formatDay, formatDateTime, formatCurrency } = useI18n()
+  const plugins = usePlugins()
   const [userSelection, setUserSelection] = useState<{ base: SettingsCategory | undefined; category: SettingsCategory } | null>(null)
   const selectedCategory: SettingsCategory =
     userSelection && userSelection.base === initialCategory ? userSelection.category : (initialCategory ?? "general")
@@ -70,14 +78,19 @@ export function SettingsView({
 
   const groups = useMemo(() => SETTINGS_GROUP_SPECS.map(group => ({
     label: t(group.labelKey),
-    items: group.items.map(item => ({
-      id: item.id,
-      label: t(item.labelKey),
-      icon: item.icon,
-      description: t(item.descKey),
-      keywords: item.keywords,
-    })),
-  })), [t])
+    items: group.items
+      .filter(item => {
+        const mod = MODULE_FOR_CATEGORY[item.id]
+        return !mod || plugins.isModuleEnabled(mod)
+      })
+      .map(item => ({
+        id: item.id,
+        label: t(item.labelKey),
+        icon: item.icon,
+        description: t(item.descKey),
+        keywords: item.keywords,
+      })),
+  })).filter(group => group.items.length > 0), [t, plugins])
   const allItems = useMemo(() => groups.flatMap(group => group.items), [groups])
   const reasoningLevels = useMemo(() => REASONING_LEVEL_IDS.map(id => ({
     id,

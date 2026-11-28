@@ -15,6 +15,7 @@ import { useI18n } from "../i18n/I18nContext"
 export type SidebarSelection =
   | { kind: "inbox" }
   | { kind: "observatory" }
+  | { kind: "marketplace" }
   | { kind: "project"; projectId: string }
   | { kind: "session"; sessionId: string }
   | { kind: "new-session" }

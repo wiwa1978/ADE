@@ -27,6 +27,7 @@ import { MobileAppShell, type MobileTab } from "./mobile/MobileAppShell"
 import { useIsMobile } from "./mobile/useIsMobile"
 import { I18nProvider } from "./i18n/I18nProvider"
 import { useI18n } from "./i18n/I18nContext"
+import { usePlugins } from "./marketplace/usePlugins"
 import { request } from "./api"
 
 type LastView = { screen?: Screen; activeSessionId?: string; selectedProjectId?: string | null; expandedProjects?: string[] }
@@ -97,6 +98,7 @@ function AppInner({ settingsHook }: { settingsHook: ReturnType<typeof useSetting
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameText, setRenameText] = useState("")
   const isMobile = useIsMobile()
+  const plugins = usePlugins()
   const [mobileSession, setMobileSession] = useState<MobileSessionState | null>(null)
   const [pairedToastDismissed, setPairedToastDismissed] = useState(false)
   const [urlFlags] = useState(() => {
@@ -383,7 +385,8 @@ function AppInner({ settingsHook }: { settingsHook: ReturnType<typeof useSetting
     () =>
       screen === "inbox" ? { kind: "inbox" }
         : screen === "observatory" ? { kind: "observatory" }
-          : screen === "settings" ? { kind: "settings" }
+          : screen === "marketplace" ? { kind: "marketplace" }
+            : screen === "settings" ? { kind: "settings" }
           : screen === "project" && selectedProjectId ? { kind: "project", projectId: selectedProjectId }
             : screen === "work" && newSessionOpen ? { kind: "new-session" }
               : screen === "work" ? { kind: "session", sessionId: sess.activeSession.id }
@@ -408,6 +411,7 @@ function AppInner({ settingsHook }: { settingsHook: ReturnType<typeof useSetting
   const handleOpenCommandCenter = useCallback(() => setCommandOpen(true), [])
   const handleOpenInbox = useCallback(() => setScreen("inbox"), [])
   const handleOpenObservatory = useCallback(() => setScreen("observatory"), [])
+  const handleOpenMarketplace = useCallback(() => setScreen("marketplace"), [])
   const handleOpenAddProject = useCallback((src?: AddProjectSource) => {
     setAddProjectInitialSource(src ?? "menu")
     setAddProjectOpen(true)
@@ -558,7 +562,8 @@ function AppInner({ settingsHook }: { settingsHook: ReturnType<typeof useSetting
           onOpenCreateWorktree={handleOpenCreateWorktree}
           onOpenCommandCenter={handleOpenCommandCenter}
           onOpenInbox={handleOpenInbox}
-          onOpenObservatory={handleOpenObservatory}
+          onOpenObservatory={plugins.isModuleEnabled("observatory") ? handleOpenObservatory : undefined}
+          onOpenMarketplace={handleOpenMarketplace}
           onOpenAddProject={handleOpenAddProject}
           onMarkAllRead={handleMarkAllRead}
           onClearCompleted={handleClearCompleted}
@@ -569,7 +574,9 @@ function AppInner({ settingsHook }: { settingsHook: ReturnType<typeof useSetting
           onToggleArchive={handleToggleArchive}
           onOpenContextMenu={setContextMenu}
           onOpenSettings={handleOpenSettings}
-          onOpenMobilePairing={handleOpenMobilePairing}
+          onOpenUsageSettings={plugins.isModuleEnabled("usage-bar") ? () => openSettingsSection("usage") : undefined}
+          monthlyBudget={settings.monthlyBudget}
+          onOpenMobilePairing={plugins.isModuleEnabled("mobile") ? handleOpenMobilePairing : undefined}
           onOpenEnvironmentPalette={handleOpenEnvPalette}
         />
       )}
@@ -658,6 +665,18 @@ function AppInner({ settingsHook }: { settingsHook: ReturnType<typeof useSetting
         onCompactSession={() => void sess.compactSession()}
         onReviewArtifact={handleReviewArtifact}
         inboxEntries={inbox.entries}
+        marketplace={{
+          snapshot: plugins.snapshot,
+          loading: plugins.loading,
+          busyId: plugins.busyId,
+          error: plugins.error,
+          onToggle: plugins.togglePlugin,
+          onInstall: plugins.installPlugin,
+          onUninstall: plugins.uninstallPlugin,
+          onAddSource: plugins.addSource,
+          onRemoveSource: plugins.removeSource,
+          onRefreshSources: plugins.refreshSources,
+        }}
         onOpenSessionConversation={openSession}
         onArchiveSession={id => void sess.toggleArchive(id, false)}
         attemptsGroup={attemptsGroup}

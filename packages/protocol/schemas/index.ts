@@ -7,3 +7,4 @@ export * from "./approvals.ts";
 export * from "./mcp-targets.ts";
 export * from "./workflow.ts";
 export * from "./events.ts";
+export * from "./plugins.ts";

@@ -3,6 +3,7 @@ import { Sparkles } from "lucide-react"
 import { useViewMode } from "../view-mode"
 import { InboxView } from "../inbox/InboxView"
 import { ObservatoryView } from "../observatory/ObservatoryView"
+import { MarketplaceView, type MarketplaceViewProps } from "../marketplace/MarketplaceView"
 import { sessionStateInfo, type InboxEntry } from "../session-state"
 import { request, requestJson } from "../api"
 import type { Conversation, EnvironmentDirectory, GitHubIssue, StartFrom, ProviderCatalogEntry, RuntimeHealth, Screen, SessionArtifact, WorkspaceTab } from "../app-types"
@@ -104,6 +105,7 @@ type AppMainColumnProps = {
   onCompactSession: () => void
   onReviewArtifact: (artifact: SessionArtifact, decision: "approved" | "changes_requested", feedback?: string) => Promise<void>
   inboxEntries: Record<string, InboxEntry>
+  marketplace?: MarketplaceViewProps
   onOpenSessionConversation: (session: Conversation) => void
   onArchiveSession: (sessionId: string) => void
   attemptsGroup: string | null
@@ -158,6 +160,8 @@ export function AppMainColumn(props: AppMainColumnProps) {
         />
       ) : screen === "observatory" ? (
         <ObservatoryView onOpenSession={props.onOpenSession} />
+      ) : screen === "marketplace" && props.marketplace ? (
+        <MarketplaceView {...props.marketplace} />
       ) : screen === "settings" ? (
         <SettingsView
           sessionLabels={Object.fromEntries(sessions.map(item => [item.id, item.label]))}

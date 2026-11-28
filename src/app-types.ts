@@ -61,7 +61,7 @@ export type {
 } from "@ade/protocol"
 import type { GitHubIssue, RunTargetDto, WorkerTaskSpec } from "@ade/protocol"
 
-export type Screen = "inbox" | "observatory" | "projects" | "project" | "work" | "settings" | "worktrees" | "attempts"
+export type Screen = "inbox" | "observatory" | "marketplace" | "projects" | "project" | "work" | "settings" | "worktrees" | "attempts"
 
 export type TaskStart = {
   id: string

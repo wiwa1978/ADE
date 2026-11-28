@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react"
-import { Activity, FolderPlus, Inbox, LayoutDashboard, PanelLeft, Search, Settings2, Smartphone, Sparkles } from "lucide-react"
+import { Activity, BarChart2, Blocks, FolderPlus, Inbox, LayoutDashboard, PanelLeft, Search, Settings2, Smartphone, Sparkles } from "lucide-react"
+import { UsagePopover } from "../usage/UsagePopover"
 import type { Conversation, RuntimeHealth } from "../app-types"
 import type { Project } from "../ProjectsView"
 import type { InboxEntry } from "../session-state"
@@ -39,6 +40,7 @@ type AppSidebarProps = {
   onOpenCommandCenter: () => void
   onOpenInbox: () => void
   onOpenObservatory?: () => void
+  onOpenMarketplace?: () => void
   onOpenAddProject: (initialSource?: AddProjectSource) => void
   onMarkAllRead?: () => void
   onClearCompleted?: () => void
@@ -49,6 +51,8 @@ type AppSidebarProps = {
   onToggleArchive: (id: string, archivedNow?: boolean) => void
   onOpenContextMenu: (target: ContextMenuTarget) => void
   onOpenSettings: () => void
+  onOpenUsageSettings?: () => void
+  monthlyBudget?: number
   onOpenMobilePairing?: () => void
   onOpenEnvironmentPalette: () => void
 }
@@ -111,6 +115,7 @@ export const AppSidebar = memo(function AppSidebar(props: AppSidebarProps) {
   const tools = useSessionTools().filter(tool => !tool.menuOnly && viewMode === "full")
   // The hover card beside an activity bar icon (one at a time, placed next to the icon).
   const [tip, setTip] = useState<RailTip | null>(null)
+  const [usageOpen, setUsageOpen] = useState(false)
   const kb = props.keybindings ?? DEFAULT_KEYBINDINGS
   const searchBadge = kb.commandCenter ? formatShortcut(kb.commandCenter) : ""
   const addProjectBadge = kb.addProject ? formatShortcut(kb.addProject) : ""
@@ -134,6 +139,11 @@ export const AppSidebar = memo(function AppSidebar(props: AppSidebarProps) {
       {viewMode === "full" && props.onOpenObservatory ? (
         <RailButton tip={setTip} label={t("sidebar.observatory")} description={t("sidebar.observatoryDesc")} active={props.selection.kind === "observatory"} onClick={props.onOpenObservatory}>
           <Activity className="size-[18px]" />
+        </RailButton>
+      ) : null}
+      {props.onOpenMarketplace ? (
+        <RailButton tip={setTip} label="Marketplace" description="Toggle built-in Core Modules and install open-source community plugins." active={props.selection.kind === "marketplace"} onClick={props.onOpenMarketplace}>
+          <Blocks className="size-[18px]" />
         </RailButton>
       ) : null}
       <RailButton tip={setTip} label={t("sidebar.addProject")} description={t("sidebar.addProjectDesc")} shortcut={addProjectBadge} onClick={() => props.onOpenAddProject()}>
@@ -161,6 +171,11 @@ export const AppSidebar = memo(function AppSidebar(props: AppSidebarProps) {
       >
         {viewMode === "simple" ? <LayoutDashboard className="size-[18px]" /> : <Sparkles className="size-[18px]" />}
       </RailButton>
+      {props.onOpenUsageSettings ? (
+        <RailButton tip={setTip} label="Usage & Subscriptions" description="View connected subscriptions, providers, and monthly token consumption." active={usageOpen} onClick={() => setUsageOpen(open => !open)}>
+          <BarChart2 className="size-[18px]" />
+        </RailButton>
+      ) : null}
       {props.onOpenMobilePairing ? (
         <RailButton tip={setTip} label={t("sidebar.pairPhone")} description={t("sidebar.pairPhoneDesc")} onClick={props.onOpenMobilePairing}>
           <Smartphone className="size-[18px]" />
@@ -169,6 +184,13 @@ export const AppSidebar = memo(function AppSidebar(props: AppSidebarProps) {
       <RailButton tip={setTip} label={t("sidebar.settings")} description={t("sidebar.settingsDesc")} shortcut={settingsBadge} active={props.selection.kind === "settings"} onClick={props.onOpenSettings}>
         <Settings2 className="size-[18px]" />
       </RailButton>
+      {usageOpen && props.onOpenUsageSettings ? (
+        <UsagePopover
+          monthlyBudget={props.monthlyBudget}
+          onClose={() => setUsageOpen(false)}
+          onOpenUsageSettings={props.onOpenUsageSettings}
+        />
+      ) : null}
       {tip ? (
         <div className="ade-activity-tip" role="tooltip" style={{ top: tip.top }}>
           <div className="ade-activity-tip-head">

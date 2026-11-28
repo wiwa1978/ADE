@@ -33,6 +33,8 @@ import { registerMobileRoutes } from "./routes/mobile.ts";
 import { registerBoardRoutes } from "./routes/board.ts";
 import { registerAgentTaskRoutes } from "./routes/agent-tasks.ts";
 import { registerObservatoryRoutes } from "./routes/observatory.ts";
+import { registerPluginRoutes } from "./routes/plugins.ts";
+import { PluginManager } from "./plugins.ts";
 import { createAgentWorkflow } from "./agent-workflow.ts";
 import { MobilePairingManager } from "./mobile-pairing.ts";
 
@@ -185,6 +187,7 @@ export function createRuntimeRouters(deps: RouteDeps): { envRouter: Router; main
 	registerBoardRoutes(mainRouter, deps);
 	registerAgentTaskRoutes(mainRouter, deps);
 	registerObservatoryRoutes(mainRouter, deps);
+	registerPluginRoutes(mainRouter, deps);
 
 	return { envRouter, mainRouter };
 }
@@ -207,6 +210,8 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 	origins?: readonly (string | undefined)[];
 }) {
 	let githubConnectionRevision = 0;
+	const plugins = new PluginManager(worktreeManager?.root ? resolve(worktreeManager.root, "..") : join(homedir(), ".ade", "state"));
+	terminals?.setProfileResolver?.(() => plugins.resolveTerminalLaunch());
 	const { inbox, scripts, scriptRunner, checkpoints, engines, viewSessions, prepareWorktree, usage, secrets, sendToAgent, runCheck, automations, automationRunner, integrations, executionTargets, subagentPolicies, subagentKey, limitGuard, usageWaiter, scheduler, egressProxy, inboundGateway, sessionBackup, dispose } = createAgentWorkflow({ host, worktreeManager, sessionGit });
 	/** Close terminals in an archived session's workspace and optionally remove its ADE worktree (keeping the branch). */
 	async function cleanUpArchivedWorkspace(session: { id: string; workspace: string | null; repository: string | null; kind: string | null }, removeWorktreeRequested: boolean) {
@@ -239,6 +244,7 @@ export function createRuntimeServer({ host, worktreeManager, environments, termi
 		worktreeManager,
 		environments,
 		terminals,
+		plugins,
 		githubRepositories,
 		sessionGit,
 		cleanUpArchivedWorkspace,
